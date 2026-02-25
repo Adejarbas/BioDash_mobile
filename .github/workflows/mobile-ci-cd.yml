@@ -203,7 +203,7 @@ jobs:
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: "❌ Falha pipeline Actions - BioDashMobile"
           to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
-          from: ${{ secrets.EMAIL_USERNAME }}
+          from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
           body: |
             ⚠️ A execução do pipeline FALHOU!
             
@@ -231,7 +231,7 @@ jobs:
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: "✅ Pipeline BioDashMobile executado com sucesso!"
           to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
-          from: ${{ secrets.EMAIL_USERNAME }}
+          from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
           body: |
             🎉 Pipeline executado com SUCESSO!
             

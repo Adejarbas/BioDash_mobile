@@ -1,0 +1,11 @@
+{
+  "name": "biodash-mobile",
+  "version": "0.0.0",
+  "description": "BioDash Mobile Project",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Daniel Adejarbas",
+  "license": "ISC"
+}
