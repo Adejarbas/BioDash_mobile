@@ -192,58 +192,58 @@ jobs:
       #     cache-to: type=gha,mode=max
 
       # Envio de e-mail quando pipeline FALHAR
-      - name: Enviar email se falhar
-        if: failure()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          secure: false
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "❌ Falha pipeline Actions - BioDashMobile"
-          to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
-          from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
-          body: |
-            ⚠️ A execução do pipeline FALHOU!
+      # - name: Enviar email se falhar
+      #   if: failure()
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: smtp.gmail.com
+      #     server_port: 587
+      #     secure: false
+      #     username: ${{ secrets.EMAIL_USERNAME }}
+      #     password: ${{ secrets.EMAIL_PASSWORD }}
+      #     subject: "❌ Falha pipeline Actions - BioDashMobile"
+      #     to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
+      #     from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
+      #     body: |
+      #       ⚠️ A execução do pipeline FALHOU!
             
-            📦 Repositório: ${{ github.repository }}
-            🔖 Commit: ${{ github.sha }}
-            ⚙️ Workflow: ${{ github.workflow }}
-            🔧 Job: ${{ github.job }}
-            👤 Autor: ${{ github.actor }}
-            🌿 Branch: ${{ github.ref_name }}
+      #       📦 Repositório: ${{ github.repository }}
+      #       🔖 Commit: ${{ github.sha }}
+      #       ⚙️ Workflow: ${{ github.workflow }}
+      #       🔧 Job: ${{ github.job }}
+      #       👤 Autor: ${{ github.actor }}
+      #       🌿 Branch: ${{ github.ref_name }}
             
-            🔗 Ver logs completos: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      #       🔗 Ver logs completos: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
-            --
-            Notificação automática do GitHub Actions
+      #       --
+      #       Notificação automática do GitHub Actions
 
       # Envio de e-mail quando pipeline tiver SUCESSO
-      - name: Enviar email de sucesso
-        if: success()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          secure: false
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "✅ Pipeline BioDashMobile executado com sucesso!"
-          to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
-          from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
-          body: |
-            🎉 Pipeline executado com SUCESSO!
+      # - name: Enviar email de sucesso
+      #   if: success()
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: smtp.gmail.com
+      #     server_port: 587
+      #     secure: false
+      #     username: ${{ secrets.EMAIL_USERNAME }}
+      #     password: ${{ secrets.EMAIL_PASSWORD }}
+      #     subject: "✅ Pipeline BioDashMobile executado com sucesso!"
+      #     to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
+      #     from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
+      #     body: |
+      #       🎉 Pipeline executado com SUCESSO!
             
-            📦 Repositório: ${{ github.repository }}
-            🔖 Commit: ${{ github.sha }}
-            ⚙️ Workflow: ${{ github.workflow }}
-            🔧 Job: ${{ github.job }}
-            👤 Autor: ${{ github.actor }}
-            🌿 Branch: ${{ github.ref_name }}
-            📌 Versão: v${{ steps.version.outputs.new_version }}
+      #       📦 Repositório: ${{ github.repository }}
+      #       🔖 Commit: ${{ github.sha }}
+      #       ⚙️ Workflow: ${{ github.workflow }}
+      #       🔧 Job: ${{ github.job }}
+      #       👤 Autor: ${{ github.actor }}
+      #       🌿 Branch: ${{ github.ref_name }}
+      #       📌 Versão: v${{ steps.version.outputs.new_version }}
             
-            🔗 Ver detalhes: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      #       🔗 Ver detalhes: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
-            --
-            Notificação automática do GitHub Actions
+      #       --
+      #       Notificação automática do GitHub Actions
