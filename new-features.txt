@@ -4,3 +4,4 @@
 4. Incluir tela de configuração de informações cadastrais
 5. Incluir tela de registro e esqueci minha senha com validação por email.
 6. INCLUIR FILTRO PARA MAIS BIODIGESTORES POR USUÁRIO
+7. Adicionar recursos de acessibilidade
