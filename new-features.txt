@@ -1,0 +1,6 @@
+1. Incluir gráficos de barras e linhas como no site.
+2. Incluir monitoramento de temperatura, PH e pressão em tempo real.
+3. Incluir modal de agendamento de manutenção.
+4. Incluir tela de configuração de informações cadastrais
+5. Incluir tela de registro e esqueci minha senha com validação por email.
+6. INCLUIR FILTRO PARA MAIS BIODIGESTORES POR USUÁRIO
