@@ -1,65 +1,105 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native'
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, SafeAreaView } from 'react-native'
 import { supabase } from './src/lib/supabase'
 import LoginScreen from './src/screens/LoginScreen'
 import DashboardScreen from './src/screens/DashboardScreen'
 import RegisterScreen from './src/screens/RegisterScreen'
 import SettingsScreen from './src/screens/SettingsScreen'
+import CompanyProfileScreen from './src/screens/CompanyProfileScreen'
+import NotificationsScreen from './src/screens/NotificationsScreen'
+import TermsScreen from './src/screens/TermsScreen'
+import HelpCenterScreen from './src/screens/HelpCenterScreen'
 import { StatusBar } from 'expo-status-bar'
 import type { Session } from '@supabase/supabase-js'
+import { ThemeProvider, useTheme } from './src/context/ThemeContext'
 
 const TEST_MODE = true; // <--- MODO DE TESTE ATIVADO
 
 // --- COMPONENTE DE ABAS (MENU INFERIOR) ---
+type SubScreen = 'none' | 'profile' | 'notifications' | 'terms' | 'helpCenter';
+
 function MainTabs({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home')
+  const [currentSubScreen, setCurrentSubScreen] = useState<SubScreen>('none')
+  const { theme, toggleTheme, colors } = useTheme();
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header Fixo Global */}
-      <View style={styles.header}>
-        <View style={styles.headerLogo}>
-          <Text style={styles.headerEmoji}>🌱</Text>
+      <SafeAreaView style={{ backgroundColor: colors.cardBackground }}>
+        <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
+          <View style={[styles.headerLogo, { backgroundColor: colors.primaryLight }]}>
+            <Text style={styles.headerEmoji}>🌱</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>BioDash</Text>
+            <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
+          </View>
+
+          <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
+            <Text style={{ fontSize: 18 }}>{theme === 'light' ? '🌙' : '☀️'}</Text>
+          </TouchableOpacity>
         </View>
-        <View>
-          <Text style={styles.headerTitle}>BioDash</Text>
-          <Text style={styles.headerSub}>Plataforma Sustentável</Text>
-        </View>
-      </View>
+      </SafeAreaView>
 
       {/* Tela Ativa */}
       <View style={{ flex: 1 }}>
-        {activeTab === 'home' ? <DashboardScreen /> : <SettingsScreen onLogout={onLogout} />}
+        {activeTab === 'home' ? (
+          <DashboardScreen />
+        ) : currentSubScreen === 'profile' ? (
+          <CompanyProfileScreen onBack={() => setCurrentSubScreen('none')} />
+        ) : currentSubScreen === 'notifications' ? (
+          <NotificationsScreen onBack={() => setCurrentSubScreen('none')} />
+        ) : currentSubScreen === 'terms' ? (
+          <TermsScreen onBack={() => setCurrentSubScreen('none')} />
+        ) : currentSubScreen === 'helpCenter' ? (
+          <HelpCenterScreen onBack={() => setCurrentSubScreen('none')} />
+        ) : (
+          <SettingsScreen
+            onLogout={onLogout}
+            onNavigateProfile={() => setCurrentSubScreen('profile')}
+            onNavigateNotifications={() => setCurrentSubScreen('notifications')}
+            onNavigateTerms={() => setCurrentSubScreen('terms')}
+            onNavigateHelpCenter={() => setCurrentSubScreen('helpCenter')}
+          />
+        )}
       </View>
 
       {/* Barra de Navegação */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
         <TouchableOpacity
           style={styles.tabItem}
-          onPress={() => setActiveTab('home')}
+          onPress={() => {
+            setActiveTab('home');
+            setCurrentSubScreen('none');
+          }}
           activeOpacity={0.7}
         >
           <Text style={[styles.tabIcon, activeTab === 'home' && styles.tabIconActive]}>📊</Text>
-          <Text style={[styles.tabLabel, activeTab === 'home' && styles.tabLabelActive]}>Painel</Text>
+          <Text style={[styles.tabLabel, activeTab === 'home' && { color: colors.primary }]}>Painel</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.tabItem}
-          onPress={() => setActiveTab('settings')}
+          onPress={() => {
+            setActiveTab('settings');
+            setCurrentSubScreen('none'); // Reseta a sub-tela ao clicar na tab
+          }}
           activeOpacity={0.7}
         >
           <Text style={[styles.tabIcon, activeTab === 'settings' && styles.tabIconActive]}>⚙️</Text>
-          <Text style={[styles.tabLabel, activeTab === 'settings' && styles.tabLabelActive]}>Ajustes</Text>
+          <Text style={[styles.tabLabel, activeTab === 'settings' && { color: colors.primary }]}>Ajustes</Text>
         </TouchableOpacity>
       </View>
     </View>
   )
 }
 
-export default function App() {
+function MainApp() {
   const [session, setSession] = useState<any>(null)
   const [currentScreen, setCurrentScreen] = useState<'login' | 'register'>('login')
   const [loading, setLoading] = useState(true)
+  const { theme, colors } = useTheme();
 
   useEffect(() => {
     if (TEST_MODE) {
@@ -85,8 +125,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <View style={styles.splash}>
-        <ActivityIndicator size="large" color="#16a34a" />
+      <View style={[styles.splash, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     )
   }
@@ -94,17 +134,17 @@ export default function App() {
   // Se estiver logado, exibe as abas com Painel e Configurações
   if (session) {
     return (
-      <>
-        <StatusBar style="dark" />
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
         <MainTabs onLogout={() => setSession(null)} />
-      </>
+      </View>
     )
   }
 
   // Se não estiver logado, escolhe entre Login ou Cadastro
   return (
-    <>
-      <StatusBar style="dark" />
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
       {currentScreen === 'register' ? (
         <RegisterScreen
           onBackToLogin={() => setCurrentScreen('login')}
@@ -119,7 +159,19 @@ export default function App() {
           onNavigateRegister={() => setCurrentScreen('register')}
         />
       )}
-    </>
+    </View>
+  )
+}
+
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <MainApp />
+      </ThemeProvider>
+    </SafeAreaProvider>
   )
 }
 
@@ -128,17 +180,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0fdf4',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 56,
+    paddingTop: 16,
     paddingHorizontal: 20,
     paddingBottom: 16,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
     shadowColor: '#000',
     shadowOpacity: 0.03,
     shadowRadius: 4,
@@ -149,10 +198,16 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#bbf7d0',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+  },
+  themeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerEmoji: {
     fontSize: 22,
@@ -160,12 +215,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#14532d',
     letterSpacing: -0.5,
   },
   headerSub: {
     fontSize: 12,
-    color: '#64748b',
     marginTop: 2,
   },
   tabBar: {
@@ -174,9 +227,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 70,
-    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
@@ -203,10 +254,6 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#94a3b8',
     marginTop: 4,
-  },
-  tabLabelActive: {
-    color: '#16a34a',
   },
 })
