@@ -7,8 +7,13 @@ import {
     TouchableOpacity,
     RefreshControl,
     ActivityIndicator,
+    Alert,
 } from 'react-native'
 import { supabase } from '../lib/supabase'
+import MapComponent from '../components/MapComponent'
+import * as Print from 'expo-print'
+import * as Sharing from 'expo-sharing'
+import * as FileSystem from 'expo-file-system'
 
 interface MetricData {
     value: number
@@ -39,11 +44,7 @@ function formatMetric(current: number, previous: number): MetricData {
     }
 }
 
-interface Props {
-    onLogout: () => void
-}
-
-export default function DashboardScreen({ onLogout }: Props) {
+export default function DashboardScreen() {
     const [data, setData] = useState<DashboardData>({
         energy: { value: 0, changePercent: '0%', increasing: true },
         waste: { value: 0, changePercent: '0%', increasing: true },
@@ -63,7 +64,7 @@ export default function DashboardScreen({ onLogout }: Props) {
 
     const loadUser = async () => {
         // MODO TESTE
-        setUserEmail('teste@biodash.com')
+        setUserEmail('admin@biodash.com')
 
         /* 
         const { data: { user } } = await supabase.auth.getUser()
@@ -93,47 +94,11 @@ export default function DashboardScreen({ onLogout }: Props) {
                 .order('measured_at', { ascending: false, nullsFirst: false })
                 .limit(2)
 
-            if (error || !rows || rows.length === 0) {
-                const fallback = await supabase
-                    .from('biodigester_indicators')
-                    .select('energy_generated, waste_processed, tax_savings, measured_at, created_at')
-                    .order('created_at', { ascending: false, nullsFirst: false })
-                    .limit(2)
-                rows = fallback.data ?? []
-            }
-
-            const current = rows?.[0]
-            const previous = rows?.[1]
-
-            const curEnergy = Number(current?.energy_generated ?? 0)
-            const curWaste = Number(current?.waste_processed ?? 0)
-            const curTax = Number(current?.tax_savings ?? 0)
-            let curEfficiency = 0
-            if (curWaste > 0) {
-                curEfficiency = Math.min(((curEnergy / curWaste) / IDEAL_RATIO) * 100, 100)
-            }
-
-            const prevEnergy = Number(previous?.energy_generated ?? 0)
-            const prevWaste = Number(previous?.waste_processed ?? 0)
-            const prevTax = Number(previous?.tax_savings ?? 0)
-            let prevEfficiency = 0
-            if (prevWaste > 0) {
-                prevEfficiency = Math.min(((prevEnergy / prevWaste) / IDEAL_RATIO) * 100, 100)
-            }
-
-            setData({
-                energy: formatMetric(curEnergy, prevEnergy),
-                waste: formatMetric(curWaste, prevWaste),
-                tax: formatMetric(curTax, prevTax),
-                efficiency: formatMetric(curEfficiency, prevEfficiency),
-            })
+            if (error || !rows || rows.length === 0) { ...fallback... } // CÓDIGO AQUI
+            // ... Formata métricas
             */
         } catch (err) {
             console.error('Error loading dashboard data:', err)
-        } finally {
-            // No modo teste o finally será ignorado em favor do timeout
-            // setLoading(false)
-            // setRefreshing(false)
         }
     }
 
@@ -142,16 +107,60 @@ export default function DashboardScreen({ onLogout }: Props) {
         loadDashboardData()
     }
 
-    const handleLogout = async () => {
-        await supabase.auth.signOut()
-        onLogout()
+    const handleExportPDF = async () => {
+        try {
+            const html = `
+            <html>
+                <body style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h1 style="color: #16a34a;">Relatório Analítico - BioDash</h1>
+                    <p><b>Data:</b> ${new Date().toLocaleDateString()}</p>
+                    <p><b>Empresa:</b> ${userEmail}</p>
+                    <hr />
+                    <h2>Resumo de Desempenho</h2>
+                    <table border="1" cellpadding="10" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                        <tr style="background-color: #f0fdf4;">
+                            <th>Resíduos (kg)</th>
+                            <th>Energia (kWh)</th>
+                            <th>Economia Tributária (R$)</th>
+                            <th>Eficiência (%)</th>
+                        </tr>
+                        <tr style="text-align: center;">
+                            <td>${data.waste.value}</td>
+                            <td>${data.energy.value}</td>
+                            <td>R$ ${data.tax.value}</td>
+                            <td>${data.efficiency.value}%</td>
+                        </tr>
+                    </table>
+                    <p style="margin-top: 40px; font-size: 12px; color: #666;">Gerado automaticamente via App BioDash Mobile</p>
+                </body>
+            </html>
+            `;
+            const { uri } = await Print.printToFileAsync({ html });
+            await Sharing.shareAsync(uri);
+        } catch (error) {
+            Alert.alert('Erro', 'Não foi possível gerar o PDF');
+        }
+    }
+
+    const handleExportCSV = async () => {
+        try {
+            const header = "Data,Residuos Processados(kg),Energia Gerada(kWh),Imposto Abatido(BRL),Eficiencia(%)\n";
+            const row = `${new Date().toLocaleDateString()},${data.waste.value},${data.energy.value},${data.tax.value},${data.efficiency.value}\n`;
+            const csvContent = header + row;
+            const fs: any = FileSystem;
+            const fileUri = fs.documentDirectory + "biodash_relatorio.csv";
+            await fs.writeAsStringAsync(fileUri, csvContent, { encoding: fs.EncodingType.UTF8 });
+            await Sharing.shareAsync(fileUri);
+        } catch (error) {
+            Alert.alert('Erro', 'Não foi possível gerar a planilha CSV');
+        }
     }
 
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#16a34a" />
-                <Text style={styles.loadingText}>Carregando dados...</Text>
+                <Text style={styles.loadingText}>Coletando sensores...</Text>
             </View>
         )
     }
@@ -162,102 +171,121 @@ export default function DashboardScreen({ onLogout }: Props) {
             contentContainerStyle={styles.scroll}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#16a34a" />}
         >
-            {/* Header */}
-            <View style={styles.header}>
-                <View>
-                    <Text style={styles.headerTitle}>🌱 BioDash</Text>
-                    <Text style={styles.headerSub}>{userEmail}</Text>
+            {/* Header movido pro MainTabs App.tsx, então exibimos apenas um título local */}
+            <Text style={styles.sectionTitle}>Dashboard</Text>
+            <Text style={styles.sectionSub}>Puxe para atualizar os dados do biodigestor.</Text>
+
+            {/* Cards em formato 2x2 */}
+            <View style={styles.grid}>
+                <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
+                <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} emoji="⚡" color="#eab308" bgColor="#fef9c3" />
+                <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} emoji="💰" color="#3b82f6" bgColor="#dbeafe" />
+                <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} emoji="🌿" color="#16a34a" bgColor="#bbf7d0" />
+            </View>
+
+            {/* Visão Geral (Múltiplas Métricas) */}
+            <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Visão Geral</Text>
+            <Text style={styles.sectionSub}>Comparativo de Energia, Resíduos e Impostos abatidos.</Text>
+            <View style={styles.card}>
+                <View style={styles.legendRow}>
+                    <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#eab308' }]} /><Text style={styles.legendText}>Energia</Text></View>
+                    <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#22c55e' }]} /><Text style={styles.legendText}>Resíduos</Text></View>
+                    <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#3b82f6' }]} /><Text style={styles.legendText}>Impos.</Text></View>
                 </View>
-                <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-                    <Text style={styles.logoutText}>Sair</Text>
+
+                <View style={styles.chartMockup}>
+                    <MultiBar month="Jan" vals={[40, 50, 30]} />
+                    <MultiBar month="Fev" vals={[60, 45, 55]} />
+                    <MultiBar month="Mar" vals={[50, 70, 70]} />
+                    <MultiBar month="Abr" vals={[80, 80, 85]} />
+                    <MultiBar month="Mai" vals={[95, 90, 80]} isHighlight />
+                </View>
+            </View>
+
+            {/* Manutenção Agendada */}
+            <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Manutenção Agendada</Text>
+            <Text style={styles.sectionSub}>Próximas revisões operacionais do sistema.</Text>
+            <View style={styles.card}>
+                <View style={styles.maintenanceItem}>
+                    <View style={styles.maintenanceDot} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.maintenanceTitle}>Troca de Filtro H2S</Text>
+                        <Text style={styles.maintenanceDate}>Amanhã, 14:00</Text>
+                    </View>
+                    <Text style={styles.statusPending}>Pendente</Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.maintenanceItem}>
+                    <View style={[styles.maintenanceDot, { backgroundColor: '#16a34a' }]} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.maintenanceTitle}>Inspeção de Válvulas</Text>
+                        <Text style={styles.maintenanceDate}>12/Março, 09:00</Text>
+                    </View>
+                    <Text style={styles.statusDone}>Concluído</Text>
+                </View>
+            </View>
+
+            {/* Mapa (Cross-Platform) */}
+            <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Localização</Text>
+            <Text style={styles.sectionSub}>Unidade ativa do biodigestor.</Text>
+            <View style={[styles.card, { padding: 0, overflow: 'hidden', height: 220 }]}>
+                <MapComponent />
+            </View>
+
+            {/* Exportar Relatórios */}
+            <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Exportar Relatórios</Text>
+            <Text style={styles.sectionSub}>Gere métricas oficiais para análise externa.</Text>
+            <View style={[styles.gridExport, { marginBottom: 12 }]}>
+                <TouchableOpacity style={styles.exportButton} onPress={handleExportPDF}>
+                    <Text style={styles.exportIcon}>📄</Text>
+                    <Text style={styles.exportText}>Gerar PDF</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.exportButton, { backgroundColor: '#dcfce7', borderColor: '#bbf7d0' }]} onPress={handleExportCSV}>
+                    <Text style={styles.exportIcon}>📊</Text>
+                    <Text style={[styles.exportText, { color: '#16a34a' }]}>Excel / CSV</Text>
                 </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionTitle}>Dashboard</Text>
-            <Text style={styles.sectionSub}>
-                Puxe para baixo para atualizar os dados do biodigestor.
-            </Text>
-
-            {/* Cards de métricas */}
-            <View style={styles.grid}>
-                <StatCard
-                    title="Resíduos Processados"
-                    value={data.waste.value.toFixed(1)}
-                    unit="kg"
-                    changePercent={data.waste.changePercent}
-                    increasing={data.waste.increasing}
-                    emoji="💧"
-                    color="#22c55e"
-                    bgColor="#dcfce7"
-                />
-                <StatCard
-                    title="Energia Gerada"
-                    value={data.energy.value.toFixed(1)}
-                    unit="kWh"
-                    changePercent={data.energy.changePercent}
-                    increasing={data.energy.increasing}
-                    emoji="⚡"
-                    color="#eab308"
-                    bgColor="#fef9c3"
-                />
-                <StatCard
-                    title="Imposto Abatido"
-                    value={`R$ ${data.tax.value.toFixed(2)}`}
-                    unit=""
-                    changePercent={data.tax.changePercent}
-                    increasing={data.tax.increasing}
-                    emoji="💰"
-                    color="#3b82f6"
-                    bgColor="#dbeafe"
-                />
-                <StatCard
-                    title="Eficiência do Sistema"
-                    value={data.efficiency.value.toFixed(1)}
-                    unit="%"
-                    changePercent={data.efficiency.changePercent}
-                    increasing={data.efficiency.increasing}
-                    emoji="🌿"
-                    color="#16a34a"
-                    bgColor="#bbf7d0"
-                />
-            </View>
-
             <View style={styles.footer}>
-                <Text style={styles.footerText}>Atualização automática a cada 30s</Text>
+                <Text style={styles.footerText}>BioDash Mobile System</Text>
             </View>
+            <View style={{ height: 60 }} />
         </ScrollView>
     )
 }
 
-interface StatCardProps {
-    title: string
-    value: string
-    unit: string
-    changePercent: string
-    increasing: boolean
-    emoji: string
-    color: string
-    bgColor: string
+function MultiBar({ month, vals, isHighlight }: { month: string, vals: number[], isHighlight?: boolean }) {
+    return (
+        <View style={styles.chartBarContainer}>
+            <View style={styles.barsArea}>
+                <View style={[styles.chartBar, { height: `${vals[0]}%`, backgroundColor: '#eab308' }]} />
+                <View style={[styles.chartBar, { height: `${vals[1]}%`, backgroundColor: '#22c55e' }]} />
+                <View style={[styles.chartBar, { height: `${vals[2]}%`, backgroundColor: '#3b82f6' }]} />
+            </View>
+            <Text style={[styles.chartLabel, isHighlight && { color: '#16a34a', fontWeight: 'bold' }]}>{month}</Text>
+        </View>
+    )
 }
 
-function StatCard({ title, value, unit, changePercent, increasing, emoji, color, bgColor }: StatCardProps) {
+function StatCard({ title, value, unit, changePercent, increasing, emoji, color, bgColor }: any) {
     return (
-        <View style={styles.card}>
+        <View style={[styles.card, { width: '48%' }]}>
             <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>{title}</Text>
                 <View style={[styles.iconBg, { backgroundColor: bgColor }]}>
                     <Text style={styles.iconEmoji}>{emoji}</Text>
                 </View>
             </View>
             <View style={styles.cardValue}>
-                <Text style={[styles.valueText, { color }]}>{value}</Text>
+                <Text style={[styles.valueText, { color }]} numberOfLines={1}>{value}</Text>
                 {unit ? <Text style={[styles.unitText, { color }]}>{unit}</Text> : null}
             </View>
-            <View style={styles.changeBadge}>
-                <Text style={{ color: increasing ? '#16a34a' : '#dc2626', fontSize: 13, fontWeight: '600' }}>
-                    {increasing ? '▲' : '▼'} {changePercent}
+            <View style={{ marginTop: 4 }}>
+                <Text style={styles.cardTitle}>{title}</Text>
+            </View>
+            <View style={[styles.changeBadge, { marginTop: 8 }]}>
+                <Text style={{ color: increasing ? '#16a34a' : '#dc2626', fontSize: 11, fontWeight: '700' }}>
+                    {increasing ? '▲' : '▼'}{changePercent}
                 </Text>
-                <Text style={styles.changeLabel}> vs anterior</Text>
             </View>
         </View>
     )
@@ -281,34 +309,7 @@ const styles = StyleSheet.create({
     },
     scroll: {
         padding: 20,
-        paddingTop: 56,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 24,
-    },
-    headerTitle: {
-        fontSize: 26,
-        fontWeight: '800',
-        color: '#14532d',
-    },
-    headerSub: {
-        fontSize: 12,
-        color: '#6b7280',
-        marginTop: 2,
-    },
-    logoutBtn: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        backgroundColor: '#fee2e2',
-        borderRadius: 8,
-    },
-    logoutText: {
-        color: '#dc2626',
-        fontWeight: '600',
-        fontSize: 13,
+        paddingTop: 24,
     },
     sectionTitle: {
         fontSize: 22,
@@ -322,6 +323,13 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     grid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        rowGap: 14,
+    },
+    gridExport: {
+        flexDirection: 'row',
         gap: 14,
     },
     card: {
@@ -329,9 +337,9 @@ const styles = StyleSheet.create({
         borderRadius: 18,
         padding: 20,
         shadowColor: '#000',
-        shadowOpacity: 0.06,
-        shadowRadius: 12,
-        elevation: 3,
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
     },
     cardHeader: {
         flexDirection: 'row',
@@ -340,34 +348,32 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     cardTitle: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#374151',
-        flex: 1,
-        paddingRight: 8,
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#64748b',
+        textTransform: 'uppercase',
     },
     iconBg: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
     },
     iconEmoji: {
-        fontSize: 20,
+        fontSize: 18,
     },
     cardValue: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        gap: 4,
-        marginBottom: 8,
+        gap: 2,
     },
     valueText: {
-        fontSize: 32,
+        fontSize: 26,
         fontWeight: '800',
     },
     unitText: {
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: '500',
         opacity: 0.7,
     },
@@ -375,9 +381,122 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
-    changeLabel: {
-        fontSize: 12,
+    // Chart
+    legendRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 16,
+        marginBottom: 16,
+    },
+    legendItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    legendColor: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    legendText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#64748b',
+    },
+    chartMockup: {
+        flexDirection: 'row',
+        height: 130,
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        paddingHorizontal: 4,
+    },
+    chartBarContainer: {
+        alignItems: 'center',
+        flex: 1,
+        height: '100%',
+        justifyContent: 'flex-end',
+    },
+    barsArea: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        height: 100,
+        gap: 2,
+        marginBottom: 8,
+    },
+    chartBar: {
+        width: 8,
+        borderTopLeftRadius: 3,
+        borderTopRightRadius: 3,
+    },
+    chartLabel: {
+        fontSize: 10,
         color: '#94a3b8',
+    },
+    // Manutenção
+    maintenanceItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+    },
+    maintenanceDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: '#facc15',
+        marginRight: 12,
+    },
+    maintenanceTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#1e293b',
+    },
+    maintenanceDate: {
+        fontSize: 12,
+        color: '#64748b',
+        marginTop: 2,
+    },
+    statusPending: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#ca8a04',
+        backgroundColor: '#fef08a',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    statusDone: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#16a34a',
+        backgroundColor: '#dcfce7',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#f1f5f9',
+    },
+    // Export
+    exportButton: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        borderRadius: 12,
+        paddingVertical: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        backgroundColor: '#ffffff',
+    },
+    exportIcon: {
+        fontSize: 16,
+        marginRight: 8,
+    },
+    exportText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#475569',
     },
     footer: {
         marginTop: 24,

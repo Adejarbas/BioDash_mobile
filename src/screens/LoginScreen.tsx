@@ -15,9 +15,10 @@ import { supabase } from '../lib/supabase'
 
 interface Props {
     onLogin: () => void
+    onNavigateRegister?: () => void
 }
 
-export default function LoginScreen({ onLogin }: Props) {
+export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
@@ -139,6 +140,16 @@ export default function LoginScreen({ onLogin }: Props) {
                         ) : (
                             <Text style={styles.buttonText}>Entrar</Text>
                         )}
+                    </TouchableOpacity>
+
+                    {/* Link para Cadastro */}
+                    <TouchableOpacity
+                        style={{ marginTop: 24, alignItems: 'center' }}
+                        onPress={onNavigateRegister}
+                    >
+                        <Text style={{ fontSize: 14, color: '#64748b' }}>
+                            Não tem uma conta? <Text style={{ fontWeight: 'bold', color: '#16a34a' }}>Cadastre-se</Text>
+                        </Text>
                     </TouchableOpacity>
                 </View>
 
