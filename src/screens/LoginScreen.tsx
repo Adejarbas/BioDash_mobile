@@ -33,22 +33,17 @@ export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
         setLoading(true)
         setError(null)
 
-        // MODO TESTE (sem banco): Simula loading e loga após 1.5s
-        setTimeout(() => {
-            setLoading(false)
-            onLogin()
-        }, 1500)
-
-        /* 
-        // CÓDIGO ORIGINAL COM SUPABASE
         try {
+            console.log("Tentando logar com:", email.trim(), "| Senha (tamanho):", password.length);
             const { error: authError } = await supabase.auth.signInWithPassword({
                 email: email.trim(),
-                password,
+                password: password.trim(), // Removido espaço acidental
             })
             if (authError) {
-                setError(authError.message)
+                console.log("Erro do Supabase:", authError.message);
+                setError(authError.message === 'Invalid login credentials' ? 'Email ou Senha inválidos.' : authError.message)
             } else {
+                console.log("Login OK!");
                 onLogin()
             }
         } catch (e) {
@@ -56,7 +51,6 @@ export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
         } finally {
             setLoading(false)
         }
-        */
     }
 
     return (

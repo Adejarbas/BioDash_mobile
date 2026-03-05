@@ -10,6 +10,7 @@ import {
     Platform,
     ScrollView,
 } from 'react-native'
+import { supabase } from '../lib/supabase'
 
 interface Props {
     onRegisterSuccess: () => void
@@ -38,16 +39,45 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin }: Pro
         setLoading(true)
         setError(null)
 
-        // MODO TESTE (sem banco real no momento): Simula loading e retorna
-        setTimeout(() => {
-            setLoading(false)
-            onRegisterSuccess()
-        }, 1500)
+        try {
+            const { data, error: signUpError } = await supabase.auth.signUp({
+                email: email.trim(),
+                password,
+            })
 
-        /* 
-        // Lógica futura com Supabase para cadastro
-        // await supabase.auth.signUp({ email, password, options: { data: { name, razaoSocial, cnpj, cep, numero, endereco } } })
-        */
+            if (signUpError) {
+                setError(signUpError.message)
+            } else {
+                // Inserir os dados na tabela pública user_profiles para integração com Web
+                if (data.user) {
+                    const { error: dbError } = await supabase.from('user_profiles').insert({
+                        id: data.user.id,
+                        name: name.trim(),
+                        company: '',
+                        razao_social: razaoSocial.trim(),
+                        cnpj: cnpj.replace(/\D/g, ''),
+                        address: endereco.trim(),
+                        numero: numero.trim() ? Number(numero.trim()) : null,
+                        city: '',
+                        state: '',
+                        zip_code: cep.replace(/\D/g, ''),
+                        phone: '',
+                        email: email.trim(),
+                        updated_at: new Date().toISOString()
+                    });
+
+                    if (dbError) {
+                        console.log('Erro ao salvar no user_profiles:', dbError);
+                    }
+                }
+
+                onRegisterSuccess() // Se der sucesso, volta pro login ou mostra msg de confirmação
+            }
+        } catch (e) {
+            setError('Erro inesperado. Tente novamente mais tarde.')
+        } finally {
+            setLoading(false)
+        }
     }
 
     return (

@@ -19,14 +19,14 @@ export default function NotificationsScreen({ onBack }: Props) {
     const [loading, setLoading] = useState(true);
 
     const demoActivities: ActivityItem[] = [
-        { id: 1, type: "success", message: "Sistema de aquecimento otimizado automaticamente", timestamp: "Agora mesmo" },
-        { id: 2, type: "warning", message: "Pressão do gás ligeiramente elevada", timestamp: "Há 5 min" },
-        { id: 3, type: "info", message: "Novo sensor de pH instalado e calibrado", timestamp: "Há 12 min" },
-        { id: 4, type: "success", message: "Eficiência energética aumentou para 94%", timestamp: "Há 30 min" },
-        { id: 5, type: "info", message: "Backup de dados realizado com sucesso", timestamp: "Há 1 hora" },
-        { id: 6, type: "warning", message: "Filtro de entrada precisa de limpeza", timestamp: "Há 2 horas" },
-        { id: 7, type: "error", message: "Falha na comunicação com o sensor 3", timestamp: "Há 3 horas" },
-        { id: 8, type: "success", message: "Meta diária de produção atingida", timestamp: "Ontem" },
+        { id: 1, type: "error", message: "⚠️ [CRÍTICO] Temperatura da caldeira excedeu 40°C", timestamp: "Agora mesmo" },
+        { id: 2, type: "warning", message: "⏱️ Pressão do gás apresentou alta oscilação (1.7 bar)", timestamp: "Há 5 min" },
+        { id: 3, type: "info", message: "💧 Nível de pH estabilizado em 7.0", timestamp: "Há 12 min" },
+        { id: 4, type: "success", message: "⚡ Geração de energia otimizada (Eficiência: 96%)", timestamp: "Há 30 min" },
+        { id: 5, type: "warning", message: "⚠️ Temperatura do tanque de mistura atingiu 38°C", timestamp: "Há 1 hora" },
+        { id: 6, type: "info", message: "📝 Relatório automático de telemetria emitido", timestamp: "Há 2 horas" },
+        { id: 7, type: "success", message: "✅ Manutenção preventiva da Válvula 02 concluída", timestamp: "Há 3 horas" },
+        { id: 8, type: "error", message: "❌ Perda de conexão temporária com o Sensor de pH", timestamp: "Ontem" },
     ];
 
     useEffect(() => {

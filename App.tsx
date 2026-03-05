@@ -12,8 +12,9 @@ import HelpCenterScreen from './src/screens/HelpCenterScreen'
 import { StatusBar } from 'expo-status-bar'
 import type { Session } from '@supabase/supabase-js'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
+import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
 
-const TEST_MODE = true; // <--- MODO DE TESTE ATIVADO
+const TEST_MODE = false; // <--- MODO DE TESTE DESATIVADO
 
 // --- COMPONENTE DE ABAS (MENU INFERIOR) ---
 type SubScreen = 'none' | 'profile' | 'notifications' | 'terms' | 'helpCenter';
@@ -22,25 +23,24 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home')
   const [currentSubScreen, setCurrentSubScreen] = useState<SubScreen>('none')
   const { theme, toggleTheme, colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header Fixo Global */}
-      <SafeAreaView style={{ backgroundColor: colors.cardBackground }}>
-        <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-          <View style={[styles.headerLogo, { backgroundColor: colors.primaryLight }]}>
-            <Text style={styles.headerEmoji}>🌱</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>BioDash</Text>
-            <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
-          </View>
-
-          <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
-            <Text style={{ fontSize: 18 }}>{theme === 'light' ? '🌙' : '☀️'}</Text>
-          </TouchableOpacity>
+      <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 16) }]}>
+        <View style={[styles.headerLogo, { backgroundColor: colors.primaryLight }]}>
+          <Text style={styles.headerEmoji}>🌱</Text>
         </View>
-      </SafeAreaView>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>BioDash</Text>
+          <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
+        </View>
+
+        <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
+          <Text style={{ fontSize: 18 }}>{theme === 'light' ? '🌙' : '☀️'}</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Tela Ativa */}
       <View style={{ flex: 1 }}>
@@ -66,7 +66,7 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
       </View>
 
       {/* Barra de Navegação */}
-      <View style={[styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
+      <View style={[styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 16) }]}>
         <TouchableOpacity
           style={styles.tabItem}
           onPress={() => {
@@ -155,7 +155,10 @@ function MainApp() {
         />
       ) : (
         <LoginScreen
-          onLogin={() => setSession({ user: { email: 'teste@biodash.com' } })}
+          onLogin={() => {
+            // The session will automatically update via the onAuthStateChange listener
+            // We don't need to manually setSession here unless needed for forced UI updates 
+          }}
           onNavigateRegister={() => setCurrentScreen('register')}
         />
       )}
@@ -163,7 +166,6 @@ function MainApp() {
   )
 }
 
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function App() {
   return (
@@ -184,7 +186,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 16,
     paddingHorizontal: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
@@ -226,12 +227,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 70,
     borderTopWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingBottom: 12,
+    paddingTop: 8,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 10,

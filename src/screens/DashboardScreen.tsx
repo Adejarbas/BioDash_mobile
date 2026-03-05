@@ -34,6 +34,13 @@ interface DashboardData {
     efficiency: MetricData
 }
 
+type ChartPoint = {
+    name: string        // "Jan", "Fev", ...
+    wasteProcessed: number
+    energyGenerated: number
+    taxDeduction: number
+}
+
 const IDEAL_RATIO = 0.8
 
 function calculateChange(current: number, previous: number) {
@@ -55,6 +62,41 @@ export default function DashboardScreen() {
     const chartRef = useRef<ViewShot>(null)
     const [isMapModalVisible, setMapModalVisible] = useState(false)
     const [markerName, setMarkerName] = useState('')
+    const [markerCep, setMarkerCep] = useState('')
+    const [markerAddress, setMarkerAddress] = useState('')
+    const [markerNumber, setMarkerNumber] = useState('')
+    const [cepLoading, setCepLoading] = useState(false)
+    const [chartData, setChartData] = useState<ChartPoint[]>([])
+
+    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; }
+    const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
+
+    const [maintenances, setMaintenances] = useState([
+        { id: '1', title: 'Troca de Filtro H2S', date: 'Amanhã, 14:00', status: 'pending' },
+        { id: '2', title: 'Inspeção de Válvulas', date: '12/Março, 09:00', status: 'done' }
+    ]);
+
+    const handleFetchCep = async () => {
+        const cleanCep = markerCep.replace(/\D/g, '');
+        if (cleanCep.length !== 8) {
+            Alert.alert("Aviso", "Digite um CEP válido com 8 dígitos.");
+            return;
+        }
+        setCepLoading(true);
+        try {
+            const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+            const cepData = await res.json();
+            if (!cepData.erro) {
+                setMarkerAddress(`${cepData.logradouro}, ${cepData.bairro} - ${cepData.localidade}/${cepData.uf}`);
+            } else {
+                Alert.alert("Erro", "CEP não encontrado.");
+            }
+        } catch (err) {
+            Alert.alert("Erro", "Falha ao consultar viaCEP.");
+        } finally {
+            setCepLoading(false);
+        }
+    }
 
     const [data, setData] = useState<DashboardData>({
         energy: { value: 0, changePercent: '0%', increasing: true },
@@ -66,6 +108,34 @@ export default function DashboardScreen() {
     const [refreshing, setRefreshing] = useState(false)
     const [userEmail, setUserEmail] = useState('')
     const [selectedTab, setSelectedTab] = useState<'all' | 'waste' | 'energy' | 'tax'>('all')
+    const [metricsModalVisible, setMetricsModalVisible] = useState(false)
+    const [manualMetrics, setManualMetrics] = useState({
+        waste: '120.0',
+        energy: '92.5',
+        tax: '750'
+    })
+
+    const handleSaveManualMetrics = async () => {
+        try {
+            const { error } = await supabase.from('biodigester_indicators').insert([{
+                waste_processed: parseFloat(manualMetrics.waste) || 0,
+                energy_generated: parseFloat(manualMetrics.energy) || 0,
+                tax_savings: parseFloat(manualMetrics.tax) || 0,
+                // Eficiência será calculada nas views, salvamos as primárias
+            }])
+
+            if (error) throw error
+
+            setMetricsModalVisible(false)
+            Alert.alert("Sucesso", "Métricas registradas com sucesso no Banco de Dados!")
+
+            // Recarrega o dashboard para exibir os novos totais gerados
+            loadDashboardData()
+        } catch (err) {
+            console.error('Save metrics error:', err)
+            Alert.alert("Erro", "Não foi possível salvar as métricas no sistema.")
+        }
+    }
     const { colors, theme } = useTheme()
 
     useEffect(() => {
@@ -76,42 +146,121 @@ export default function DashboardScreen() {
     }, [])
 
     const loadUser = async () => {
-        // MODO TESTE
-        setUserEmail('admin@biodash.com')
-
-        /* 
         const { data: { user } } = await supabase.auth.getUser()
-        setUserEmail(user?.email ?? '')
-        */
+        setUserEmail(user?.email ?? 'admin@biodash.com')
     }
 
     const loadDashboardData = async () => {
         try {
-            // MODO TESTE (sem banco): dados fixos
-            setTimeout(() => {
-                setData({
-                    energy: { value: 92.5, changePercent: '5.2%', increasing: true },
-                    waste: { value: 120.0, changePercent: '2.0%', increasing: true },
-                    tax: { value: 750.0, changePercent: '1.5%', increasing: false },
-                    efficiency: { value: 96.3, changePercent: '0.8%', increasing: true },
-                })
-                setLoading(false)
-                setRefreshing(false)
-            }, 1000)
+            const IDEAL_RATIO = 0.8;
 
-            /* 
-            // CÓDIGO ORIGINAL COM SUPABASE
-            let { data: rows, error } = await supabase
-                .from('biodigester_indicators')
-                .select('energy_generated, waste_processed, tax_savings, measured_at, created_at')
-                .order('measured_at', { ascending: false, nullsFirst: false })
-                .limit(2)
+            // --- BUSCA OS 2 ÚLTIMOS REGISTROS PARA OS CARDS DO TOPO ---
+            let query = supabase
+                .from("biodigester_indicators")
+                .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
+                .order("measured_at", { ascending: false, nullsFirst: false })
+                .limit(2);
 
-            if (error || !rows || rows.length === 0) { ...fallback... } // CÓDIGO AQUI
-            // ... Formata métricas
-            */
+            let { data: rows, error } = await query;
+
+            if (error || !rows || rows.length === 0) {
+                const fallback = await supabase
+                    .from("biodigester_indicators")
+                    .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
+                    .order("created_at", { ascending: false, nullsFirst: false })
+                    .limit(2);
+                rows = fallback.data;
+                if (fallback.error) throw fallback.error;
+            }
+
+            const current = rows?.[0];
+            const previous = rows?.[1];
+
+            const curEnergy = Number(current?.energy_generated ?? 0);
+            const curWaste = Number(current?.waste_processed ?? 0);
+            const curTax = Number(current?.tax_savings ?? 0);
+
+            let curEfficiency = 0;
+            if (curWaste > 0) {
+                curEfficiency = Math.min(((curEnergy / curWaste) / IDEAL_RATIO) * 100, 100);
+            }
+
+            const prevEnergy = Number(previous?.energy_generated ?? 0);
+            const prevWaste = Number(previous?.waste_processed ?? 0);
+            const prevTax = Number(previous?.tax_savings ?? 0);
+
+            let prevEfficiency = 0;
+            if (prevWaste > 0) {
+                prevEfficiency = Math.min(((prevEnergy / prevWaste) / IDEAL_RATIO) * 100, 100);
+            }
+
+            setData({
+                energy: formatMetric(curEnergy, prevEnergy),
+                waste: formatMetric(curWaste, prevWaste),
+                tax: formatMetric(curTax, prevTax),
+                efficiency: formatMetric(curEfficiency, prevEfficiency),
+            });
+
+            // --- BUSCA HISTÓRICO DE 12 MESES PARA O GRÁFICO ---
+            const since = new Date();
+            since.setMonth(since.getMonth() - 12);
+
+            let chartQuery = supabase
+                .from("biodigester_indicators")
+                .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
+                .gte("measured_at", since.toISOString())
+                .order("measured_at", { ascending: true });
+
+            let chartRes = await chartQuery;
+
+            if (chartRes.error) {
+                const fb = await supabase
+                    .from("biodigester_indicators")
+                    .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
+                    .gte("created_at", since.toISOString())
+                    .order("created_at", { ascending: true });
+                if (fb.error) throw fb.error;
+                chartRes = { data: fb.data, error: null, count: null, status: 200, statusText: "OK" };
+            }
+
+            const rowsHistory = chartRes.data ?? [];
+            const byMonth = new Map<string, { date: Date; w: number; e: number; t: number }>();
+
+            const monthShort = (d: Date) =>
+                new Intl.DateTimeFormat("pt-BR", { month: "short" })
+                    .format(d)
+                    .replace(".", "")
+                    .replace(/^\w/, (c) => c.toUpperCase());
+
+            for (const r of rowsHistory) {
+                const whenStr = r.measured_at ?? r.created_at;
+                if (!whenStr) continue;
+                const d = new Date(whenStr);
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                const acc = byMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), w: 0, e: 0, t: 0 };
+                acc.w += Number(r.waste_processed ?? 0);
+                acc.e += Number(r.energy_generated ?? 0);
+                acc.t += Number(r.tax_savings ?? 0);
+                byMonth.set(key, acc);
+            }
+
+            const compiledChartData = Array.from(byMonth.values())
+                .sort((a, b) => a.date.getTime() - b.date.getTime())
+                .slice(-12)
+                .map((m) => ({
+                    name: monthShort(m.date),
+                    wasteProcessed: Number(m.w.toFixed(2)),
+                    energyGenerated: Number(m.e.toFixed(2)),
+                    taxDeduction: Number(m.t.toFixed(2)),
+                }));
+
+            setChartData(compiledChartData);
+
         } catch (err) {
             console.error('Error loading dashboard data:', err)
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
         }
     }
 
@@ -240,8 +389,18 @@ export default function DashboardScreen() {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
                 {/* Header movido pro MainTabs App.tsx, então exibimos apenas um título local */}
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
-                <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Puxe para atualizar os dados do biodigestor.</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
+                        <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Visão geral do biodigestor.</Text>
+                    </View>
+                    <TouchableOpacity
+                        style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                        onPress={() => setMetricsModalVisible(true)}
+                    >
+                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✏️ Atualizar</Text>
+                    </TouchableOpacity>
+                </View>
 
                 {/* Cards em formato 2x2 */}
                 <View style={styles.grid}>
@@ -281,11 +440,30 @@ export default function DashboardScreen() {
 
                     <ViewShot ref={chartRef} options={{ format: "jpg", quality: 0.9, result: 'base64' }}>
                         <View style={[styles.chartMockup, { backgroundColor: colors.cardBackground }]}>
-                            <MultiBar month="Jan" vals={[40, 50, 30]} selectedTab={selectedTab} />
-                            <MultiBar month="Fev" vals={[60, 45, 55]} selectedTab={selectedTab} />
-                            <MultiBar month="Mar" vals={[50, 70, 70]} selectedTab={selectedTab} />
-                            <MultiBar month="Abr" vals={[80, 80, 85]} selectedTab={selectedTab} />
-                            <MultiBar month="Mai" vals={[95, 90, 80]} selectedTab={selectedTab} isHighlight />
+                            {chartData.length === 0 ? (
+                                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', height: 180 }}>
+                                    <Text style={{ color: colors.textMuted }}>Nenhum dado registrado para o gráfico.</Text>
+                                </View>
+                            ) : (
+                                chartData.map((point, index) => {
+                                    // Vamos calcular proporções para a altura da barra ser pelo menos visível.
+                                    // Isso é uma simplificação para fins visuais no RN, usando um "teto" flexível
+                                    // igual fizemos no mock anterior, limitando a 100% de altura para não quebrar o layout.
+                                    const hEnergy = Math.min(Math.max((point.energyGenerated / 15000) * 100, 5), 100);
+                                    const hWaste = Math.min(Math.max((point.wasteProcessed / 4000) * 100, 5), 100);
+                                    const hTax = Math.min(Math.max((point.taxDeduction / 12000) * 100, 5), 100);
+
+                                    return (
+                                        <MultiBar
+                                            key={index}
+                                            month={point.name}
+                                            vals={[hEnergy, hWaste, hTax]}
+                                            selectedTab={selectedTab}
+                                            isHighlight={index === chartData.length - 1}
+                                        />
+                                    );
+                                })
+                            )}
                         </View>
                     </ViewShot>
                 </View>
@@ -294,23 +472,21 @@ export default function DashboardScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Manutenção Agendada</Text>
                 <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Próximas revisões operacionais do sistema.</Text>
                 <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
-                    <View style={styles.maintenanceItem}>
-                        <View style={styles.maintenanceDot} />
-                        <View style={{ flex: 1 }}>
-                            <Text style={[styles.maintenanceTitle, { color: colors.text }]}>Troca de Filtro H2S</Text>
-                            <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>Amanhã, 14:00</Text>
-                        </View>
-                        <Text style={styles.statusPending}>Pendente</Text>
-                    </View>
-                    <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                    <View style={styles.maintenanceItem}>
-                        <View style={[styles.maintenanceDot, { backgroundColor: '#16a34a' }]} />
-                        <View style={{ flex: 1 }}>
-                            <Text style={[styles.maintenanceTitle, { color: colors.text }]}>Inspeção de Válvulas</Text>
-                            <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>12/Março, 09:00</Text>
-                        </View>
-                        <Text style={[styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>Concluído</Text>
-                    </View>
+                    {maintenances.map((item, index) => (
+                        <React.Fragment key={item.id}>
+                            <View style={styles.maintenanceItem}>
+                                <View style={[styles.maintenanceDot, item.status === 'done' && { backgroundColor: '#16a34a' }]} />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
+                                    <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>{item.date}</Text>
+                                </View>
+                                <Text style={item.status === 'pending' ? styles.statusPending : [styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>
+                                    {item.status === 'pending' ? 'Pendente' : 'Concluído'}
+                                </Text>
+                            </View>
+                            {index < maintenances.length - 1 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
+                        </React.Fragment>
+                    ))}
                 </View>
 
                 {/* Exportar Relatórios (Movido para antes do mapa) */}
@@ -345,25 +521,117 @@ export default function DashboardScreen() {
                 {/* Map Add Modal */}
                 <Modal visible={isMapModalVisible} transparent animationType="fade">
                     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
-                        <View style={{ backgroundColor: colors.cardBackground, width: '85%', padding: 24, borderRadius: 16 }}>
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Novo Marcador</Text>
-                            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>Insira o nome do equipamento para fixá-lo no mapa da sua unidade.</Text>
-                            <TextInput
-                                style={{ borderWidth: 1, borderColor: colors.border, padding: 14, borderRadius: 10, color: colors.text, marginBottom: 24, fontSize: 15 }}
-                                placeholder="Ex: Célula Termofílica 01"
-                                placeholderTextColor={colors.textMuted}
-                                value={markerName}
-                                onChangeText={setMarkerName}
-                            />
+                        <View style={{ backgroundColor: colors.cardBackground, width: '90%', padding: 24, borderRadius: 16 }}>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Novo Marcador de Instalação</Text>
+                            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>Busque pelo CEP ou preencha o local do equipamento.</Text>
+
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nome do Equipamento / Cliente</Text>
+                                <TextInput
+                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                    placeholder="Ex: Unidade Sul"
+                                    placeholderTextColor={colors.textMuted}
+                                    value={markerName}
+                                    onChangeText={setMarkerName}
+                                />
+                            </View>
+
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>CEP</Text>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                        placeholder="00000-000"
+                                        placeholderTextColor={colors.textMuted}
+                                        keyboardType="numeric"
+                                        value={markerCep}
+                                        onChangeText={setMarkerCep}
+                                    />
+                                </View>
+                                <View style={{ justifyContent: 'flex-end' }}>
+                                    <TouchableOpacity style={{ backgroundColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 10, justifyContent: 'center' }} onPress={handleFetchCep} disabled={cepLoading}>
+                                        {cepLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Buscar</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
+                                <View style={{ flex: 2 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço</Text>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
+                                        placeholder="Rua, Bairro..."
+                                        placeholderTextColor={colors.textMuted}
+                                        value={markerAddress}
+                                        onChangeText={setMarkerAddress}
+                                    />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nº</Text>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                        placeholder="123"
+                                        placeholderTextColor={colors.textMuted}
+                                        keyboardType="numeric"
+                                        value={markerNumber}
+                                        onChangeText={setMarkerNumber}
+                                    />
+                                </View>
+                            </View>
+
+
                             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                                 <TouchableOpacity onPress={() => setMapModalVisible(false)} style={{ padding: 10, paddingHorizontal: 16 }}>
                                     <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Cancelar</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                    onPress={() => {
+                                    onPress={async () => {
                                         setMapModalVisible(false);
-                                        setTimeout(() => Alert.alert("Sucesso", "Marcador adicionado ao mapa com sucesso!"), 300);
+
+                                        let lat: number | undefined, lon: number | undefined;
+                                        try {
+                                            const headers = {
+                                                'User-Agent': 'BioDashMobileApp/1.0',
+                                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+                                            };
+
+                                            const cleanAddress = markerAddress.replace(/[-/]/g, ',');
+                                            const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
+                                            let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
+                                            let geoData = await geoRes.json();
+
+                                            if (geoData && geoData.length > 0) {
+                                                lat = parseFloat(geoData[0].lat);
+                                                lon = parseFloat(geoData[0].lon);
+                                            } else if (markerCep) {
+                                                geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
+                                                geoData = await geoRes.json();
+                                                if (geoData && geoData.length > 0) {
+                                                    lat = parseFloat(geoData[0].lat);
+                                                    lon = parseFloat(geoData[0].lon);
+                                                }
+                                            }
+
+                                            if (typeof lat === 'number' && typeof lon === 'number') {
+                                                setMapMarkers(prev => [...prev, {
+                                                    id: Math.random().toString(),
+                                                    latitude: lat as number,
+                                                    longitude: lon as number,
+                                                    title: markerName || 'Nova Instalação',
+                                                    description: markerAddress
+                                                }]);
+                                                setTimeout(() => Alert.alert("Sucesso", `Marcador "${markerName}" adicionado ao mapa!`), 500);
+                                            } else {
+                                                setTimeout(() => Alert.alert("Aviso", `Coordenadas não encontradas parar este endereço.\nTente preencher sem formatações ou verifique a conexão.`), 500);
+                                            }
+                                        } catch (e) {
+                                            setTimeout(() => Alert.alert("Erro de Conexão", "Não foi possível buscar as coordenadas geográficas."), 500);
+                                        }
+
                                         setMarkerName('');
+                                        setMarkerCep('');
+                                        setMarkerAddress('');
+                                        setMarkerNumber('');
                                     }}
                                     style={{ backgroundColor: '#16a34a', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 }}
                                 >
@@ -375,7 +643,7 @@ export default function DashboardScreen() {
                 </Modal>
 
                 <View style={[styles.card, { padding: 0, overflow: 'hidden', height: 220, backgroundColor: colors.cardBackground }]}>
-                    <MapComponent />
+                    <MapComponent markers={mapMarkers} />
                 </View>
 
                 <View style={styles.footer}>
@@ -383,18 +651,79 @@ export default function DashboardScreen() {
                 </View>
                 <View style={{ height: 120 }} />
             </ScrollView>
-            <TelemetryWidget />
+
+            {/* Modal de Atualização Manual de Métricas */}
+            <Modal visible={metricsModalVisible} animationType="slide" transparent={true} onRequestClose={() => setMetricsModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Atualizar Métricas</Text>
+                            <TouchableOpacity onPress={() => setMetricsModalVisible(false)}>
+                                <Text style={styles.modalClose}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores atuais para simular os sensores.</Text>
+
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                            <View style={[styles.formGroup, { width: '48%' }]}>
+                                <Text style={[styles.label, { color: colors.text }]}>Resíduos (kg)</Text>
+                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.waste} onChangeText={t => setManualMetrics({ ...manualMetrics, waste: t })} />
+                            </View>
+                            <View style={[styles.formGroup, { width: '48%' }]}>
+                                <Text style={[styles.label, { color: colors.text }]}>Energia (kWh)</Text>
+                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.energy} onChangeText={t => setManualMetrics({ ...manualMetrics, energy: t })} />
+                            </View>
+                            <View style={[styles.formGroup, { width: '100%' }]}>
+                                <Text style={[styles.label, { color: colors.text }]}>Impostos Abatidos (R$)</Text>
+                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.tax} onChangeText={t => setManualMetrics({ ...manualMetrics, tax: t })} />
+                            </View>
+                        </View>
+
+                        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handleSaveManualMetrics}>
+                            <Text style={styles.primaryButtonText}>Salvar Dados</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            <TelemetryWidget onAddMaintenance={(m) => setMaintenances(prev => [m, ...prev])} />
         </View>
     )
 }
 
-function TelemetryWidget() {
+function TelemetryWidget({ onAddMaintenance }: { onAddMaintenance?: (m: any) => void }) {
     const { colors } = useTheme();
     const [temp, setTemp] = useState(35);
     const [pressure, setPressure] = useState(1.5);
     const [ph, setPh] = useState(7.0);
     const [timeElapsed, setTimeElapsed] = useState(0);
     const [expanded, setExpanded] = useState(false);
+    const [maintenanceModalVisible, setMaintenanceModalVisible] = useState(false);
+    const [maintenanceForm, setMaintenanceForm] = useState({
+        equipment: '',
+        description: '',
+        urgency: 'Alta'
+    });
+
+    const handleScheduleMaintenance = () => {
+        if (!maintenanceForm.equipment) {
+            Alert.alert("Erro", "Por favor, preencha o nome do equipamento.");
+            return;
+        }
+
+        if (onAddMaintenance) {
+            onAddMaintenance({
+                id: Math.random().toString(),
+                title: maintenanceForm.equipment,
+                date: 'Agora (Novo)',
+                status: 'pending'
+            });
+        }
+
+        Alert.alert("Sucesso", "Manutenção agendada e registrada com sucesso!");
+        setMaintenanceModalVisible(false);
+        setMaintenanceForm({ equipment: '', description: '', urgency: 'Alta' });
+    }
 
     // Animação para o ícone M/Alerta
     const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -471,13 +800,86 @@ function TelemetryWidget() {
                         <View style={{ backgroundColor: '#fee2e2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#fecaca' }}>
                             <Text style={{ color: '#b91c1c', fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>⚠️ Temperatura Crítica!</Text>
                             <Text style={{ color: '#991b1b', fontSize: 11, marginBottom: 10 }}>Notificação enviada ao responsável.</Text>
-                            <TouchableOpacity style={{ backgroundColor: '#dc2626', paddingVertical: 8, borderRadius: 6, alignItems: 'center' }} onPress={() => Alert.alert("Suporte", "Manutenção Solicitada para a unidade.")}>
+                            <TouchableOpacity style={{ backgroundColor: '#dc2626', paddingVertical: 8, borderRadius: 6, alignItems: 'center' }} onPress={() => setMaintenanceModalVisible(true)}>
                                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Solicitar Manutenção</Text>
                             </TouchableOpacity>
                         </View>
                     )}
                 </View>
             )}
+
+            {/* Modal de Agendamento de Manutenção */}
+            <Modal
+                visible={maintenanceModalVisible}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => setMaintenanceModalVisible(false)}
+            >
+                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', maxWidth: 400 }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Agendar Manutenção</Text>
+                            <TouchableOpacity onPress={() => setMaintenanceModalVisible(false)}>
+                                <Text style={styles.modalClose}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>
+                            Preencha os dados para registrar a solicitação de manutenção imediata.
+                        </Text>
+
+                        <View style={styles.formGroup}>
+                            <Text style={[styles.label, { color: colors.text }]}>Equipamento / Setor</Text>
+                            <TextInput
+                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                value={maintenanceForm.equipment}
+                                onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, equipment: t })}
+                                placeholder="Ex: Caldeira Principal"
+                                placeholderTextColor={colors.textMuted}
+                            />
+                        </View>
+
+                        <View style={styles.formGroup}>
+                            <Text style={[styles.label, { color: colors.text }]}>Descrição do Problema</Text>
+                            <TextInput
+                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 80 }]}
+                                value={maintenanceForm.description}
+                                onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, description: t })}
+                                placeholder="Descreva o que está ocorrendo..."
+                                placeholderTextColor={colors.textMuted}
+                                multiline
+                                textAlignVertical="top"
+                            />
+                        </View>
+
+                        <View style={styles.formGroup}>
+                            <Text style={[styles.label, { color: colors.text }]}>Urgência</Text>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                                {['Baixa', 'Média', 'Alta'].map((level) => (
+                                    <TouchableOpacity
+                                        key={level}
+                                        style={[
+                                            styles.urgencyBtn,
+                                            { borderColor: colors.border },
+                                            maintenanceForm.urgency === level && { backgroundColor: level === 'Alta' ? '#fee2e2' : colors.primaryLight, borderColor: level === 'Alta' ? '#ef4444' : colors.primary }
+                                        ]}
+                                        onPress={() => setMaintenanceForm({ ...maintenanceForm, urgency: level })}
+                                    >
+                                        <Text style={[
+                                            { fontSize: 12, color: colors.text },
+                                            maintenanceForm.urgency === level && { color: level === 'Alta' ? '#b91c1c' : colors.primary, fontWeight: 'bold' }
+                                        ]}>{level}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: '#ef4444', marginTop: 8 }]} onPress={handleScheduleMaintenance}>
+                            <Text style={styles.primaryButtonText}>Confirmar Agendamento</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             {!expanded && (
                 <TouchableOpacity
@@ -503,9 +905,7 @@ function TelemetryWidget() {
                             <Text style={{ fontSize: 16 }}>⚠️</Text>
                         </Animated.View>
                     ) : (
-                        <View style={{ backgroundColor: '#16a34a', borderRadius: 12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ fontSize: 13, color: '#fff', fontWeight: 'bold' }}>M</Text>
-                        </View>
+                        <Text style={{ fontSize: 16 }}>📡</Text>
                     )}
                     <Text style={{ fontWeight: '700', color: isCritical ? '#fff' : colors.text, fontSize: 13 }}>
                         {isCritical ? 'Alerta Crítico' : 'Sensores'}
@@ -781,5 +1181,74 @@ const styles = StyleSheet.create({
     tabText: {
         fontSize: 12,
         fontWeight: '600',
-    }
-})
+    },
+    // Modal Geral (Map and Maintenance)
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 24,
+        width: '90%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+    },
+    modalSubtitle: {
+        fontSize: 13,
+    },
+    modalClose: {
+        fontSize: 20,
+        color: '#94a3b8',
+        fontWeight: 'bold',
+        padding: 4,
+    },
+    formGroup: {
+        marginBottom: 16,
+    },
+    label: {
+        fontSize: 13,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    input: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        fontSize: 14,
+    },
+    urgencyBtn: {
+        borderWidth: 1,
+        borderRadius: 20,
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+    },
+    primaryButton: {
+        backgroundColor: '#16a34a',
+        borderRadius: 12,
+        paddingVertical: 16,
+        alignItems: 'center',
+        marginTop: 16,
+    },
+    primaryButtonText: {
+        color: '#fff',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+});

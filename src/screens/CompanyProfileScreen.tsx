@@ -11,7 +11,46 @@ import {
     Alert
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode } from 'base64-arraybuffer';
 import { useTheme } from '../context/ThemeContext';
+import { supabase } from '../lib/supabase';
+
+const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
+    <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
+);
+
+const CustomInput = ({ value, onChangeText, placeholder, style, secure = false, colors }: any) => (
+    <TextInput
+        style={[
+            styles.input,
+            {
+                backgroundColor: colors.background, // Fundo levemente contrastante
+                borderColor: colors.border,
+                color: colors.text
+            },
+            style
+        ]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textMuted}
+        secureTextEntry={secure}
+    />
+);
+
+const InfoRow = ({ label1, val1, label2, val2, colors }: any) => (
+    <View style={styles.twoCols}>
+        <View style={styles.col}>
+            <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label1}</Text>
+            <Text style={[styles.infoVal, { color: colors.text }]}>{val1 || '—'}</Text>
+        </View>
+        <View style={styles.col}>
+            <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label2}</Text>
+            <Text style={[styles.infoVal, { color: colors.text }]}>{val2 || '—'}</Text>
+        </View>
+    </View>
+);
 
 interface Props {
     onBack: () => void;
@@ -22,19 +61,18 @@ export default function CompanyProfileScreen({ onBack }: Props) {
     const [loading, setLoading] = useState(false);
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
-    // Mocks de Estado do Formulário
     const [formData, setFormData] = useState({
-        nome: 'BioDash Master',
-        nomeFantasia: 'BioDash Corp',
-        razaoSocial: 'BioDash Soluções Ambientais LTDA',
-        cnpj: '12.345.678/0001-99',
-        email: 'tiago.muniz93@hotmail.com',
-        endereco: 'Rua das Araucárias',
-        numero: '123',
-        cidade: 'Curitiba',
-        estado: 'PR',
-        cep: '80000-000',
-        telefone: '(41) 99999-9999',
+        nome: '',
+        nomeFantasia: '',
+        razaoSocial: '',
+        cnpj: '',
+        email: '',
+        endereco: '',
+        numero: '',
+        cidade: '',
+        estado: '',
+        cep: '',
+        telefone: '',
     });
 
     const [passwordData, setPasswordData] = useState({
@@ -43,25 +81,169 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         confirmar: ''
     });
 
-    const handleSaveProfile = () => {
+    React.useEffect(() => {
+        const loadProfile = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                // Tenta buscar no user_profiles (igual Web)
+                const { data: profile } = await supabase
+                    .from('user_profiles')
+                    .select('*')
+                    .eq('id', user.id)
+                    .single();
+
+                if (profile?.avatar_url) {
+                    setAvatarUri(profile.avatar_url);
+                }
+
+                setFormData({
+                    nome: profile?.name || user.user_metadata?.name || '',
+                    nomeFantasia: profile?.company || user.user_metadata?.nomeFantasia || '',
+                    razaoSocial: profile?.razao_social || user.user_metadata?.razaoSocial || '',
+                    cnpj: profile?.cnpj || user.user_metadata?.cnpj || '',
+                    email: profile?.email || user.email || '',
+                    endereco: profile?.address || user.user_metadata?.endereco || '',
+                    numero: profile?.numero?.toString() || user.user_metadata?.numero || '',
+                    cidade: profile?.city || user.user_metadata?.cidade || '',
+                    estado: profile?.state || user.user_metadata?.estado || '',
+                    cep: profile?.zip_code || user.user_metadata?.cep || '',
+                    telefone: profile?.phone || user.user_metadata?.telefone || '',
+                });
+            }
+        };
+        loadProfile();
+    }, []);
+
+    const handleSaveProfile = async () => {
         setLoading(true);
-        setTimeout(() => {
-            setLoading(false);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não logado.");
+
+            // Salva na tabela user_profiles (igual Web)
+            const payload = {
+                id: user.id,
+                name: formData.nome || null,
+                company: formData.nomeFantasia || null,
+                razao_social: formData.razaoSocial || null,
+                cnpj: formData.cnpj || null,
+                address: formData.endereco || null,
+                numero: formData.numero ? Number(formData.numero) : null,
+                city: formData.cidade || null,
+                state: formData.estado || null,
+                zip_code: formData.cep || null,
+                phone: formData.telefone || null,
+                updated_at: new Date().toISOString()
+            };
+
+            const { error: dbError } = await supabase
+                .from('user_profiles')
+                .upsert(payload, { onConflict: 'id' });
+
+            if (dbError) throw dbError;
+
+            // Também podemos atualizar a auth.users para garantir sincronia se quisermos
+            await supabase.auth.updateUser({
+                data: {
+                    name: formData.nome,
+                    nomeFantasia: formData.nomeFantasia,
+                    razaoSocial: formData.razaoSocial,
+                    cnpj: formData.cnpj,
+                    endereco: formData.endereco,
+                    numero: formData.numero,
+                    cidade: formData.cidade,
+                    estado: formData.estado,
+                    cep: formData.cep,
+                    telefone: formData.telefone,
+                }
+            });
+
             Alert.alert('Sucesso', 'Informações atualizadas com sucesso!');
-        }, 1500);
+        } catch (e: any) {
+            Alert.alert('Erro', e.message || 'Falha ao atualizar o perfil.');
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const handleChangePassword = () => {
+    const handleChangePassword = async () => {
         if (passwordData.nova !== passwordData.confirmar) {
             Alert.alert('Erro', 'As senhas novas não coincidem.');
             return;
         }
+        if (passwordData.nova.length < 6) {
+            Alert.alert('Erro', 'A senha deve ter pelo menos 6 caracteres.');
+            return;
+        }
+
         setLoading(true);
-        setTimeout(() => {
-            setLoading(false);
+        try {
+            const { error } = await supabase.auth.updateUser({
+                password: passwordData.nova
+            });
+
+            if (error) throw error;
             Alert.alert('Sucesso', 'Senha alterada com segurança.');
             setPasswordData({ atual: '', nova: '', confirmar: '' });
-        }, 1500);
+        } catch (e: any) {
+            Alert.alert('Erro', e.message || 'Falha ao alterar senha.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const uploadAvatar = async (uri: string) => {
+        try {
+            setLoading(true);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não logado.");
+
+            // Pegar a extensão
+            const ext = uri.substring(uri.lastIndexOf('.') + 1) || 'jpg';
+            const unique = Math.random().toString(36).slice(2);
+            const fileName = `${user.id}/${unique}.${ext}`;
+
+            // Ler o arquivo como base64 usando expo-file-system
+            const base64 = await FileSystem.readAsStringAsync(uri, {
+                encoding: 'base64',
+            });
+
+            // Upload para o bucket "avatars" usando ArrayBuffer
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(fileName, decode(base64), {
+                    contentType: `image/${ext}`,
+                    upsert: true,
+                });
+
+            if (uploadError) throw uploadError;
+
+            // Pega a URL pública
+            const { data } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(fileName);
+
+            const displayUrl = data.publicUrl;
+
+            // Salva no user_profiles (igual na Web)
+            const { error: updateError } = await supabase
+                .from('user_profiles')
+                .upsert(
+                    { id: user.id, avatar_url: displayUrl, updated_at: new Date().toISOString() },
+                    { onConflict: 'id' }
+                );
+
+            if (updateError) throw updateError;
+
+            setAvatarUri(displayUrl);
+            Alert.alert("Sucesso", "Foto de perfil atualizada com sucesso!");
+
+        } catch (e: any) {
+            console.error(e);
+            Alert.alert("Erro", "Falha ao enviar a foto de perfil.");
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handlePickImage = () => {
@@ -78,13 +260,13 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                             return;
                         }
                         const result = await ImagePicker.launchCameraAsync({
-                            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                            mediaTypes: ['images'],
                             allowsEditing: true,
                             aspect: [1, 1],
                             quality: 0.5,
                         });
                         if (!result.canceled && result.assets[0].uri) {
-                            setAvatarUri(result.assets[0].uri);
+                            await uploadAvatar(result.assets[0].uri);
                         }
                     }
                 },
@@ -97,13 +279,13 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                             return;
                         }
                         const result = await ImagePicker.launchImageLibraryAsync({
-                            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                            mediaTypes: ['images'],
                             allowsEditing: true,
                             aspect: [1, 1],
                             quality: 0.5,
                         });
                         if (!result.canceled && result.assets[0].uri) {
-                            setAvatarUri(result.assets[0].uri);
+                            await uploadAvatar(result.assets[0].uri);
                         }
                     }
                 },
@@ -111,43 +293,6 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             ]
         );
     };
-
-    // Funções Auxiliares para UI
-    const InputLabel = ({ label }: { label: string }) => (
-        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
-    );
-
-    const CustomInput = ({ value, onChangeText, placeholder, style, secure = false }: any) => (
-        <TextInput
-            style={[
-                styles.input,
-                {
-                    backgroundColor: colors.background, // Fundo levemente contrastante
-                    borderColor: colors.border,
-                    color: colors.text
-                },
-                style
-            ]}
-            value={value}
-            onChangeText={onChangeText}
-            placeholder={placeholder}
-            placeholderTextColor={colors.textMuted}
-            secureTextEntry={secure}
-        />
-    );
-
-    const InfoRow = ({ label1, val1, label2, val2 }: any) => (
-        <View style={styles.twoCols}>
-            <View style={styles.col}>
-                <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label1}</Text>
-                <Text style={[styles.infoVal, { color: colors.text }]}>{val1 || '—'}</Text>
-            </View>
-            <View style={styles.col}>
-                <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label2}</Text>
-                <Text style={[styles.infoVal, { color: colors.text }]}>{val2 || '—'}</Text>
-            </View>
-        </View>
-    );
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -188,10 +333,10 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     </View>
 
                     <View style={styles.infoBlock}>
-                        <InfoRow label1="RAZÃO SOCIAL" val1={formData.razaoSocial} label2="CNPJ" val2={formData.cnpj} />
-                        <InfoRow label1="ENDEREÇO" val1={`${formData.endereco}, ${formData.numero} `} label2="CIDADE" val2={formData.cidade} />
-                        <InfoRow label1="ESTADO" val1={formData.estado} label2="CEP" val2={formData.cep} />
-                        <InfoRow label1="TELEFONE" val1={formData.telefone} label2="" val2="" />
+                        <InfoRow colors={colors} label1="RAZÃO SOCIAL" val1={formData.razaoSocial} label2="CNPJ" val2={formData.cnpj} />
+                        <InfoRow colors={colors} label1="ENDEREÇO" val1={`${formData.endereco}, ${formData.numero} `} label2="CIDADE" val2={formData.cidade} />
+                        <InfoRow colors={colors} label1="ESTADO" val1={formData.estado} label2="CEP" val2={formData.cep} />
+                        <InfoRow colors={colors} label1="TELEFONE" val1={formData.telefone} label2="" val2="" />
                     </View>
                 </View>
 
@@ -222,61 +367,61 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     {/* Campos Pessoais / Fantasia */}
                     <View style={styles.twoCols}>
                         <View style={styles.col}>
-                            <InputLabel label="Nome do Usuário" />
-                            <CustomInput value={formData.nome} onChangeText={(t: string) => setFormData({ ...formData, nome: t })} />
+                            <InputLabel colors={colors} label="Nome do Usuário" />
+                            <CustomInput colors={colors} value={formData.nome} onChangeText={(t: string) => setFormData({ ...formData, nome: t })} />
                         </View>
                         <View style={styles.col}>
-                            <InputLabel label="Nome Fantasia" />
-                            <CustomInput value={formData.nomeFantasia} onChangeText={(t: string) => setFormData({ ...formData, nomeFantasia: t })} />
+                            <InputLabel colors={colors} label="Nome Fantasia" />
+                            <CustomInput colors={colors} value={formData.nomeFantasia} onChangeText={(t: string) => setFormData({ ...formData, nomeFantasia: t })} />
                         </View>
                     </View>
 
                     {/* Razão Social / CNPJ */}
                     <View style={styles.twoCols}>
                         <View style={styles.col}>
-                            <InputLabel label="Razão Social" />
-                            <CustomInput value={formData.razaoSocial} onChangeText={(t: string) => setFormData({ ...formData, razaoSocial: t })} />
+                            <InputLabel colors={colors} label="Razão Social" />
+                            <CustomInput colors={colors} value={formData.razaoSocial} onChangeText={(t: string) => setFormData({ ...formData, razaoSocial: t })} />
                         </View>
                         <View style={styles.col}>
-                            <InputLabel label="CNPJ" />
-                            <CustomInput value={formData.cnpj} onChangeText={(t: string) => setFormData({ ...formData, cnpj: t })} />
+                            <InputLabel colors={colors} label="CNPJ" />
+                            <CustomInput colors={colors} value={formData.cnpj} onChangeText={(t: string) => setFormData({ ...formData, cnpj: t })} />
                         </View>
                     </View>
 
                     {/* Email */}
-                    <InputLabel label="Email" />
-                    <CustomInput value={formData.email} onChangeText={(t: string) => setFormData({ ...formData, email: t })} />
+                    <InputLabel colors={colors} label="Email" />
+                    <CustomInput colors={colors} value={formData.email} onChangeText={(t: string) => setFormData({ ...formData, email: t })} />
 
                     <Text style={[styles.sectionHeading, { color: colors.text, marginTop: 12 }]}>Endereço da Empresa</Text>
 
                     {/* Endereço / Numero / Cidade (Adaptação mobile, 2 num linha, 1 noutra pra caber) */}
-                    <InputLabel label="Endereço Completo" />
-                    <CustomInput value={formData.endereco} onChangeText={(t: string) => setFormData({ ...formData, endereco: t })} />
+                    <InputLabel colors={colors} label="Endereço Completo" />
+                    <CustomInput colors={colors} value={formData.endereco} onChangeText={(t: string) => setFormData({ ...formData, endereco: t })} />
 
                     <View style={styles.twoCols}>
                         <View style={[styles.col, { flex: 0.4 }]}>
-                            <InputLabel label="Número" />
-                            <CustomInput value={formData.numero} onChangeText={(t: string) => setFormData({ ...formData, numero: t })} />
+                            <InputLabel colors={colors} label="Número" />
+                            <CustomInput colors={colors} value={formData.numero} onChangeText={(t: string) => setFormData({ ...formData, numero: t })} />
                         </View>
                         <View style={[styles.col, { flex: 0.6 }]}>
-                            <InputLabel label="Cidade" />
-                            <CustomInput value={formData.cidade} onChangeText={(t: string) => setFormData({ ...formData, cidade: t })} />
+                            <InputLabel colors={colors} label="Cidade" />
+                            <CustomInput colors={colors} value={formData.cidade} onChangeText={(t: string) => setFormData({ ...formData, cidade: t })} />
                         </View>
                     </View>
 
                     <View style={styles.twoCols}>
                         <View style={styles.col}>
-                            <InputLabel label="Estado" />
-                            <CustomInput value={formData.estado} onChangeText={(t: string) => setFormData({ ...formData, estado: t })} />
+                            <InputLabel colors={colors} label="Estado" />
+                            <CustomInput colors={colors} value={formData.estado} onChangeText={(t: string) => setFormData({ ...formData, estado: t })} />
                         </View>
                         <View style={styles.col}>
-                            <InputLabel label="CEP" />
-                            <CustomInput value={formData.cep} onChangeText={(t: string) => setFormData({ ...formData, cep: t })} />
+                            <InputLabel colors={colors} label="CEP" />
+                            <CustomInput colors={colors} value={formData.cep} onChangeText={(t: string) => setFormData({ ...formData, cep: t })} />
                         </View>
                     </View>
 
-                    <InputLabel label="Telefone" />
-                    <CustomInput value={formData.telefone} onChangeText={(t: string) => setFormData({ ...formData, telefone: t })} />
+                    <InputLabel colors={colors} label="Telefone" />
+                    <CustomInput colors={colors} value={formData.telefone} onChangeText={(t: string) => setFormData({ ...formData, telefone: t })} />
 
                     {/* Botão Salvar */}
                     <View style={styles.actionRow}>
@@ -297,17 +442,17 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     <Text style={[styles.cardTitle, { color: colors.primary }]}>Alterar Senha</Text>
                     <Text style={[styles.cardSub, { color: colors.textMuted }]}>Mantenha sua conta segura com uma senha forte</Text>
 
-                    <InputLabel label="Senha Atual" />
-                    <CustomInput secure value={passwordData.atual} onChangeText={(t: string) => setPasswordData({ ...passwordData, atual: t })} />
+                    <InputLabel colors={colors} label="Senha Atual" />
+                    <CustomInput colors={colors} secure value={passwordData.atual} onChangeText={(t: string) => setPasswordData({ ...passwordData, atual: t })} />
 
                     <View style={styles.twoCols}>
                         <View style={styles.col}>
-                            <InputLabel label="Nova Senha" />
-                            <CustomInput secure value={passwordData.nova} onChangeText={(t: string) => setPasswordData({ ...passwordData, nova: t })} />
+                            <InputLabel colors={colors} label="Nova Senha" />
+                            <CustomInput colors={colors} secure value={passwordData.nova} onChangeText={(t: string) => setPasswordData({ ...passwordData, nova: t })} />
                         </View>
                         <View style={styles.col}>
-                            <InputLabel label="Confirmar Nova Senha" />
-                            <CustomInput secure value={passwordData.confirmar} onChangeText={(t: string) => setPasswordData({ ...passwordData, confirmar: t })} />
+                            <InputLabel colors={colors} label="Confirmar Nova Senha" />
+                            <CustomInput colors={colors} secure value={passwordData.confirmar} onChangeText={(t: string) => setPasswordData({ ...passwordData, confirmar: t })} />
                         </View>
                     </View>
 
