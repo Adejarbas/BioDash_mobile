@@ -10,8 +10,13 @@ import {
     Alert,
     Modal,
     TextInput,
-    Animated
+    Animated,
+    LayoutAnimation,
+    Platform,
+    UIManager
 } from 'react-native'
+import { MaterialCommunityIcons } from '@expo/vector-icons'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
 import { supabase } from '../lib/supabase'
@@ -24,7 +29,8 @@ import { useTheme } from '../context/ThemeContext'
 interface MetricData {
     value: number
     changePercent: string
-    increasing: boolean
+    increasing: boolean,
+    color: string
 }
 
 interface DashboardData {
@@ -48,13 +54,24 @@ function calculateChange(current: number, previous: number) {
     return ((current - previous) / previous) * 100
 }
 
-function formatMetric(current: number, previous: number): MetricData {
+function formatMetric(current: number, previous: number, key: CardKey): MetricData {
     const change = calculateChange(current, previous)
     return {
         value: current,
         changePercent: `${Math.abs(change).toFixed(1)}%`,
         increasing: change >= 0,
+        color: colorToMetric[key]
     }
+}
+
+type CardKey = 'waste' | 'energy' | 'tax' | 'efficiency'
+const DEFAULT_CARD_ORDER: CardKey[] = ['waste', 'energy', 'tax', 'efficiency']
+
+const colorToMetric: Record<CardKey, string> = {
+    'waste': '#2563eb', // Emerald (Cool Green)
+    'energy': '#d97706', // Cool Blue
+    'tax': '#e11d48', // Rose (Cooler Red)
+    'efficiency': '#10b981',  // Amber (Cooler Yellow/Orange)
 }
 
 export default function DashboardScreen() {
@@ -67,6 +84,11 @@ export default function DashboardScreen() {
     const [markerNumber, setMarkerNumber] = useState('')
     const [cepLoading, setCepLoading] = useState(false)
     const [chartData, setChartData] = useState<ChartPoint[]>([])
+
+    // States for custom card ordering
+    const [cardOrder, setCardOrder] = useState<CardKey[]>(DEFAULT_CARD_ORDER)
+    const [isOrderModalVisible, setOrderModalVisible] = useState(false)
+    const [tempOrder, setTempOrder] = useState<CardKey[]>(DEFAULT_CARD_ORDER)
 
     interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; }
     const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
@@ -99,10 +121,10 @@ export default function DashboardScreen() {
     }
 
     const [data, setData] = useState<DashboardData>({
-        energy: { value: 0, changePercent: '0%', increasing: true },
-        waste: { value: 0, changePercent: '0%', increasing: true },
-        tax: { value: 0, changePercent: '0%', increasing: true },
-        efficiency: { value: 0, changePercent: '0%', increasing: true },
+        energy: { value: 0, changePercent: '0%', increasing: true, color: colorToMetric['energy'] },
+        waste: { value: 0, changePercent: '0%', increasing: true, color: colorToMetric['waste'] },
+        tax: { value: 0, changePercent: '0%', increasing: true, color: colorToMetric['tax'] },
+        efficiency: { value: 0, changePercent: '0%', increasing: true, color: colorToMetric['efficiency'] },
     })
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
@@ -139,11 +161,82 @@ export default function DashboardScreen() {
     const { colors, theme } = useTheme()
 
     useEffect(() => {
+        if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+            UIManager.setLayoutAnimationEnabledExperimental(true);
+        }
         loadUser()
         loadDashboardData()
+        loadCardOrder()
         const interval = setInterval(loadDashboardData, 30_000)
         return () => clearInterval(interval)
     }, [])
+
+    const loadCardOrder = async () => {
+        try {
+            const saved = await AsyncStorage.getItem('@biodash_card_order')
+            if (saved) {
+                setCardOrder(JSON.parse(saved))
+            }
+        } catch (e) {
+            console.error('Error loading card order', e)
+        }
+    }
+
+    const saveCardOrder = async (newOrder: CardKey[]) => {
+        try {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+            await AsyncStorage.setItem('@biodash_card_order', JSON.stringify(newOrder))
+            setCardOrder(newOrder)
+            setOrderModalVisible(false)
+            Alert.alert("Sucesso", "Sua visão geral foi reordenada com sucesso")
+        } catch (e) {
+            console.error('Error saving order', e)
+            Alert.alert('Erro', 'Não foi possível salvar a ordenação.')
+        }
+    }
+
+    const resetCardOrder = async () => {
+        try {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+            await AsyncStorage.removeItem('@biodash_card_order')
+            setCardOrder(DEFAULT_CARD_ORDER)
+            setTempOrder(DEFAULT_CARD_ORDER)
+            setOrderModalVisible(false)
+            Alert.alert("Sucesso", "Ordenamento restaurado ao padrão")
+        } catch (e) {
+            console.error('Error resetting order', e)
+        }
+    }
+
+    const moveCard = (index: number, direction: 'up' | 'down') => {
+        if (direction === 'up' && index === 0) return
+        if (direction === 'down' && index === tempOrder.length - 1) return
+
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.spring)
+        const newOrder = [...tempOrder]
+        const swapIndex = direction === 'up' ? index - 1 : index + 1
+        const temp = newOrder[index]
+        newOrder[index] = newOrder[swapIndex]
+        newOrder[swapIndex] = temp
+        setTempOrder(newOrder)
+        // Omit alert here to avoid interrupting the flow, or use a toast if available.
+        // Alert.alert("Sucesso", "Card reordenado com sucesso")
+    }
+
+    const openOrderModal = () => {
+        setTempOrder([...cardOrder])
+        setOrderModalVisible(true)
+    }
+
+    const getCardTitle = (key: CardKey) => {
+        switch (key) {
+            case 'waste': return 'Resíduos'
+            case 'energy': return 'Energia'
+            case 'tax': return 'Impostos'
+            case 'efficiency': return 'Eficiência'
+            default: return ''
+        }
+    }
 
     const loadUser = async () => {
         const { data: { user } } = await supabase.auth.getUser()
@@ -195,10 +288,10 @@ export default function DashboardScreen() {
             }
 
             setData({
-                energy: formatMetric(curEnergy, prevEnergy),
-                waste: formatMetric(curWaste, prevWaste),
-                tax: formatMetric(curTax, prevTax),
-                efficiency: formatMetric(curEfficiency, prevEfficiency),
+                energy: formatMetric(curEnergy, prevEnergy, 'energy'),
+                waste: formatMetric(curWaste, prevWaste, 'waste'),
+                tax: formatMetric(curTax, prevTax, 'tax'),
+                efficiency: formatMetric(curEfficiency, prevEfficiency, 'efficiency'),
             });
 
             // --- BUSCA HISTÓRICO DE 12 MESES PARA O GRÁFICO ---
@@ -394,20 +487,31 @@ export default function DashboardScreen() {
                         <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
                         <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Visão geral do biodigestor.</Text>
                     </View>
-                    <TouchableOpacity
-                        style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                        onPress={() => setMetricsModalVisible(true)}
-                    >
-                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✏️ Atualizar</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                            style={{ backgroundColor: colors.cardBackground, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border }}
+                            onPress={openOrderModal}
+                        >
+                            <Text style={{ color: colors.text, fontSize: 12, fontWeight: 'bold' }}>⚙️ Ordenar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                            onPress={() => setMetricsModalVisible(true)}
+                        >
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✏️ Atualizar</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
-                {/* Cards em formato 2x2 */}
+                {/* Cards dinâmicos e ordenáveis */}
                 <View style={styles.grid}>
-                    <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
-                    <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} emoji="⚡" color="#eab308" bgColor="#fef9c3" />
-                    <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} emoji="💰" color="#3b82f6" bgColor="#dbeafe" />
-                    <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} emoji="🌿" color="#16a34a" bgColor="#bbf7d0" />
+                    {cardOrder.map(key => {
+                        if (key === 'waste') return <StatCard key="waste" title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
+                        if (key === 'energy') return <StatCard key="energy" title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} emoji="⚡" color="#eab308" bgColor="#fef9c3" />
+                        if (key === 'tax') return <StatCard key="tax" title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} emoji="💰" color="#3b82f6" bgColor="#dbeafe" />
+                        if (key === 'efficiency') return <StatCard key="efficiency" title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} emoji="🌿" color="#16a34a" bgColor="#bbf7d0" />
+                        return null
+                    })}
                 </View>
 
                 {/* Visão Geral (Múltiplas Métricas) */}
@@ -687,6 +791,61 @@ export default function DashboardScreen() {
             </Modal>
 
             <TelemetryWidget onAddMaintenance={(m) => setMaintenances(prev => [m, ...prev])} />
+
+            {/* Modal de Ordenação dos Cards */}
+            <Modal visible={isOrderModalVisible} animationType="slide" transparent={true} onRequestClose={() => setOrderModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Ordenar Visão Geral</Text>
+                            <TouchableOpacity onPress={() => setOrderModalVisible(false)}>
+                                <Text style={styles.modalClose}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Altere a ordem de exibição dos painéis principais.</Text>
+
+                        <View style={{ gap: 8, marginBottom: 24 }}>
+                            {tempOrder.map((key, index) => {
+                                let emoji = '';
+                                if (key === 'waste') emoji = '💧';
+                                if (key === 'energy') emoji = '⚡';
+                                if (key === 'tax') emoji = '💰';
+                                if (key === 'efficiency') emoji = '🌿';
+                                
+                                return (
+                                <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: data[key].color, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                                    <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {emoji} {getCardTitle(key)}</Text>
+                                    <View style={{ flexDirection: 'row', gap: 4 }}>
+                                        <TouchableOpacity
+                                            style={{ backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                            onPress={() => moveCard(index, 'up')}
+                                            disabled={index === 0}
+                                        >
+                                            <MaterialCommunityIcons name="chevron-up" size={20} color={index === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={{ backgroundColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                            onPress={() => moveCard(index, 'down')}
+                                            disabled={index === tempOrder.length - 1}
+                                        >
+                                            <MaterialCommunityIcons name="chevron-down" size={20} color={index === tempOrder.length - 1 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            )})}
+                        </View>
+
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' }]} onPress={resetCardOrder}>
+                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Restaurar Padrão</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0 }]} onPress={() => saveCardOrder(tempOrder)}>
+                                <Text style={styles.primaryButtonText}>Salvar Ordem</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     )
 }
@@ -1250,5 +1409,15 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 15,
         fontWeight: '700',
+    },
+    cancelBtn: {
+        borderWidth: 1,
+        paddingVertical: 14,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    cancelText: {
+        fontWeight: '600',
+        fontSize: 15,
     },
 });
