@@ -179,17 +179,29 @@ export default function DashboardScreen() {
         }
     }
 
-    const saveCardOrder = async (newOrder: CardKey[]) => {
+    const saveCardOrder = async (oldOrder: CardKey[], newOrder: CardKey[]) => {
         try {
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
             await AsyncStorage.setItem('@biodash_card_order', JSON.stringify(newOrder))
             setCardOrder(newOrder)
             setOrderModalVisible(false)
-            Alert.alert("Sucesso", "Sua visão geral foi reordenada com sucesso")
+            const changed = changedOrder(oldOrder, newOrder)
+            if (changed) {
+                Alert.alert("Sucesso", "Sua visão geral foi reordenada com sucesso")
+            }
         } catch (e) {
             console.error('Error saving order', e)
             Alert.alert('Erro', 'Não foi possível salvar a ordenação.')
         }
+    }
+
+    const changedOrder = (oldOrder: CardKey[], newOrder: CardKey[]) => {
+        for (let i=0; i < oldOrder.length; i++) {
+            if (oldOrder[i] !== newOrder[i]) {
+                return true
+            }
+        }
+        return false
     }
 
     const resetCardOrder = async () => {
@@ -836,7 +848,7 @@ export default function DashboardScreen() {
                             <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' }]} onPress={resetCardOrder}>
                                 <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Restaurar Padrão</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0 }]} onPress={() => saveCardOrder(tempOrder)}>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0 }]} onPress={() => saveCardOrder(cardOrder, tempOrder)}>
                                 <Text style={styles.primaryButtonText}>Salvar Ordem</Text>
                             </TouchableOpacity>
                         </View>
