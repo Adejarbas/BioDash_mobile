@@ -1,11 +1,40 @@
 {
   "name": "biodash-mobile",
-  "version": "0.1.0",
-  "description": "BioDash Mobile Project",
-  "main": "index.js",
+  "version": "1.0.0",
+  "main": "index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
   },
-  "author": "Daniel Adejarbas",
-  "license": "ISC"
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/datetimepicker": "^8.4.4",
+    "@supabase/supabase-js": "^2.98.0",
+    "base64-arraybuffer": "^1.0.2",
+    "expo": "~54.0.0",
+    "expo-asset": "~12.0.12",
+    "expo-file-system": "~19.0.21",
+    "expo-image-picker": "~17.0.10",
+    "expo-print": "~15.0.8",
+    "expo-secure-store": "~15.0.8",
+    "expo-sharing": "~14.0.8",
+    "expo-status-bar": "~3.0.9",
+    "expo-template-blank": "^54.0.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.0",
+    "react-native-maps": "^1.18.0",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-url-polyfill": "^3.0.0",
+    "react-native-view-shot": "^4.0.3",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "~18.3.12",
+    "typescript": "^5.3.3"
+  },
+  "private": true
 }
