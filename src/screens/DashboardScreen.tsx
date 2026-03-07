@@ -161,9 +161,6 @@ export default function DashboardScreen() {
     const { colors, theme } = useTheme()
 
     useEffect(() => {
-        if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-            UIManager.setLayoutAnimationEnabledExperimental(true);
-        }
         loadUser()
         loadDashboardData()
         loadCardOrder()
