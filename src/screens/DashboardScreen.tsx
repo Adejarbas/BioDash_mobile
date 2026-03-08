@@ -21,7 +21,7 @@ import { supabase } from '../lib/supabase'
 import MapComponent from '../components/MapComponent'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
-import * as FileSystem from 'expo-file-system'
+import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme } from '../context/ThemeContext'
 
 interface MetricData {
@@ -69,11 +69,14 @@ export default function DashboardScreen() {
     const [markerCep, setMarkerCep] = useState('')
     const [markerAddress, setMarkerAddress] = useState('')
     const [markerNumber, setMarkerNumber] = useState('')
+    const [markerComplement, setMarkerComplement] = useState('')
+    const [markerEditingId, setMarkerEditingId] = useState<string | null>(null)
     const [cepLoading, setCepLoading] = useState(false)
     const [chartData, setChartData] = useState<ChartPoint[]>([])
 
-    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; }
+    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; rawAddress?: any; }
     const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
+    const [mapFocusLocation, setMapFocusLocation] = useState<{ latitude: number, longitude: number } | undefined>(undefined);
 
     interface MaintenanceItem { id: string; title: string; date: string; status: string; raw: any; }
     const [maintenances, setMaintenances] = useState<MaintenanceItem[]>([]);
@@ -123,6 +126,94 @@ export default function DashboardScreen() {
         ]);
     }
 
+    const fetchMapMarkers = async (focusId?: string) => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) return
+
+            const { data, error } = await supabase
+                .from('biodigestor_maps')
+                .select('id, address')
+                .eq('user_id', user.id)
+                .order('id', { ascending: false })
+
+            if (error || !data) return
+
+            const ms: MarkerData[] = []
+            for (const row of data) {
+                const addr = row.address as any
+                const fullAddress = addr?.full_address || JSON.stringify(row.address)
+
+                if (addr?.lat && addr?.lon) {
+                    const marker = {
+                        id: row.id.toString(),
+                        latitude: parseFloat(addr.lat),
+                        longitude: parseFloat(addr.lon),
+                        title: addr?.nome || fullAddress.split(',')[0],
+                        description: fullAddress,
+                        rawAddress: addr
+                    };
+                    ms.push(marker);
+
+                    if (focusId && focusId === marker.id) {
+                        setMapFocusLocation({ latitude: marker.latitude, longitude: marker.longitude });
+                    }
+                }
+            }
+            setMapMarkers(ms)
+        } catch (e) {
+            console.error("Erro ao buscar marcadores:", e)
+        }
+    }
+
+    const handleMarkerDragEnd = async (id: string, coord: { latitude: number, longitude: number }) => {
+        const m = mapMarkers.find(x => x.id === id);
+        if (!m || !m.rawAddress) return;
+        const newAddr = { ...m.rawAddress, lat: coord.latitude, lon: coord.longitude };
+        const { error } = await supabase.from('biodigestor_maps').update({ address: newAddr }).eq('id', parseInt(id));
+        if (!error) {
+            setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, latitude: coord.latitude, longitude: coord.longitude } : x));
+        }
+    };
+
+    const handleDeleteMarker = (id: string, name: string) => {
+        Alert.alert("Excluir Marcador", `Deseja remover "${name}"?`, [
+            { text: "Cancelar", style: "cancel" },
+            {
+                text: "Excluir", style: "destructive", onPress: async () => {
+                    const { error } = await supabase.from('biodigestor_maps').delete().eq('id', parseInt(id));
+                    if (error) Alert.alert("Erro", "Não foi possível excluir");
+                    else fetchMapMarkers();
+                }
+            }
+        ]);
+    };
+
+    const handleEditMarker = (m: any) => {
+        setMarkerEditingId(m.id);
+        const addr = m.rawAddress || {};
+
+        // Nome: prioriza o que está no JSON 'nome', senão usa o título do marcador
+        setMarkerName(addr.nome || m.title || '');
+
+        // Se temos dados granulares, usamos eles
+        if (addr.logradouro || addr.cep) {
+            setMarkerCep(addr.cep || '');
+            setMarkerAddress(addr.logradouro || '');
+            setMarkerNumber(addr.numero || '');
+            setMarkerComplement(addr.complemento || '');
+        } else {
+            // Fallback para dados antigos que só tinham full_address
+            const full = addr.full_address || m.description || '';
+            setMarkerAddress(full.split(',')[0] || '');
+            setMarkerCep('');
+            setMarkerNumber('');
+            setMarkerComplement('');
+        }
+
+        setMapModalVisible(true);
+    };
+
     const handleFetchCep = async () => {
         const cleanCep = markerCep.replace(/\D/g, '');
         if (cleanCep.length !== 8) {
@@ -168,6 +259,16 @@ export default function DashboardScreen() {
     const [referenceDate, setReferenceDate] = useState<string>('')
     const [selectedChartIndex, setSelectedChartIndex] = useState<number | null>(null)
     const [alertsEnabled, setAlertsEnabled] = useState(true)
+
+    // Estados para Exportação
+    const [exportModalVisible, setExportModalVisible] = useState(false);
+    const [pendingExportType, setPendingExportType] = useState<"pdf" | "excel" | "csv" | null>(null);
+    const [exportPeriodType, setExportPeriodType] = useState<"12months" | "specific">("12months");
+    const [exportMonth, setExportMonth] = useState<string>(new Date().getMonth().toString());
+    const [exportYear, setExportYear] = useState<string>(new Date().getFullYear().toString());
+    const [exportMonthPickerVisible, setExportMonthPickerVisible] = useState(false);
+    const [exportYearPickerVisible, setExportYearPickerVisible] = useState(false);
+    const [exportLoading, setExportLoading] = useState(false);
 
     // Efeito para buscar dados existentes ao mudar mês/ano no modal
     useEffect(() => {
@@ -317,6 +418,7 @@ export default function DashboardScreen() {
     }
 
     const loadDashboardData = async () => {
+        fetchMapMarkers()
         try {
             const { data: { user: currentUser } } = await supabase.auth.getUser()
             if (!currentUser) return;
@@ -499,14 +601,72 @@ export default function DashboardScreen() {
         ];
     };
 
-    const handleExportPDF = async () => {
+    const fetchExportData = async () => {
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return [];
+
+            let query = supabase
+                .from("biodigester_indicators")
+                .select("*")
+                .eq("user_id", user.id)
+                .order("measured_at", { ascending: true });
+
+            if (exportPeriodType === "12months") {
+                const since = new Date();
+                since.setMonth(since.getMonth() - 12);
+                query = query.gte("measured_at", since.toISOString());
+            } else {
+                const startDate = new Date(parseInt(exportYear), parseInt(exportMonth), 1).toISOString();
+                const endDate = new Date(parseInt(exportYear), parseInt(exportMonth) + 1, 0, 23, 59, 59).toISOString();
+                query = query.gte("measured_at", startDate).lte("measured_at", endDate);
+            }
+
+            const { data, error } = await query;
+            if (error) throw error;
+            return data || [];
+        } catch (err) {
+            console.error("Erro ao buscar dados para exportação:", err);
+            return [];
+        }
+    };
+
+    const processExportMetrics = (data: any[]) => {
+        if (data.length === 0) {
+            return [
+                ["Métrica", "Valor Total", "Variação"],
+                ["Sem dados no período", "-", "-"],
+            ];
+        }
+
+        const totals = data.reduce((acc, curr) => ({
+            waste: acc.waste + Number(curr.waste_processed || 0),
+            energy: acc.energy + Number(curr.energy_generated || 0),
+            tax: acc.tax + Number(curr.tax_savings || 0),
+        }), { waste: 0, energy: 0, tax: 0 });
+
+        return [
+            ["Resíduos Processados (kg)", totals.waste.toFixed(2), "-"],
+            ["Energia Gerada (kWh)", totals.energy.toFixed(2), "-"],
+            ["Imposto Abatido (BRL)", `R$ ${totals.tax.toFixed(2)}`, "-"],
+            ["Total de Registros", data.length.toString(), "-"],
+        ];
+    };
+
+    const handleExportPDF = async () => {
+        setExportLoading(true);
+        try {
+            const data = await fetchExportData();
+            const metrics = processExportMetrics(data);
+            const periodLabel = exportPeriodType === "12months"
+                ? "Últimos 12 Meses"
+                : `${months[parseInt(exportMonth)].label} / ${exportYear}`;
+
             let chartImageURI = '';
             if (chartRef.current && chartRef.current.capture) {
                 chartImageURI = await chartRef.current.capture();
             }
 
-            const metrics = getMetricsArray();
             const rowsHTML = metrics.map(m => `
                 <tr style="text-align: center; border-bottom: 1px solid #ddd;">
                     <td style="padding: 12px; font-weight: bold; color: #1f2937;">${m[0]}</td>
@@ -515,78 +675,114 @@ export default function DashboardScreen() {
                 </tr>
             `).join('');
 
-            const chartHTML = chartImageURI ? `<div style="margin-top: 20px; text-align: center;"><img src="data:image/png;base64,${chartImageURI}" style="width: 100%; max-width: 500px; border-radius: 8px;" /></div>` : '';
-
             const html = `
             <html>
-                <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #333;">
-                    <div style="border-bottom: 3px solid #16a34a; padding-bottom: 20px; margin-bottom: 30px;">
-                        <h1 style="color: #16a34a; margin: 0; font-size: 28px;">Relatório Analítico - BioDash</h1>
-                        <p style="color: #666; margin-top: 8px;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
-                        <p style="color: #666; margin-top: 4px;">Empresa: ${userEmail}</p>
+                <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 0; margin: 0; color: #333;">
+                    <div style="background-color: #16a34a; padding: 40px 30px; color: white;">
+                        <h1 style="margin: 0; font-size: 28px;">BioDash - Relatório Analítico</h1>
+                        <p style="margin-top: 8px; opacity: 0.9;">Período: ${periodLabel}</p>
+                        <p style="margin-top: 4px; opacity: 0.8; font-size: 12px;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
                     </div>
                     
-                    <h2 style="color: #1f2937; margin-bottom: 20px;">Resumo de Desempenho</h2>
-                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
-                        <tr style="background-color: #f0fdf4; border-bottom: 2px solid #16a34a;">
-                            <th style="padding: 12px; text-align: center; color: #16a34a;">Métrica</th>
-                            <th style="padding: 12px; text-align: center; color: #16a34a;">Valor Total</th>
-                            <th style="padding: 12px; text-align: center; color: #16a34a;">Variação</th>
-                        </tr>
-                        ${rowsHTML}
-                    </table>
+                    <div style="padding: 30px;">
+                        <h2 style="color: #1f2937; margin-bottom: 20px;">Resumo de Desempenho</h2>
+                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                            <thead>
+                                <tr style="background-color: #f0fdf4;">
+                                    <th style="padding: 15px; text-align: center; color: #16a34a; font-weight: 800; border-bottom: 2px solid #16a34a;">Métrica</th>
+                                    <th style="padding: 15px; text-align: center; color: #16a34a; font-weight: 800; border-bottom: 2px solid #16a34a;">Valor Total</th>
+                                    <th style="padding: 15px; text-align: center; color: #16a34a; font-weight: 800; border-bottom: 2px solid #16a34a;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rowsHTML}
+                            </tbody>
+                        </table>
 
-                    ${chartImageURI ? `<h2 style="color: #1f2937; margin-bottom: 10px;">Gráfico de Tendências</h2>${chartHTML}` : ''}
+                        ${chartImageURI ? `
+                            <h2 style="color: #1f2937; margin-bottom: 20px;">Tendências do Período</h2>
+                            <div style="text-align: center; background: #fbfbfb; padding: 20px; border-radius: 12px; border: 1px solid #eee;">
+                                <img src="data:image/png;base64,${chartImageURI}" style="width: 100%; max-width: 600px;" />
+                            </div>
+                        ` : ''}
 
-                    <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
-                        <h3 style="margin-top: 0; color: #1e40af;">Nota sobre Gráficos</h3>
-                        <p style="color: #475569; margin-bottom: 0;">Para visualizar relatórios mais detalhados, acesse a versão Web.</p>
+                        <div style="margin-top: 40px; padding: 20px; background-color: #f8fafc; border-radius: 12px; border-left: 5px solid #16a34a;">
+                            <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.6;">
+                                Este relatório contém dados consolidados das unidades de biodigestão monitoradas via BioDash. 
+                                Para análises granulares, exportações por unidade ou ferramentas de BI, utilize a plataforma BioDash Web.
+                            </p>
+                        </div>
+                        <p style="margin-top: 60px; font-size: 11px; color: #94a3b8; text-align: center;">BioDash Intelligence Systems © ${new Date().getFullYear()}</p>
                     </div>
-
-                    <p style="margin-top: 60px; font-size: 11px; color: #94a3b8; text-align: center;">Documento oficial e interno - Gerado via BioDash Mobile System</p>
                 </body>
             </html>
             `;
-            const { uri } = await Print.printToFileAsync({ html, width: 612, height: 792 }); // Carta Portrait
+            const { uri } = await Print.printToFileAsync({ html, width: 612, height: 792 });
             await Sharing.shareAsync(uri, { dialogTitle: 'Compartilhar Relatório PDF' });
-        } catch (error) {
-            Alert.alert('Erro', 'Não foi possível gerar o PDF: ' + String(error));
+        } catch (error: any) {
+            console.error("Erro PDF:", error);
+            Alert.alert('Erro', 'Não foi possível gerar o PDF: ' + (error.message || String(error)));
+        } finally {
+            setExportLoading(false);
         }
     }
 
     const handleExportExcel = async () => {
+        setExportLoading(true);
         try {
-            const metrics = getMetricsArray();
-            let csvContent = "Metrica;Valor Total;Variacao\n";
+            const data = await fetchExportData();
+            const metrics = processExportMetrics(data);
+            const periodLabel = exportPeriodType === "12months"
+                ? "Últimos 12 Meses"
+                : `${months[parseInt(exportMonth)].label} / ${exportYear}`;
+
+            let csvContent = "\uFEFF" + `Relatorio BioDash - ${periodLabel}\n`;
+            csvContent += `Gerado em: ${new Date().toLocaleString('pt-BR')}\n\n`;
+            csvContent += "Metrica;Valor Total\n";
             metrics.forEach(row => {
-                csvContent += `${row[0]};${row[1].replace('R$ ', '')};${row[2]}\n`;
+                csvContent += `${row[0]};${row[1].replace('R$ ', '').replace('kg', '').replace('kWh', '')}\n`;
             });
 
+            const fileName = `biodash_${periodLabel.replace(/[\s\/]/g, '_')}.csv`;
             // @ts-ignore
-            const fileUri = FileSystem.cacheDirectory + `biodash_relatorio_${Date.now()}.csv`;
-            // @ts-ignore
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar Excel', mimeType: 'text/comma-separated-values' });
-        } catch (error) {
-            Alert.alert('Erro', 'Não foi possível gerar a planilha Excel');
+            const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+            const fileUri = cacheDir + fileName;
+            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
+            await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar Planilha', mimeType: 'text/comma-separated-values' });
+        } catch (error: any) {
+            console.error("Erro Excel:", error);
+            Alert.alert('Erro', 'Não foi possível gerar a planilha: ' + (error.message || String(error)));
+        } finally {
+            setExportLoading(false);
         }
     }
 
     const handleExportCSV = async () => {
+        setExportLoading(true);
         try {
-            const metrics = getMetricsArray();
-            let csvContent = "Metrica,Valor Total,Variacao\n";
+            const data = await fetchExportData();
+            const metrics = processExportMetrics(data);
+            const periodLabel = exportPeriodType === "12months"
+                ? "Últimos 12 Meses"
+                : `${months[parseInt(exportMonth)].label} / ${exportYear}`;
+
+            // Add BOM for better compatibility with Excel and change delimiter to semicolon
+            let csvContent = "\uFEFF" + "Metrica;Valor Total\n";
             metrics.forEach(row => {
-                csvContent += `${row[0]},${row[1].replace('R$ ', '')},${row[2]}\n`;
+                csvContent += `${row[0]};${row[1].replace('R$ ', '').replace('kg', '').replace('kWh', '')}\n`;
             });
 
+            const fileName = `biodash_raw_${periodLabel.replace(/[\s\/]/g, '_')}.csv`;
             // @ts-ignore
-            const fileUri = FileSystem.cacheDirectory + `biodash_relatorio_${Date.now()}.csv`;
-            // @ts-ignore
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar Planilha CSV', mimeType: 'text/csv' });
-        } catch (error) {
-            Alert.alert('Erro', 'Não foi possível gerar a planilha CSV');
+            const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+            const fileUri = cacheDir + fileName;
+            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
+            await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar CSV', mimeType: 'text/csv' });
+        } catch (error: any) {
+            console.error("Erro CSV:", error);
+            Alert.alert('Erro', 'Não foi possível gerar o CSV: ' + (error.message || String(error)));
+        } finally {
+            setExportLoading(false);
         }
     }
 
@@ -741,15 +937,33 @@ export default function DashboardScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Exportar Relatórios</Text>
                 <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gere métricas oficiais para análise externa.</Text>
                 <View style={[styles.gridExport, { marginBottom: 12 }]}>
-                    <TouchableOpacity style={[styles.exportCard, { borderColor: '#fca5a5', backgroundColor: '#fef2f2' }]} onPress={handleExportPDF}>
+                    <TouchableOpacity
+                        style={[styles.exportCard, { borderColor: '#fca5a5', backgroundColor: '#fef2f2' }]}
+                        onPress={() => {
+                            setPendingExportType("pdf");
+                            setExportModalVisible(true);
+                        }}
+                    >
                         <Text style={styles.exportIcon}>📄</Text>
                         <Text style={[styles.exportText, { color: '#dc2626' }]}>Gerar PDF</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.exportCard, { borderColor: '#86efac', backgroundColor: '#f0fdf4' }]} onPress={handleExportExcel}>
+                    <TouchableOpacity
+                        style={[styles.exportCard, { borderColor: '#86efac', backgroundColor: '#f0fdf4' }]}
+                        onPress={() => {
+                            setPendingExportType("excel");
+                            setExportModalVisible(true);
+                        }}
+                    >
                         <Text style={styles.exportIcon}>📗</Text>
                         <Text style={[styles.exportText, { color: '#16a34a' }]}>Gerar Excel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.exportCard, { borderColor: '#93c5fd', backgroundColor: '#eff6ff' }]} onPress={handleExportCSV}>
+                    <TouchableOpacity
+                        style={[styles.exportCard, { borderColor: '#93c5fd', backgroundColor: '#eff6ff' }]}
+                        onPress={() => {
+                            setPendingExportType("csv");
+                            setExportModalVisible(true);
+                        }}
+                    >
                         <Text style={styles.exportIcon}>📊</Text>
                         <Text style={[styles.exportText, { color: '#2563eb' }]}>Gerar CSV</Text>
                     </TouchableOpacity>
@@ -761,7 +975,18 @@ export default function DashboardScreen() {
                         <Text style={[styles.sectionTitle, { color: colors.text }]}>Localização da Empresa</Text>
                         <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Unidade ativa do biodigestor.</Text>
                     </View>
-                    <TouchableOpacity style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 16 }} onPress={() => setMapModalVisible(true)}>
+                    <TouchableOpacity
+                        style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 16 }}
+                        onPress={() => {
+                            setMarkerEditingId(null);
+                            setMarkerName('');
+                            setMarkerCep('');
+                            setMarkerAddress('');
+                            setMarkerNumber('');
+                            setMarkerComplement('');
+                            setMapModalVisible(true);
+                        }}
+                    >
                         <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
                     </TouchableOpacity>
                 </View>
@@ -828,71 +1053,151 @@ export default function DashboardScreen() {
                             </View>
 
 
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Complemento</Text>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                        placeholder="Opcional (Ex: Km 42)"
+                                        placeholderTextColor={colors.textMuted}
+                                        value={markerComplement}
+                                        onChangeText={setMarkerComplement}
+                                    />
+                                </View>
+                            </View>
+
                             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
-                                <TouchableOpacity onPress={() => setMapModalVisible(false)} style={{ padding: 10, paddingHorizontal: 16 }}>
+                                <TouchableOpacity onPress={() => { setMapModalVisible(false); setMarkerEditingId(null); }} style={{ padding: 10, paddingHorizontal: 16 }}>
                                     <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Cancelar</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     onPress={async () => {
-                                        setMapModalVisible(false);
-
                                         let lat: number | undefined, lon: number | undefined;
                                         try {
+                                            setCepLoading(true);
                                             const headers = {
                                                 'User-Agent': 'BioDashMobileApp/1.0',
                                                 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
                                             };
 
-                                            const cleanAddress = markerAddress.replace(/[-/]/g, ',');
-                                            const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
-                                            let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
-                                            let geoData = await geoRes.json();
+                                            // Geocodificação (apenas se for novo marcador ou se o endereço mudou)
+                                            if (!markerEditingId) {
+                                                const cleanAddress = markerAddress.replace(/[-/]/g, ',');
+                                                const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
+                                                let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
+                                                let geoData = await geoRes.json();
 
-                                            if (geoData && geoData.length > 0) {
-                                                lat = parseFloat(geoData[0].lat);
-                                                lon = parseFloat(geoData[0].lon);
-                                            } else if (markerCep) {
-                                                geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
-                                                geoData = await geoRes.json();
                                                 if (geoData && geoData.length > 0) {
                                                     lat = parseFloat(geoData[0].lat);
                                                     lon = parseFloat(geoData[0].lon);
+                                                } else if (markerCep) {
+                                                    geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
+                                                    geoData = await geoRes.json();
+                                                    if (geoData && geoData.length > 0) {
+                                                        lat = parseFloat(geoData[0].lat);
+                                                        lon = parseFloat(geoData[0].lon);
+                                                    }
                                                 }
                                             }
 
-                                            if (typeof lat === 'number' && typeof lon === 'number') {
-                                                setMapMarkers(prev => [...prev, {
-                                                    id: Math.random().toString(),
-                                                    latitude: lat as number,
-                                                    longitude: lon as number,
-                                                    title: markerName || 'Nova Instalação',
-                                                    description: markerAddress
-                                                }]);
-                                                setTimeout(() => Alert.alert("Sucesso", `Marcador "${markerName}" adicionado ao mapa!`), 500);
-                                            } else {
-                                                setTimeout(() => Alert.alert("Aviso", `Coordenadas não encontradas parar este endereço.\nTente preencher sem formatações ou verifique a conexão.`), 500);
-                                            }
-                                        } catch (e) {
-                                            setTimeout(() => Alert.alert("Erro de Conexão", "Não foi possível buscar as coordenadas geográficas."), 500);
-                                        }
+                                            const { data: { user } } = await supabase.auth.getUser();
+                                            if (user) {
+                                                const addressFull = `${markerAddress}${markerNumber ? ', ' + markerNumber : ''}${markerComplement ? ' - ' + markerComplement : ''}, ${markerCep}, Brasil`.replace(/'/g, "");
+                                                const addressJson = {
+                                                    nome: markerName,
+                                                    full_address: addressFull,
+                                                    lat: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : undefined),
+                                                    lon: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : undefined),
+                                                    cep: markerCep,
+                                                    logradouro: markerAddress,
+                                                    numero: markerNumber,
+                                                    complemento: markerComplement
+                                                };
 
-                                        setMarkerName('');
-                                        setMarkerCep('');
-                                        setMarkerAddress('');
-                                        setMarkerNumber('');
+                                                if (markerEditingId) {
+                                                    await supabase.from('biodigestor_maps').update({ address: addressJson }).eq('id', parseInt(markerEditingId));
+                                                    await fetchMapMarkers(markerEditingId);
+                                                } else {
+                                                    const { data: newRows } = await supabase.from('biodigestor_maps').insert([{ user_id: user.id, address: addressJson }]).select('id');
+                                                    if (newRows && newRows[0]) {
+                                                        await fetchMapMarkers(newRows[0].id.toString());
+                                                    } else {
+                                                        await fetchMapMarkers();
+                                                    }
+                                                }
+
+                                                setMapModalVisible(false);
+                                                setMarkerEditingId(null);
+                                                setMarkerName(''); setMarkerCep(''); setMarkerAddress(''); setMarkerNumber(''); setMarkerComplement('');
+                                                setTimeout(() => Alert.alert("Sucesso", "Localização salva!"), 500);
+                                            }
+                                        } catch (e: any) {
+                                            Alert.alert("Erro", "Falha ao salvar: " + e.message);
+                                        } finally {
+                                            setCepLoading(false);
+                                        }
                                     }}
                                     style={{ backgroundColor: '#16a34a', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 }}
                                 >
-                                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Salvar no Mapa</Text>
+                                    {cepLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{markerEditingId ? 'Atualizar Dados' : 'Salvar no Mapa'}</Text>}
                                 </TouchableOpacity>
                             </View>
                         </View>
                     </View>
                 </Modal>
 
-                <View style={[styles.card, { padding: 0, overflow: 'hidden', height: 220, backgroundColor: colors.cardBackground }]}>
-                    <MapComponent markers={mapMarkers} />
+                {/* Lista de Locais Acima do Mapa (Novo Requisito) */}
+                {/* Lista de Locais (Refinada - Flex Wrap) */}
+                {mapMarkers.length > 0 && (
+                    <View style={{ marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                        {mapMarkers.map((m) => (
+                            <TouchableOpacity
+                                key={m.id}
+                                onPress={() => {
+                                    setMapFocusLocation({ latitude: m.latitude, longitude: m.longitude });
+                                }}
+                                style={{
+                                    backgroundColor: colors.cardBackground,
+                                    paddingLeft: 14,
+                                    paddingRight: 8,
+                                    paddingVertical: 8,
+                                    borderRadius: 20,
+                                    borderWidth: 1,
+                                    borderColor: colors.border,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    elevation: 2,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 1 },
+                                    shadowOpacity: 0.1,
+                                    shadowRadius: 2
+                                }}
+                            >
+                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#16a34a', marginRight: 8 }} />
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text, marginRight: 8 }}>{m.title}</Text>
+
+                                <TouchableOpacity onPress={() => handleEditMarker(m)} style={{ padding: 6, backgroundColor: '#3b82f6', borderRadius: 10, marginRight: 6 }}>
+                                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>✎</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity onPress={() => handleDeleteMarker(m.id, m.title)} style={{ padding: 6, backgroundColor: '#dc2626', borderRadius: 10 }}>
+                                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>✕</Text>
+                                </TouchableOpacity>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+
+                <View style={[styles.card, { padding: 0, overflow: 'hidden', height: 250, backgroundColor: colors.cardBackground, marginBottom: 10 }]}>
+                    <MapComponent
+                        markers={mapMarkers}
+                        focusLocation={mapFocusLocation}
+                        onMarkerDragEnd={handleMarkerDragEnd}
+                    />
                 </View>
+                <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 4 }}>
+                    Dica: Segure e arraste o marcador para ajustar a posição manual.
+                </Text>
 
                 <View style={styles.footer}>
                     <Text style={styles.footerText}></Text>
@@ -1151,6 +1456,188 @@ export default function DashboardScreen() {
                     </TouchableOpacity>
                 </TouchableOpacity>
             </Modal >
+
+            {/* Modal de Configuração de Exportação */}
+            <Modal
+                visible={exportModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setExportModalVisible(false)}
+            >
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Configurar Relatório</Text>
+                            <TouchableOpacity onPress={() => setExportModalVisible(false)}>
+                                <Text style={styles.modalClose}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 20 }]}>
+                            Escolha o período para o arquivo {pendingExportType?.toUpperCase()}.
+                        </Text>
+
+                        <View style={{ gap: 12, marginBottom: 24 }}>
+                            <TouchableOpacity
+                                onPress={() => setExportPeriodType("12months")}
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    padding: 16,
+                                    borderRadius: 12,
+                                    borderWidth: 1,
+                                    borderColor: exportPeriodType === "12months" ? colors.primary : colors.border,
+                                    backgroundColor: exportPeriodType === "12months" ? colors.primary + '10' : 'transparent'
+                                }}
+                            >
+                                <View style={{
+                                    width: 20,
+                                    height: 20,
+                                    borderRadius: 10,
+                                    borderWidth: 2,
+                                    borderColor: exportPeriodType === "12months" ? colors.primary : colors.textMuted,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginRight: 12
+                                }}>
+                                    {exportPeriodType === "12months" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary }} />}
+                                </View>
+                                <View>
+                                    <Text style={{ fontWeight: 'bold', color: colors.text }}>Últimos 12 Meses</Text>
+                                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Resumo consolidado do último ano</Text>
+                                </View>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                onPress={() => setExportPeriodType("specific")}
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    padding: 16,
+                                    borderRadius: 12,
+                                    borderWidth: 1,
+                                    borderColor: exportPeriodType === "specific" ? colors.primary : colors.border,
+                                    backgroundColor: exportPeriodType === "specific" ? colors.primary + '10' : 'transparent'
+                                }}
+                            >
+                                <View style={{
+                                    width: 20,
+                                    height: 20,
+                                    borderRadius: 10,
+                                    borderWidth: 2,
+                                    borderColor: exportPeriodType === "specific" ? colors.primary : colors.textMuted,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginRight: 12
+                                }}>
+                                    {exportPeriodType === "specific" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary }} />}
+                                </View>
+                                <View>
+                                    <Text style={{ fontWeight: 'bold', color: colors.text }}>Mês Específico</Text>
+                                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Dados de um período único</Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
+
+                        {exportPeriodType === "specific" && (
+                            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
+                                <View style={{ flex: 1, position: 'relative' }}>
+                                    <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Mês</Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setExportMonthPickerVisible(!exportMonthPickerVisible);
+                                            setExportYearPickerVisible(false);
+                                        }}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            padding: 12,
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between'
+                                        }}
+                                    >
+                                        <Text style={{ color: colors.text }}>{months[parseInt(exportMonth)].label}</Text>
+                                        <Text style={{ color: colors.textMuted }}>▼</Text>
+                                    </TouchableOpacity>
+
+                                    {exportMonthPickerVisible && (
+                                        <View style={{
+                                            position: 'absolute', bottom: '100%', left: 0, width: 200,
+                                            backgroundColor: colors.cardBackground, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+                                            padding: 8, flexDirection: 'row', flexWrap: 'wrap', zIndex: 1000, elevation: 10
+                                        }}>
+                                            {months.map((m) => (
+                                                <TouchableOpacity
+                                                    key={m.value}
+                                                    onPress={() => { setExportMonth(m.value); setExportMonthPickerVisible(false); }}
+                                                    style={{ width: '33.3%', paddingVertical: 10, alignItems: 'center' }}
+                                                >
+                                                    <Text style={{ color: colors.text, fontSize: 12, fontWeight: exportMonth === m.value ? 'bold' : 'normal' }}>{m.label.substring(0, 3)}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+
+                                <View style={{ width: 100, position: 'relative' }}>
+                                    <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Ano</Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setExportYearPickerVisible(!exportYearPickerVisible);
+                                            setExportMonthPickerVisible(false);
+                                        }}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            padding: 12,
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between'
+                                        }}
+                                    >
+                                        <Text style={{ color: colors.text }}>{exportYear}</Text>
+                                        <Text style={{ color: colors.textMuted }}>▼</Text>
+                                    </TouchableOpacity>
+
+                                    {exportYearPickerVisible && (
+                                        <View style={{
+                                            position: 'absolute', bottom: '100%', right: 0, width: 120,
+                                            backgroundColor: colors.cardBackground, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+                                            padding: 8, zIndex: 1000, elevation: 10
+                                        }}>
+                                            {years.map((y) => (
+                                                <TouchableOpacity
+                                                    key={y}
+                                                    onPress={() => { setExportYear(y); setExportYearPickerVisible(false); }}
+                                                    style={{ paddingVertical: 10, alignItems: 'center' }}
+                                                >
+                                                    <Text style={{ color: colors.text, fontSize: 12, fontWeight: exportYear === y ? 'bold' : 'normal' }}>{y}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+                            </View>
+                        )}
+
+                        <TouchableOpacity
+                            onPress={() => {
+                                setExportModalVisible(false);
+                                if (pendingExportType === "pdf") handleExportPDF();
+                                else if (pendingExportType === "excel") handleExportExcel();
+                                else if (pendingExportType === "csv") handleExportCSV();
+                            }}
+                            disabled={exportLoading}
+                            style={[styles.primaryButton, { backgroundColor: colors.primary, flexDirection: 'row', gap: 10, marginBottom: 30 }]}
+                        >
+                            {exportLoading && <ActivityIndicator size="small" color="#fff" />}
+                            <Text style={styles.primaryButtonText}>{exportLoading ? "Processando..." : "Gerar Arquivo"}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             <TelemetryWidget
                 ref={telemetryRef}
