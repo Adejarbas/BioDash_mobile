@@ -10,8 +10,11 @@ import {
     Alert,
     Modal,
     TextInput,
-    Animated
+    Animated,
+    Dimensions,
+    FlatList
 } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
 import { supabase } from '../lib/supabase'
@@ -52,7 +55,7 @@ function formatMetric(current: number, previous: number): MetricData {
     const change = calculateChange(current, previous)
     return {
         value: current,
-        changePercent: `${Math.abs(change).toFixed(1)}%`,
+        changePercent: `${Math.abs(change).toFixed(1)}% `,
         increasing: change >= 0,
     }
 }
@@ -60,6 +63,7 @@ function formatMetric(current: number, previous: number): MetricData {
 export default function DashboardScreen() {
     const insets = useSafeAreaInsets()
     const chartRef = useRef<ViewShot>(null)
+    const telemetryRef = useRef<any>(null)
     const [isMapModalVisible, setMapModalVisible] = useState(false)
     const [markerName, setMarkerName] = useState('')
     const [markerCep, setMarkerCep] = useState('')
@@ -71,10 +75,53 @@ export default function DashboardScreen() {
     interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; }
     const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
 
-    const [maintenances, setMaintenances] = useState([
-        { id: '1', title: 'Troca de Filtro H2S', date: 'Amanhã, 14:00', status: 'pending' },
-        { id: '2', title: 'Inspeção de Válvulas', date: '12/Março, 09:00', status: 'done' }
-    ]);
+    interface MaintenanceItem { id: string; title: string; date: string; status: string; raw: any; }
+    const [maintenances, setMaintenances] = useState<MaintenanceItem[]>([]);
+    const [actionModalVisible, setActionModalVisible] = useState(false);
+    const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceItem | null>(null);
+
+    const handleMarkAsDone = async (id: string) => {
+        try {
+            console.log("Marking as done:", id);
+            const { error } = await supabase
+                .from('maintenance_schedules')
+                .update({ status: 'done' })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            console.log("Update success");
+            Alert.alert("Sucesso", "Manutenção concluída!", [{ text: "OK", onPress: () => loadDashboardData() }]);
+        } catch (err: any) {
+            Alert.alert("Erro", "Não foi possível atualizar: " + err.message);
+            console.error(err);
+        }
+    }
+
+    const handleDelete = async (id: string) => {
+        Alert.alert("Confirmar", "Tem certeza que deseja apagar essa manutenção?", [
+            { text: "Cancelar", style: "cancel" },
+            {
+                text: "Apagar", style: "destructive", onPress: async () => {
+                    try {
+                        console.log("Deleting maintenance:", id);
+                        const { error } = await supabase
+                            .from('maintenance_schedules')
+                            .delete()
+                            .eq('id', id);
+
+                        if (error) throw error;
+
+                        console.log("Delete success");
+                        Alert.alert("Sucesso", "Manutenção apagada com sucesso!", [{ text: "OK", onPress: () => loadDashboardData() }]);
+                    } catch (err: any) {
+                        Alert.alert("Erro", "Não foi possível apagar: " + err.message);
+                        console.error(err);
+                    }
+                }
+            }
+        ]);
+    }
 
     const handleFetchCep = async () => {
         const cleanCep = markerCep.replace(/\D/g, '');
@@ -112,38 +159,157 @@ export default function DashboardScreen() {
     const [manualMetrics, setManualMetrics] = useState({
         waste: '120.0',
         energy: '92.5',
-        tax: '750'
+        tax: '750',
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
     })
+    const [monthPickerVisible, setMonthPickerVisible] = useState(false)
+    const [yearPickerVisible, setYearPickerVisible] = useState(false)
+    const [referenceDate, setReferenceDate] = useState<string>('')
+    const [selectedChartIndex, setSelectedChartIndex] = useState<number | null>(null)
+    const [alertsEnabled, setAlertsEnabled] = useState(true)
+
+    // Efeito para buscar dados existentes ao mudar mês/ano no modal
+    useEffect(() => {
+        if (metricsModalVisible) {
+            fetchMonthlyMetrics(manualMetrics.month, manualMetrics.year);
+        }
+    }, [manualMetrics.month, manualMetrics.year, metricsModalVisible]);
+
+    const fetchMonthlyMetrics = async (m: string, y: string) => {
+        try {
+            const monthIdx = parseInt(m);
+            const yearVal = parseInt(y);
+            const startDate = new Date(yearVal, monthIdx, 1).toISOString();
+            const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59).toISOString();
+
+            const { data, error } = await supabase
+                .from('biodigester_indicators')
+                .select('*')
+                .gte('measured_at', startDate)
+                .lte('measured_at', endDate)
+                .limit(1)
+                .single();
+
+            if (data && !error) {
+                setManualMetrics(prev => ({
+                    ...prev,
+                    waste: data.waste_processed?.toString() || "",
+                    energy: data.energy_generated?.toString() || "",
+                    tax: data.tax_savings?.toString() || ""
+                }));
+            } else {
+                setManualMetrics(prev => ({ ...prev, waste: "", energy: "", tax: "" }));
+            }
+        } catch (e) {
+            setManualMetrics(prev => ({ ...prev, waste: "", energy: "", tax: "" }));
+        }
+    };
 
     const handleSaveManualMetrics = async () => {
         try {
-            const { error } = await supabase.from('biodigester_indicators').insert([{
-                waste_processed: parseFloat(manualMetrics.waste) || 0,
-                energy_generated: parseFloat(manualMetrics.energy) || 0,
-                tax_savings: parseFloat(manualMetrics.tax) || 0,
-                // Eficiência será calculada nas views, salvamos as primárias
-            }])
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) throw new Error("Não autenticado")
 
-            if (error) throw error
+            const monthIdx = parseInt(manualMetrics.month)
+            const yearVal = parseInt(manualMetrics.year)
+
+            // Define a data como o dia 15 do mês para evitar problemas de fuso e centralizar no gráfico
+            const measuredDate = new Date(yearVal, monthIdx, 15)
+            const isoDate = measuredDate.toISOString()
+
+            // Verifica se já existe registro para este mês/ano
+            const startDate = new Date(yearVal, monthIdx, 1).toISOString()
+            const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59).toISOString()
+
+            const { data: existing } = await supabase
+                .from('biodigester_indicators')
+                .select('id')
+                .eq('user_id', user.id)
+                .gte('measured_at', startDate)
+                .lte('measured_at', endDate)
+                .limit(1)
+                .single()
+
+            let saveError
+            if (existing) {
+                // UPDATE
+                const { error } = await supabase
+                    .from('biodigester_indicators')
+                    .update({
+                        waste_processed: parseFloat(manualMetrics.waste) || 0,
+                        energy_generated: parseFloat(manualMetrics.energy) || 0,
+                        tax_savings: parseFloat(manualMetrics.tax) || 0,
+                        measured_at: isoDate
+                    })
+                    .eq('id', existing.id)
+                saveError = error
+            } else {
+                // INSERT
+                const { error } = await supabase
+                    .from('biodigester_indicators')
+                    .insert([{
+                        user_id: user.id,
+                        waste_processed: parseFloat(manualMetrics.waste) || 0,
+                        energy_generated: parseFloat(manualMetrics.energy) || 0,
+                        tax_savings: parseFloat(manualMetrics.tax) || 0,
+                        measured_at: isoDate
+                    }])
+                saveError = error
+            }
+
+            if (saveError) throw saveError
+
+            // Persiste o último mês/ano editado
+            await AsyncStorage.setItem('@biodash_last_edited', JSON.stringify({
+                month: monthIdx,
+                year: yearVal
+            }));
 
             setMetricsModalVisible(false)
-            Alert.alert("Sucesso", "Métricas registradas com sucesso no Banco de Dados!")
-
-            // Recarrega o dashboard para exibir os novos totais gerados
+            Alert.alert("Sucesso", `Métricas de ${months[monthIdx].label}/${yearVal} salvas!`)
             loadDashboardData()
         } catch (err) {
             console.error('Save metrics error:', err)
             Alert.alert("Erro", "Não foi possível salvar as métricas no sistema.")
         }
     }
+
+    const months = [
+        { value: "0", label: "Janeiro" },
+        { value: "1", label: "Fevereiro" },
+        { value: "2", label: "Março" },
+        { value: "3", label: "Abril" },
+        { value: "4", label: "Maio" },
+        { value: "5", label: "Junho" },
+        { value: "6", label: "Julho" },
+        { value: "7", label: "Agosto" },
+        { value: "8", label: "Setembro" },
+        { value: "9", label: "Outubro" },
+        { value: "10", label: "Novembro" },
+        { value: "11", label: "Dezembro" },
+    ]
+    const years = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() - 2 + i).toString())
     const { colors, theme } = useTheme()
 
     useEffect(() => {
         loadUser()
         loadDashboardData()
+        loadPreferences()
         const interval = setInterval(loadDashboardData, 30_000)
         return () => clearInterval(interval)
     }, [])
+
+    const loadPreferences = async () => {
+        try {
+            const saved = await AsyncStorage.getItem('@biodash_alerts_enabled');
+            if (saved !== null) {
+                setAlertsEnabled(JSON.parse(saved));
+            }
+        } catch (e) {
+            console.error('Error loading preferences:', e);
+        }
+    }
 
     const loadUser = async () => {
         const { data: { user } } = await supabase.auth.getUser()
@@ -152,29 +318,49 @@ export default function DashboardScreen() {
 
     const loadDashboardData = async () => {
         try {
+            const { data: { user: currentUser } } = await supabase.auth.getUser()
+            if (!currentUser) return;
             const IDEAL_RATIO = 0.8;
 
             // --- BUSCA OS 2 ÚLTIMOS REGISTROS PARA OS CARDS DO TOPO ---
+            // Prioridade: Mês atual > Último registro
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+
             let query = supabase
                 .from("biodigester_indicators")
                 .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
-                .order("measured_at", { ascending: false, nullsFirst: false })
-                .limit(2);
+                .order("measured_at", { ascending: false, nullsFirst: false });
 
-            let { data: rows, error } = await query;
-
-            if (error || !rows || rows.length === 0) {
-                const fallback = await supabase
-                    .from("biodigester_indicators")
-                    .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
-                    .order("created_at", { ascending: false, nullsFirst: false })
-                    .limit(2);
-                rows = fallback.data;
-                if (fallback.error) throw fallback.error;
+            if (currentUser) {
+                query = query.eq('user_id', currentUser.id);
             }
 
-            const current = rows?.[0];
-            const previous = rows?.[1];
+            let { data: allRows, error } = await query;
+
+            if (error) throw error;
+
+            // Tenta recuperar qual foi o último mês editado
+            const lastEditedStr = await AsyncStorage.getItem('@biodash_last_edited');
+            let lastEdited = lastEditedStr ? JSON.parse(lastEditedStr) : null;
+
+            let current = undefined;
+            if (lastEdited && allRows) {
+                current = allRows.find(r => {
+                    const d = new Date(r.measured_at);
+                    return d.getMonth() === lastEdited.month && d.getFullYear() === lastEdited.year;
+                });
+            }
+
+            // Se não achou o editado, ou não tem, usa o mais recente por data de medição
+            if (!current && allRows && allRows.length > 0) {
+                current = allRows[0];
+            }
+
+            // Pega o registro anterior para comparação (o próximo na lista descendente)
+            const currentIndex = allRows?.indexOf(current!) ?? -1;
+            const previous = (currentIndex !== -1 && allRows) ? allRows[currentIndex + 1] : undefined;
 
             const curEnergy = Number(current?.energy_generated ?? 0);
             const curWaste = Number(current?.waste_processed ?? 0);
@@ -201,6 +387,13 @@ export default function DashboardScreen() {
                 efficiency: formatMetric(curEfficiency, prevEfficiency),
             });
 
+            if (current?.measured_at) {
+                const refDate = new Date(current.measured_at);
+                setReferenceDate(`${months[refDate.getMonth()].label} de ${refDate.getFullYear()}`);
+            } else {
+                setReferenceDate('');
+            }
+
             // --- BUSCA HISTÓRICO DE 12 MESES PARA O GRÁFICO ---
             const since = new Date();
             since.setMonth(since.getMonth() - 12);
@@ -208,6 +401,7 @@ export default function DashboardScreen() {
             let chartQuery = supabase
                 .from("biodigester_indicators")
                 .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
+                .eq('user_id', currentUser.id)
                 .gte("measured_at", since.toISOString())
                 .order("measured_at", { ascending: true });
 
@@ -217,6 +411,7 @@ export default function DashboardScreen() {
                 const fb = await supabase
                     .from("biodigester_indicators")
                     .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
+                    .eq('user_id', currentUser.id)
                     .gte("created_at", since.toISOString())
                     .order("created_at", { ascending: true });
                 if (fb.error) throw fb.error;
@@ -255,6 +450,32 @@ export default function DashboardScreen() {
                 }));
 
             setChartData(compiledChartData);
+
+            // --- BUSCA MANUTENÇÕES DO SUPABASE ---
+            if (currentUser) {
+                const { data: maintData } = await supabase
+                    .from('maintenance_schedules')
+                    .select('*')
+                    .eq('user_id', currentUser.id)
+                    .order('created_at', { ascending: false })
+                    .limit(5);
+
+                if (maintData && maintData.length > 0) {
+                    const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
+                    setMaintenances(maintData.map((m: any) => {
+                        const prLevel = ptMap[m.priority] || m.priority.split(' - ')[0];
+                        return {
+                            id: m.id,
+                            title: `[${prLevel}] ${m.name}`,
+                            date: new Date(m.scheduled_date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+                            status: m.status,
+                            raw: m
+                        };
+                    }));
+                } else {
+                    setMaintenances([]);
+                }
+            }
 
         } catch (err) {
             console.error('Error loading dashboard data:', err)
@@ -402,6 +623,14 @@ export default function DashboardScreen() {
                     </TouchableOpacity>
                 </View>
 
+                {referenceDate ? (
+                    <View style={{ marginBottom: 12, paddingHorizontal: 4 }}>
+                        <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>
+                            📅 Dados referentes a {referenceDate}
+                        </Text>
+                    </View>
+                ) : null}
+
                 {/* Cards em formato 2x2 */}
                 <View style={styles.grid}>
                     <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
@@ -434,12 +663,16 @@ export default function DashboardScreen() {
                         <View style={styles.legendRow}>
                             <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#eab308' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Energia</Text></View>
                             <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#22c55e' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Resíduos</Text></View>
-                            <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#3b82f6' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Impos.</Text></View>
+                            <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#3b82f6' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Impostos</Text></View>
                         </View>
                     )}
 
                     <ViewShot ref={chartRef} options={{ format: "jpg", quality: 0.9, result: 'base64' }}>
-                        <View style={[styles.chartMockup, { backgroundColor: colors.cardBackground }]}>
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => setSelectedChartIndex(null)}
+                            style={[styles.chartMockup, { backgroundColor: colors.cardBackground }]}
+                        >
                             {chartData.length === 0 ? (
                                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', height: 180 }}>
                                     <Text style={{ color: colors.textMuted }}>Nenhum dado registrado para o gráfico.</Text>
@@ -459,22 +692,37 @@ export default function DashboardScreen() {
                                             month={point.name}
                                             vals={[hEnergy, hWaste, hTax]}
                                             selectedTab={selectedTab}
-                                            isHighlight={index === chartData.length - 1}
+                                            isHighlight={index === selectedChartIndex}
+                                            isAnySelected={selectedChartIndex !== null}
+                                            onPress={() => setSelectedChartIndex(selectedChartIndex === index ? null : index)}
+                                            details={{
+                                                waste: point.wasteProcessed,
+                                                energy: point.energyGenerated,
+                                                tax: point.taxDeduction
+                                            }}
                                         />
                                     );
                                 })
                             )}
-                        </View>
+                        </TouchableOpacity>
                     </ViewShot>
                 </View>
 
                 {/* Manutenção Agendada */}
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Manutenção Agendada</Text>
-                <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Próximas revisões operacionais do sistema.</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 8 }]}>Manutenções Agendadas</Text>
+                <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
                 <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
                     {maintenances.map((item, index) => (
                         <React.Fragment key={item.id}>
-                            <View style={styles.maintenanceItem}>
+                            <TouchableOpacity
+                                style={styles.maintenanceItem}
+                                activeOpacity={0.7}
+                                onLongPress={() => {
+                                    setSelectedMaintenance(item);
+                                    setActionModalVisible(true);
+                                }}
+                                delayLongPress={250}
+                            >
                                 <View style={[styles.maintenanceDot, item.status === 'done' && { backgroundColor: '#16a34a' }]} />
                                 <View style={{ flex: 1 }}>
                                     <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
@@ -483,7 +731,7 @@ export default function DashboardScreen() {
                                 <Text style={item.status === 'pending' ? styles.statusPending : [styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>
                                     {item.status === 'pending' ? 'Pendente' : 'Concluído'}
                                 </Text>
-                            </View>
+                            </TouchableOpacity>
                             {index < maintenances.length - 1 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
                         </React.Fragment>
                     ))}
@@ -647,10 +895,10 @@ export default function DashboardScreen() {
                 </View>
 
                 <View style={styles.footer}>
-                    <Text style={styles.footerText}>BioDash Mobile System</Text>
+                    <Text style={styles.footerText}></Text>
                 </View>
                 <View style={{ height: 120 }} />
-            </ScrollView>
+            </ScrollView >
 
             {/* Modal de Atualização Manual de Métricas */}
             <Modal visible={metricsModalVisible} animationType="slide" transparent={true} onRequestClose={() => setMetricsModalVisible(false)}>
@@ -662,7 +910,161 @@ export default function DashboardScreen() {
                                 <Text style={styles.modalClose}>✕</Text>
                             </TouchableOpacity>
                         </View>
-                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores atuais para simular os sensores.</Text>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores consolidados para o período selecionado.</Text>
+
+                        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, zIndex: 10 }}>
+                            <View style={{ flex: 1, position: 'relative' }}>
+                                <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Mês</Text>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setMonthPickerVisible(!monthPickerVisible);
+                                        setYearPickerVisible(false);
+                                    }}
+                                    style={{
+                                        backgroundColor: colors.background,
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 10,
+                                        borderRadius: 10,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                        flexDirection: 'row',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center'
+                                    }}
+                                >
+                                    <Text style={{ color: colors.text }}>{months[parseInt(manualMetrics.month)].label}</Text>
+                                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>{monthPickerVisible ? '▲' : '▼'}</Text>
+                                </TouchableOpacity>
+
+                                {monthPickerVisible && (
+                                    <View
+                                        style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            left: 0,
+                                            width: 260,
+                                            backgroundColor: colors.cardBackground,
+                                            borderRadius: 12,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            marginTop: 6,
+                                            padding: 10,
+                                            flexDirection: 'row',
+                                            flexWrap: 'wrap',
+                                            zIndex: 9999,
+                                            elevation: 25,
+                                            shadowColor: '#000',
+                                            shadowOpacity: 0.3,
+                                            shadowRadius: 10,
+                                        }}
+                                    >
+                                        {months.map((m) => (
+                                            <TouchableOpacity
+                                                key={m.value}
+                                                activeOpacity={0.7}
+                                                onPress={() => {
+                                                    setManualMetrics({ ...manualMetrics, month: m.value });
+                                                    setMonthPickerVisible(false);
+                                                }}
+                                                style={{
+                                                    width: '33.3%',
+                                                    paddingVertical: 12,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    backgroundColor: manualMetrics.month === m.value ? colors.primary : 'transparent',
+                                                    borderRadius: 8,
+                                                }}
+                                            >
+                                                <Text style={{
+                                                    color: manualMetrics.month === m.value ? '#fff' : colors.text,
+                                                    fontWeight: '700',
+                                                    fontSize: 12
+                                                }}>
+                                                    {m.label.substring(0, 3)}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+
+                            <View style={{ width: 100, position: 'relative' }}>
+                                <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Ano</Text>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setYearPickerVisible(!yearPickerVisible);
+                                        setMonthPickerVisible(false);
+                                    }}
+                                    style={{
+                                        backgroundColor: colors.background,
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 10,
+                                        borderRadius: 10,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                        flexDirection: 'row',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center'
+                                    }}
+                                >
+                                    <Text style={{ color: colors.text }}>{manualMetrics.year}</Text>
+                                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>{yearPickerVisible ? '▲' : '▼'}</Text>
+                                </TouchableOpacity>
+
+                                {yearPickerVisible && (
+                                    <View
+                                        style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            right: 0,
+                                            width: 180,
+                                            backgroundColor: colors.cardBackground,
+                                            borderRadius: 12,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            marginTop: 6,
+                                            padding: 10,
+                                            flexDirection: 'row',
+                                            flexWrap: 'wrap',
+                                            justifyContent: 'center',
+                                            zIndex: 9999,
+                                            elevation: 25,
+                                            shadowColor: '#000',
+                                            shadowOpacity: 0.3,
+                                            shadowRadius: 10,
+                                        }}
+                                    >
+                                        {years.map((y) => (
+                                            <TouchableOpacity
+                                                key={y}
+                                                activeOpacity={0.7}
+                                                onPress={() => {
+                                                    setManualMetrics({ ...manualMetrics, year: y });
+                                                    setYearPickerVisible(false);
+                                                }}
+                                                style={{
+                                                    paddingHorizontal: 14,
+                                                    paddingVertical: 10,
+                                                    margin: 4,
+                                                    backgroundColor: manualMetrics.year === y ? colors.primary : colors.background,
+                                                    borderRadius: 8,
+                                                    borderWidth: 1,
+                                                    borderColor: colors.border
+                                                }}
+                                            >
+                                                <Text style={{
+                                                    color: manualMetrics.year === y ? '#fff' : colors.text,
+                                                    fontWeight: '700',
+                                                    fontSize: 13
+                                                }}>
+                                                    {y}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+                        </View>
 
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
                             <View style={[styles.formGroup, { width: '48%' }]}>
@@ -684,45 +1086,206 @@ export default function DashboardScreen() {
                         </TouchableOpacity>
                     </View>
                 </View>
-            </Modal>
+            </Modal >
 
-            <TelemetryWidget onAddMaintenance={(m) => setMaintenances(prev => [m, ...prev])} />
-        </View>
+            {/* Action Menu (Long Press) */}
+            <Modal
+                visible={actionModalVisible}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => setActionModalVisible(false)}
+            >
+                <TouchableOpacity
+                    style={[styles.modalOverlay, { justifyContent: 'flex-end', paddingBottom: 30 }]}
+                    activeOpacity={1}
+                    onPress={() => setActionModalVisible(false)}
+                >
+                    <View style={[{ backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16, overflow: 'hidden', alignSelf: 'center' }]} onStartShouldSetResponder={() => true}>
+                        <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}>
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }}>Opções de Manutenção</Text>
+                            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>{selectedMaintenance?.title}</Text>
+                        </View>
+
+                        {selectedMaintenance?.status === 'pending' && (
+                            <TouchableOpacity
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                                onPress={() => {
+                                    setActionModalVisible(false);
+                                    if (selectedMaintenance) {
+                                        telemetryRef.current?.edit(selectedMaintenance.raw);
+                                    }
+                                }}
+                            >
+                                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>✏️ Editar Informações</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {selectedMaintenance?.status === 'pending' && (
+                            <TouchableOpacity
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                                onPress={() => {
+                                    setActionModalVisible(false);
+                                    if (selectedMaintenance) handleMarkAsDone(selectedMaintenance.id);
+                                }}
+                            >
+                                <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: 'bold' }}>✅ Marcar como Concluída</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                            style={{ paddingVertical: 18, alignItems: 'center' }}
+                            onPress={() => {
+                                setActionModalVisible(false);
+                                if (selectedMaintenance) handleDelete(selectedMaintenance.id);
+                            }}
+                        >
+                            <Text style={{ fontSize: 16, color: '#dc2626', fontWeight: 'bold' }}>🗑️ Apagar Agenda</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <TouchableOpacity
+                        style={{ backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 12, alignSelf: 'center' }}
+                        onPress={() => setActionModalVisible(false)}
+                    >
+                        <Text style={{ fontSize: 16, color: '#3b82f6', fontWeight: 'bold' }}>Cancelar</Text>
+                    </TouchableOpacity>
+                </TouchableOpacity>
+            </Modal >
+
+            <TelemetryWidget
+                ref={telemetryRef}
+                onAddMaintenance={() => loadDashboardData()}
+                alertsEnabled={alertsEnabled}
+            />
+        </View >
     )
 }
 
-function TelemetryWidget({ onAddMaintenance }: { onAddMaintenance?: (m: any) => void }) {
+const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, alertsEnabled: boolean }>(({ onAddMaintenance, alertsEnabled }, ref) => {
     const { colors } = useTheme();
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [temp, setTemp] = useState(35);
     const [pressure, setPressure] = useState(1.5);
     const [ph, setPh] = useState(7.0);
     const [timeElapsed, setTimeElapsed] = useState(0);
     const [expanded, setExpanded] = useState(false);
     const [maintenanceModalVisible, setMaintenanceModalVisible] = useState(false);
+    const [maintenanceStep, setMaintenanceStep] = useState(1);
+    const [alertSent, setAlertSent] = useState(false);
     const [maintenanceForm, setMaintenanceForm] = useState({
-        equipment: '',
+        name: '',
+        email: '',
+        phone: '',
+        priority: 'Média - Problema técnico',
         description: '',
-        urgency: 'Alta'
+        date: '',
+        time: ''
     });
 
-    const handleScheduleMaintenance = () => {
-        if (!maintenanceForm.equipment) {
-            Alert.alert("Erro", "Por favor, preencha o nome do equipamento.");
+    React.useImperativeHandle(ref, () => ({
+        edit: (item: any) => {
+            setEditingId(item.id);
+            const dt = new Date(item.scheduled_date);
+            setMaintenanceForm({
+                name: item.name || '',
+                email: item.email || '',
+                phone: item.phone || '',
+                priority: item.priority || 'Média - Problema técnico',
+                description: item.description || '',
+                date: dt.toLocaleDateString('pt-BR'),
+                time: dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+            });
+            setMaintenanceModalVisible(true);
+            setMaintenanceStep(1);
+        },
+        open: () => {
+            setEditingId(null);
+            setMaintenanceForm({
+                name: '',
+                email: '',
+                phone: '',
+                priority: 'Média - Problema técnico',
+                description: '',
+                date: '',
+                time: ''
+            });
+            setMaintenanceStep(1);
+            setExpanded(true);
+        }
+    }));
+
+    const handleScheduleMaintenance = async () => {
+        if (!maintenanceForm.name || !maintenanceForm.date || !maintenanceForm.time) {
+            Alert.alert("Erro", "Por favor, preencha nome, data (DD/MM/AAAA) e hora (HH:MM).");
             return;
         }
 
-        if (onAddMaintenance) {
-            onAddMaintenance({
-                id: Math.random().toString(),
-                title: maintenanceForm.equipment,
-                date: 'Agora (Novo)',
-                status: 'pending'
-            });
+        let dtIso = '';
+        try {
+            const parts = maintenanceForm.date.split('/');
+            if (parts.length === 3) {
+                const [dd, mm, yyyy] = parts;
+                dtIso = new Date(`${yyyy}-${mm}-${dd}T${maintenanceForm.time}:00`).toISOString();
+            } else {
+                throw new Error("Formato inválido");
+            }
+        } catch {
+            Alert.alert("Erro", "Formato de data inválido. Use DD/MM/AAAA.");
+            return;
         }
 
-        Alert.alert("Sucesso", "Manutenção agendada e registrada com sucesso!");
-        setMaintenanceModalVisible(false);
-        setMaintenanceForm({ equipment: '', description: '', urgency: 'Alta' });
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                if (editingId) {
+                    const { error } = await supabase.from('maintenance_schedules').update({
+                        name: maintenanceForm.name,
+                        email: maintenanceForm.email,
+                        phone: maintenanceForm.phone,
+                        priority: maintenanceForm.priority,
+                        description: maintenanceForm.description,
+                        scheduled_date: dtIso
+                    }).eq('id', editingId);
+
+                    if (error) {
+                        Alert.alert("Erro ao atualizar", "Erro no banco: " + error.message);
+                        return;
+                    }
+                } else {
+                    const { error } = await supabase.from('maintenance_schedules').insert([{
+                        user_id: user.id,
+                        name: maintenanceForm.name,
+                        email: maintenanceForm.email,
+                        phone: maintenanceForm.phone,
+                        priority: maintenanceForm.priority,
+                        description: maintenanceForm.description,
+                        scheduled_date: dtIso,
+                        status: 'pending'
+                    }]);
+
+                    if (error) {
+                        Alert.alert("Erro ao salvar", "Erro no banco: " + error.message);
+                        return;
+                    }
+                }
+            } else {
+                Alert.alert("Aviso", "Usuário não autenticado. Faça login novamente.");
+                return;
+            }
+
+            if (onAddMaintenance) {
+                onAddMaintenance(); // Trigger fetch
+            }
+
+            Alert.alert("Sucesso", editingId ? "Manutenção atualizada!" : "Manutenção agendada com sucesso!");
+            setMaintenanceModalVisible(false);
+            setEditingId(null);
+            setMaintenanceStep(1);
+            setMaintenanceForm({ name: '', email: '', phone: '', priority: 'Média - Problema técnico', description: '', date: '', time: '' });
+        } catch (error) {
+            console.log(error);
+            Alert.alert("Erro", "Não foi possível agendar a manutenção. Tente novamente.");
+        }
     }
 
     // Animação para o ícone M/Alerta
@@ -747,9 +1310,26 @@ function TelemetryWidget({ onAddMaintenance }: { onAddMaintenance?: (m: any) => 
     // Força abrir automaticamente se tiver temperatura crítica
     useEffect(() => {
         if (temp > 40) {
-            setExpanded(true);
+            if (alertsEnabled) {
+                setExpanded(true);
+            }
+            if (!alertSent) {
+                setAlertSent(true);
+                supabase.auth.getUser().then(({ data: { user } }) => {
+                    if (user) {
+                        supabase.from('sensor_alerts').insert([{
+                            user_id: user.id,
+                            sensor_type: 'Temperatura',
+                            message: `Temperatura atingiu ${temp.toFixed(1)}°C - Risco Crítico`,
+                            alert_level: 'critico'
+                        }]).then();
+                    }
+                });
+            }
+        } else if (temp < 38) {
+            setAlertSent(false);
         }
-    }, [temp]);
+    }, [temp, alertSent]);
 
     // Ativa animação
     useEffect(() => {
@@ -824,59 +1404,167 @@ function TelemetryWidget({ onAddMaintenance }: { onAddMaintenance?: (m: any) => 
                             </TouchableOpacity>
                         </View>
 
-                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>
-                            Preencha os dados para registrar a solicitação de manutenção imediata.
-                        </Text>
-
-                        <View style={styles.formGroup}>
-                            <Text style={[styles.label, { color: colors.text }]}>Equipamento / Setor</Text>
-                            <TextInput
-                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-                                value={maintenanceForm.equipment}
-                                onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, equipment: t })}
-                                placeholder="Ex: Caldeira Principal"
-                                placeholderTextColor={colors.textMuted}
-                            />
-                        </View>
-
-                        <View style={styles.formGroup}>
-                            <Text style={[styles.label, { color: colors.text }]}>Descrição do Problema</Text>
-                            <TextInput
-                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 80 }]}
-                                value={maintenanceForm.description}
-                                onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, description: t })}
-                                placeholder="Descreva o que está ocorrendo..."
-                                placeholderTextColor={colors.textMuted}
-                                multiline
-                                textAlignVertical="top"
-                            />
-                        </View>
-
-                        <View style={styles.formGroup}>
-                            <Text style={[styles.label, { color: colors.text }]}>Urgência</Text>
-                            <View style={{ flexDirection: 'row', gap: 8 }}>
-                                {['Baixa', 'Média', 'Alta'].map((level) => (
-                                    <TouchableOpacity
-                                        key={level}
-                                        style={[
-                                            styles.urgencyBtn,
-                                            { borderColor: colors.border },
-                                            maintenanceForm.urgency === level && { backgroundColor: level === 'Alta' ? '#fee2e2' : colors.primaryLight, borderColor: level === 'Alta' ? '#ef4444' : colors.primary }
-                                        ]}
-                                        onPress={() => setMaintenanceForm({ ...maintenanceForm, urgency: level })}
-                                    >
-                                        <Text style={[
-                                            { fontSize: 12, color: colors.text },
-                                            maintenanceForm.urgency === level && { color: level === 'Alta' ? '#b91c1c' : colors.primary, fontWeight: 'bold' }
-                                        ]}>{level}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                        <ScrollView style={{ width: '100%', maxHeight: 450 }} showsVerticalScrollIndicator={false}>
+                            {/* Indicador de passos */}
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 10 }}>
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 1 ? '#16a34a' : '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 1 ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 'bold' }}>1</Text></View>
+                                <View style={{ flex: 1, height: 3, backgroundColor: maintenanceStep >= 2 ? '#16a34a' : '#e5e7eb' }} />
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 2 ? '#16a34a' : '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 2 ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 'bold' }}>2</Text></View>
+                                <View style={{ flex: 1, height: 3, backgroundColor: maintenanceStep >= 3 ? '#16a34a' : '#e5e7eb' }} />
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 3 ? '#16a34a' : '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 3 ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 'bold' }}>3</Text></View>
                             </View>
-                        </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 5, marginBottom: 20 }}>
+                                <Text style={{ fontSize: 10, color: colors.textMuted }}>Dados</Text>
+                                <Text style={{ fontSize: 10, color: colors.textMuted }}>Problema</Text>
+                                <Text style={{ fontSize: 10, color: colors.textMuted }}>Agenda</Text>
+                            </View>
 
-                        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: '#ef4444', marginTop: 8 }]} onPress={handleScheduleMaintenance}>
-                            <Text style={styles.primaryButtonText}>Confirmar Agendamento</Text>
-                        </TouchableOpacity>
+                            {maintenanceStep === 1 && (
+                                <View>
+                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]}>Seus dados</Text>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.label, { color: colors.text }]}>Nome Completo</Text>
+                                        <TextInput
+                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                            value={maintenanceForm.name}
+                                            onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, name: t })}
+                                            placeholder="Ex: João da Silva"
+                                            placeholderTextColor={colors.textMuted}
+                                        />
+                                    </View>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+                                        <TextInput
+                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                            value={maintenanceForm.email}
+                                            onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, email: t })}
+                                            placeholder="Ex: joao@email.com"
+                                            keyboardType="email-address"
+                                            placeholderTextColor={colors.textMuted}
+                                        />
+                                    </View>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.label, { color: colors.text }]}>Telefone</Text>
+                                        <TextInput
+                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                            value={maintenanceForm.phone}
+                                            onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, phone: t })}
+                                            placeholder="Ex: 11 99999-9999"
+                                            keyboardType="phone-pad"
+                                            placeholderTextColor={colors.textMuted}
+                                        />
+                                    </View>
+                                </View>
+                            )}
+
+                            {maintenanceStep === 2 && (
+                                <View>
+                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]}>Descreva o problema</Text>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.label, { color: colors.text }]}>Prioridade</Text>
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                                            {['Baixa', 'Média', 'Alta', 'Urgente'].map((level) => {
+                                                const isSelected = maintenanceForm.priority.startsWith(level);
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={level}
+                                                        style={[
+                                                            styles.urgencyBtn,
+                                                            { borderColor: colors.border, paddingHorizontal: 10, paddingVertical: 6 },
+                                                            isSelected && { backgroundColor: level === 'Alta' || level === 'Urgente' ? '#fee2e2' : colors.primaryLight, borderColor: level === 'Alta' || level === 'Urgente' ? '#ef4444' : colors.primary }
+                                                        ]}
+                                                        onPress={() => setMaintenanceForm({ ...maintenanceForm, priority: `${level} - Problema técnico` })}
+                                                    >
+                                                        <Text style={[
+                                                            { fontSize: 12, color: colors.text },
+                                                            isSelected && { color: level === 'Alta' || level === 'Urgente' ? '#b91c1c' : colors.primary, fontWeight: 'bold' }
+                                                        ]}>{level}</Text>
+                                                    </TouchableOpacity>
+                                                )
+                                            })}
+                                        </View>
+                                    </View>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.label, { color: colors.text }]}>Descrição Detalhada</Text>
+                                        <TextInput
+                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 90 }]}
+                                            value={maintenanceForm.description}
+                                            onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, description: t })}
+                                            placeholder="Descreva o que está ocorrendo..."
+                                            placeholderTextColor={colors.textMuted}
+                                            multiline
+                                            textAlignVertical="top"
+                                        />
+                                    </View>
+                                </View>
+                            )}
+
+                            {maintenanceStep === 3 && (
+                                <View>
+                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]}>Quando podemos te ajudar?</Text>
+                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                        <View style={[styles.formGroup, { flex: 1 }]}>
+                                            <Text style={[styles.label, { color: colors.text }]}>Data Preferida</Text>
+                                            <TextInput
+                                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                                value={maintenanceForm.date}
+                                                onChangeText={(t) => {
+                                                    let val = t.replace(/\D/g, '');
+                                                    if (val.length > 2) val = val.slice(0, 2) + '/' + val.slice(2);
+                                                    if (val.length > 5) val = val.slice(0, 5) + '/' + val.slice(5, 9);
+                                                    setMaintenanceForm({ ...maintenanceForm, date: val })
+                                                }}
+                                                placeholder="DD/MM/AAAA"
+                                                keyboardType="numeric"
+                                                maxLength={10}
+                                                placeholderTextColor={colors.textMuted}
+                                            />
+                                        </View>
+                                        <View style={[styles.formGroup, { flex: 1 }]}>
+                                            <Text style={[styles.label, { color: colors.text }]}>Horário</Text>
+                                            <TextInput
+                                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                                value={maintenanceForm.time}
+                                                onChangeText={(t) => {
+                                                    let val = t.replace(/\D/g, '');
+                                                    if (val.length > 2) val = val.slice(0, 2) + ':' + val.slice(2, 4);
+                                                    setMaintenanceForm({ ...maintenanceForm, time: val })
+                                                }}
+                                                placeholder="HH:MM"
+                                                keyboardType="numeric"
+                                                maxLength={5}
+                                                placeholderTextColor={colors.textMuted}
+                                            />
+                                        </View>
+                                    </View>
+
+                                    <View style={{ backgroundColor: colors.background, padding: 12, borderRadius: 8, marginTop: 10, borderWidth: 1, borderColor: colors.border }}>
+                                        <Text style={{ fontWeight: 'bold', color: colors.text, marginBottom: 8, fontSize: 13 }}>Resumo do agendamento:</Text>
+                                        <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}><Text style={{ fontWeight: '500' }}>Nome:</Text> {maintenanceForm.name}</Text>
+                                        <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}><Text style={{ fontWeight: '500' }}>Prioridade:</Text> {maintenanceForm.priority.split(' - ')[0]}</Text>
+                                        <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}><Text style={{ fontWeight: '500' }}>Data:</Text> {maintenanceForm.date} às {maintenanceForm.time}</Text>
+                                    </View>
+                                </View>
+                            )}
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
+                                {maintenanceStep > 1 ? (
+                                    <TouchableOpacity style={[styles.primaryButton, { flex: 0.4, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]} onPress={() => setMaintenanceStep(s => s - 1)}>
+                                        <Text style={[styles.primaryButtonText, { color: colors.text }]}>Voltar</Text>
+                                    </TouchableOpacity>
+                                ) : <View style={{ flex: 0.4 }} />}
+
+                                {maintenanceStep < 3 ? (
+                                    <TouchableOpacity style={[styles.primaryButton, { flex: 0.5, backgroundColor: '#16a34a' }]} onPress={() => setMaintenanceStep(s => s + 1)}>
+                                        <Text style={styles.primaryButtonText}>Próximo</Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <TouchableOpacity style={[styles.primaryButton, { flex: 0.6, backgroundColor: '#16a34a' }]} onPress={handleScheduleMaintenance}>
+                                        <Text style={styles.primaryButtonText}>Confirmar</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>
@@ -914,19 +1602,54 @@ function TelemetryWidget({ onAddMaintenance }: { onAddMaintenance?: (m: any) => 
             )}
         </View>
     );
-}
+});
 
-function MultiBar({ month, vals, selectedTab, isHighlight }: { month: string, vals: number[], selectedTab: string, isHighlight?: boolean }) {
+
+function MultiBar({ month, vals, selectedTab, isHighlight, onPress, details, isAnySelected }: {
+    month: string,
+    vals: number[],
+    selectedTab: string,
+    isHighlight?: boolean,
+    onPress?: () => void,
+    details?: { waste: number, energy: number, tax: number },
+    isAnySelected?: boolean
+}) {
     const { colors } = useTheme();
     return (
-        <View style={styles.chartBarContainer}>
+        <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={onPress}
+            style={styles.chartBarContainer}
+        >
+            {isHighlight && details && (
+                <View style={{
+                    position: 'absolute',
+                    bottom: 110,
+                    backgroundColor: colors.cardBackground,
+                    padding: 8,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    width: 100,
+                    zIndex: 50,
+                    elevation: 4,
+                    shadowColor: '#000',
+                    shadowOpacity: 0.1,
+                    shadowRadius: 4
+                }}>
+                    <Text style={{ fontSize: 9, color: colors.text, fontWeight: 'bold', marginBottom: 2 }}>{month}</Text>
+                    {(selectedTab === 'all' || selectedTab === 'energy') && <Text style={{ fontSize: 8, color: '#eab308' }}>⚡ {details.energy} kWh</Text>}
+                    {(selectedTab === 'all' || selectedTab === 'waste') && <Text style={{ fontSize: 8, color: '#22c55e' }}>💧 {details.waste} kg</Text>}
+                    {(selectedTab === 'all' || selectedTab === 'tax') && <Text style={{ fontSize: 8, color: '#3b82f6' }}>💰 R$ {details.tax}</Text>}
+                </View>
+            )}
             <View style={styles.barsArea}>
-                {(selectedTab === 'all' || selectedTab === 'energy') && <View style={[styles.chartBar, { height: `${vals[0]}%`, backgroundColor: '#eab308' }]} />}
-                {(selectedTab === 'all' || selectedTab === 'waste') && <View style={[styles.chartBar, { height: `${vals[1]}%`, backgroundColor: '#22c55e' }]} />}
-                {(selectedTab === 'all' || selectedTab === 'tax') && <View style={[styles.chartBar, { height: `${vals[2]}%`, backgroundColor: '#3b82f6' }]} />}
+                {(selectedTab === 'all' || selectedTab === 'energy') && <View style={[styles.chartBar, { height: `${vals[0]}%`, backgroundColor: '#eab308' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
+                {(selectedTab === 'all' || selectedTab === 'waste') && <View style={[styles.chartBar, { height: `${vals[1]}%`, backgroundColor: '#22c55e' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
+                {(selectedTab === 'all' || selectedTab === 'tax') && <View style={[styles.chartBar, { height: `${vals[2]}%`, backgroundColor: '#3b82f6' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
             </View>
             <Text style={[styles.chartLabel, { color: colors.textMuted }, isHighlight && { color: colors.primary, fontWeight: 'bold' }]}>{month}</Text>
-        </View>
+        </TouchableOpacity>
     )
 }
 
@@ -1079,13 +1802,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'flex-end',
         height: 100,
-        gap: 2,
+        gap: 1,
         marginBottom: 8,
     },
     chartBar: {
-        width: 8,
-        borderTopLeftRadius: 3,
-        borderTopRightRadius: 3,
+        width: 5,
+        borderTopLeftRadius: 2,
+        borderTopRightRadius: 2,
     },
     chartLabel: {
         fontSize: 10,
