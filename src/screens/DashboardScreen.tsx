@@ -1751,6 +1751,61 @@ export default function DashboardScreen() {
                 </View>
             </Modal>
 
+            {/* Modal de Ordenação dos Cards */}
+            <Modal visible={isOrderModalVisible} animationType="slide" transparent={true} onRequestClose={() => setOrderModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Ordenar Visão Geral</Text>
+                            <TouchableOpacity onPress={() => setOrderModalVisible(false)}>
+                                <Text style={styles.modalClose}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Altere a ordem de exibição dos painéis principais.</Text>
+
+                        <View style={{ gap: 8, marginBottom: 24 }}>
+                            {tempOrder.map((key, index) => {
+                                let emoji = '';
+                                if (key === 'waste') emoji = '💧';
+                                if (key === 'energy') emoji = '⚡';
+                                if (key === 'tax') emoji = '💰';
+                                if (key === 'efficiency') emoji = '🌿';
+                                
+                                return (
+                                <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: data[key].color, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                                    <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {emoji} {getCardTitle(key)}</Text>
+                                    <View style={{ flexDirection: 'row', gap: 4 }}>
+                                        <TouchableOpacity
+                                            style={{ backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                            onPress={() => moveCard(index, 'up')}
+                                            disabled={index === 0}
+                                        >
+                                            <MaterialCommunityIcons name="chevron-up" size={20} color={index === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={{ backgroundColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                            onPress={() => moveCard(index, 'down')}
+                                            disabled={index === tempOrder.length - 1}
+                                        >
+                                            <MaterialCommunityIcons name="chevron-down" size={20} color={index === tempOrder.length - 1 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            )})}
+                        </View>
+
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' }]} onPress={resetCardOrder}>
+                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Restaurar Padrão</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0 }]} onPress={() => saveCardOrder(cardOrder, tempOrder)}>
+                                <Text style={styles.primaryButtonText}>Salvar Ordem</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             <TelemetryWidget
                 ref={telemetryRef}
                 onAddMaintenance={() => loadDashboardData()}
