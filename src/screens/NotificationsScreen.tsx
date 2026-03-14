@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
+import { supabase } from '../lib/supabase';
 
 interface ActivityItem {
-    id: number;
+    id: string | number;
     type: "success" | "warning" | "info" | "error";
     message: string;
     timestamp: string;
@@ -17,25 +19,58 @@ export default function NotificationsScreen({ onBack }: Props) {
     const { colors } = useTheme();
     const [activities, setActivities] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
-
-    const demoActivities: ActivityItem[] = [
-        { id: 1, type: "error", message: "⚠️ [CRÍTICO] Temperatura da caldeira excedeu 40°C", timestamp: "Agora mesmo" },
-        { id: 2, type: "warning", message: "⏱️ Pressão do gás apresentou alta oscilação (1.7 bar)", timestamp: "Há 5 min" },
-        { id: 3, type: "info", message: "💧 Nível de pH estabilizado em 7.0", timestamp: "Há 12 min" },
-        { id: 4, type: "success", message: "⚡ Geração de energia otimizada (Eficiência: 96%)", timestamp: "Há 30 min" },
-        { id: 5, type: "warning", message: "⚠️ Temperatura do tanque de mistura atingiu 38°C", timestamp: "Há 1 hora" },
-        { id: 6, type: "info", message: "📝 Relatório automático de telemetria emitido", timestamp: "Há 2 horas" },
-        { id: 7, type: "success", message: "✅ Manutenção preventiva da Válvula 02 concluída", timestamp: "Há 3 horas" },
-        { id: 8, type: "error", message: "❌ Perda de conexão temporária com o Sensor de pH", timestamp: "Ontem" },
-    ];
+    const [alertsEnabled, setAlertsEnabled] = useState(true);
 
     useEffect(() => {
-        // Simulando chamada API
-        setTimeout(() => {
-            setActivities(demoActivities);
-            setLoading(false);
-        }, 1000);
+        loadAlertPreference();
+        fetchAlerts();
     }, []);
+
+    const loadAlertPreference = async () => {
+        try {
+            const saved = await AsyncStorage.getItem('@biodash_alerts_enabled');
+            if (saved !== null) setAlertsEnabled(JSON.parse(saved));
+        } catch (e) { console.log(e); }
+    };
+
+    const toggleAlerts = async () => {
+        try {
+            const newValue = !alertsEnabled;
+            setAlertsEnabled(newValue);
+            await AsyncStorage.setItem('@biodash_alerts_enabled', JSON.stringify(newValue));
+        } catch (e) { console.log(e); }
+    };
+
+    const fetchAlerts = async () => {
+        setLoading(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data, error } = await supabase
+                    .from('sensor_alerts')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false });
+
+                if (!error && data && data.length > 0) {
+                    const mapped = data.map(item => ({
+                        id: item.id,
+                        type: item.alert_level === 'critico' ? 'error' : item.alert_level === 'aviso' ? 'warning' : 'info',
+                        message: item.message,
+                        timestamp: new Date(item.created_at).toLocaleString('pt-BR')
+                    }));
+                    setActivities(mapped as ActivityItem[]);
+                } else {
+                    setActivities([]);
+                }
+            }
+        } catch (err) {
+            console.log(err);
+            setActivities([]);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const getIcon = (type: string) => {
         switch (type) {
@@ -71,6 +106,38 @@ export default function NotificationsScreen({ onBack }: Props) {
                 <Text style={[styles.pageSub, { color: colors.textMuted }]}>
                     Acompanhe o feed de atividades recentes do seu biodigestor.
                 </Text>
+
+                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border, marginBottom: 30, padding: 16 }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View style={{ flex: 1, marginRight: 10 }}>
+                            <Text style={{ fontWeight: 'bold', color: colors.text, fontSize: 15 }}>Auto-abrir Alertas Críticos</Text>
+                            <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                                Expandir o painel de sensores automaticamente em caso de falha.
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={toggleAlerts}
+                            style={{
+                                width: 50,
+                                height: 28,
+                                borderRadius: 14,
+                                backgroundColor: alertsEnabled ? colors.primary : '#ccc',
+                                padding: 2,
+                                justifyContent: 'center'
+                            }}
+                        >
+                            <View style={{
+                                width: 24,
+                                height: 24,
+                                borderRadius: 12,
+                                backgroundColor: '#fff',
+                                transform: [{ translateX: alertsEnabled ? 22 : 0 }]
+                            }} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>Histórico de Atividades</Text>
 
                 {loading ? (
                     <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
