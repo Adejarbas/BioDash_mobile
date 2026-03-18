@@ -916,7 +916,8 @@ export default function DashboardScreen() {
                         style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
                         onPress={() => setMetricsModalVisible(true)}
                     >
-                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✏️ Atualizar</Text>
+                        <MaterialCommunityIcons name="pencil-outline" size={14} color="#fff" />
+                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Atualizar</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -929,12 +930,11 @@ export default function DashboardScreen() {
                     </View>
                 ) : null}
 
-                {/* Cards dinâmicos e ordenáveis */}
                 <View style={styles.grid}>
-                    <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
-                    <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} emoji="⚡" color="#eab308" bgColor="#fef9c3" />
-                    <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} emoji="💰" color="#3b82f6" bgColor="#dbeafe" />
-                    <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} emoji="🌿" color="#16a34a" bgColor="#bbf7d0" />
+                    <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" iconProvider="MaterialCommunityIcons" color="#22c55e" bgColor="#dcfce7" />
+                    <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" iconProvider="MaterialCommunityIcons" color="#eab308" bgColor="#fef9c3" />
+                    <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" iconProvider="MaterialCommunityIcons" color="#3b82f6" bgColor="#dbeafe" />
+                    <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" iconProvider="MaterialCommunityIcons" color="#16a34a" bgColor="#bbf7d0" />
                 </View>
 
                 {/* Visão Geral (Múltiplas Métricas) */}
@@ -1751,22 +1751,19 @@ export default function DashboardScreen() {
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: colors.text }]}>Ordenar Visão Geral</Text>
                             <TouchableOpacity onPress={() => setOrderModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Altere a ordem de exibição dos painéis principais.</Text>
 
                         <View style={{ gap: 8, marginBottom: 24 }}>
                             {tempOrder.map((key, index) => {
-                                let emoji = '';
-                                if (key === 'waste') emoji = '💧';
-                                if (key === 'energy') emoji = '⚡';
-                                if (key === 'tax') emoji = '💰';
-                                if (key === 'efficiency') emoji = '🌿';
+                                const iconMap: Record<CardKey, string> = { waste: 'water-outline', energy: 'lightning-bolt', tax: 'currency-usd', efficiency: 'leaf' };
 
                                 return (
                                     <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: data[key].color, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
-                                        <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {emoji} {getCardTitle(key)}</Text>
+                                        <MaterialCommunityIcons name={iconMap[key] as any} size={18} color="#fff" style={{ marginRight: 8 }} />
+                                        <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {getCardTitle(key)}</Text>
                                         <View style={{ flexDirection: 'row', gap: 4 }}>
                                             <TouchableOpacity
                                                 style={{ backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
@@ -2238,10 +2235,10 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                     {isCritical ? (
                         <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
                             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', position: 'absolute', top: -2, right: -2 }} />
-                            <Text style={{ fontSize: 16 }}>⚠️</Text>
+                            <MaterialCommunityIcons name="alert" size={18} color="#fff" />
                         </Animated.View>
                     ) : (
-                        <Text style={{ fontSize: 16 }}>📡</Text>
+                        <MaterialCommunityIcons name="access-point" size={18} color={colors.text} />
                     )}
                     <Text style={{ fontWeight: '700', color: isCritical ? '#fff' : colors.text, fontSize: 13 }}>
                         {isCritical ? 'Alerta Crítico' : 'Sensores'}
@@ -2287,8 +2284,8 @@ function MultiBar({ month, vals, selectedTab, isHighlight, onPress, details, isA
                 }}>
                     <Text style={{ fontSize: 9, color: colors.text, fontWeight: 'bold', marginBottom: 2 }}>{month}</Text>
                     {(selectedTab === 'all' || selectedTab === 'energy') && <Text style={{ fontSize: 8, color: '#eab308' }}>⚡ {details.energy} kWh</Text>}
-                    {(selectedTab === 'all' || selectedTab === 'waste') && <Text style={{ fontSize: 8, color: '#22c55e' }}>💧 {details.waste} kg</Text>}
-                    {(selectedTab === 'all' || selectedTab === 'tax') && <Text style={{ fontSize: 8, color: '#3b82f6' }}>💰 R$ {details.tax}</Text>}
+                    {(selectedTab === 'all' || selectedTab === 'waste') && <Text style={{ fontSize: 8, color: '#22c55e' }}>◉ {details.waste} kg</Text>}
+                    {(selectedTab === 'all' || selectedTab === 'tax') && <Text style={{ fontSize: 8, color: '#3b82f6' }}>R$ {details.tax}</Text>}
                 </View>
             )}
             <View style={styles.barsArea}>
