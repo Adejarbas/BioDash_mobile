@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
 import { supabase } from '../lib/supabase'
+import { markersApi } from '../lib/api'
 import MapComponent from '../components/MapComponent'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
@@ -152,36 +153,25 @@ export default function DashboardScreen() {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) return
 
-            const { data, error } = await supabase
-                .from('biodigestor_maps')
-                .select('id, address')
-                .eq('user_id', user.id)
-                .order('id', { ascending: false })
+            const res = await markersApi.fetch()
+            if (!res.success || !res.data) return
 
-            if (error || !data) return
+            const ms: MarkerData[] = res.data.map((row: any) => ({
+                id: (row._id || row.id)?.toString(),
+                latitude: row.latitude,
+                longitude: row.longitude,
+                title: row.title,
+                description: row.description,
+                rawAddress: row.rawAddress
+            }))
 
-            const ms: MarkerData[] = []
-            for (const row of data) {
-                const addr = row.address as any
-                const fullAddress = addr?.full_address || JSON.stringify(row.address)
-
-                if (addr?.lat && addr?.lon) {
-                    const marker = {
-                        id: row.id.toString(),
-                        latitude: parseFloat(addr.lat),
-                        longitude: parseFloat(addr.lon),
-                        title: addr?.nome || fullAddress.split(',')[0],
-                        description: fullAddress,
-                        rawAddress: addr
-                    };
-                    ms.push(marker);
-
-                    if (focusId && focusId === marker.id) {
-                        setMapFocusLocation({ latitude: marker.latitude, longitude: marker.longitude });
-                    }
+            setMapMarkers(ms)
+            if (focusId) {
+                const focused = ms.find(m => m.id === focusId)
+                if (focused) {
+                    setMapFocusLocation({ latitude: focused.latitude, longitude: focused.longitude });
                 }
             }
-            setMapMarkers(ms)
         } catch (e) {
             console.error("Erro ao buscar marcadores:", e)
         }
@@ -189,11 +179,25 @@ export default function DashboardScreen() {
 
     const handleMarkerDragEnd = async (id: string, coord: { latitude: number, longitude: number }) => {
         const m = mapMarkers.find(x => x.id === id);
-        if (!m || !m.rawAddress) return;
-        const newAddr = { ...m.rawAddress, lat: coord.latitude, lon: coord.longitude };
-        const { error } = await supabase.from('biodigestor_maps').update({ address: newAddr }).eq('id', parseInt(id));
-        if (!error) {
-            setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, latitude: coord.latitude, longitude: coord.longitude } : x));
+        if (!m) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const updateData = {
+                id,
+                userId: user.id,
+                latitude: coord.latitude,
+                longitude: coord.longitude
+            };
+
+            const res = await markersApi.save(updateData);
+            if (res.success) {
+                setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, latitude: coord.latitude, longitude: coord.longitude } : x));
+            }
+        } catch (e) {
+            console.error("Erro ao arrastar marcador:", e);
         }
     };
 
@@ -202,8 +206,8 @@ export default function DashboardScreen() {
             { text: "Cancelar", style: "cancel" },
             {
                 text: "Excluir", style: "destructive", onPress: async () => {
-                    const { error } = await supabase.from('biodigestor_maps').delete().eq('id', parseInt(id));
-                    if (error) Alert.alert("Erro", "Não foi possível excluir");
+                    const res = await markersApi.delete(id);
+                    if (!res.success) Alert.alert("Erro", "Não foi possível excluir");
                     else fetchMapMarkers();
                 }
             }
@@ -1226,16 +1230,21 @@ export default function DashboardScreen() {
                                                     complemento: markerComplement
                                                 };
 
-                                                if (markerEditingId) {
-                                                    await supabase.from('biodigestor_maps').update({ address: addressJson }).eq('id', parseInt(markerEditingId));
-                                                    await fetchMapMarkers(markerEditingId);
+                                                const markerPayload = {
+                                                    id: markerEditingId,
+                                                    userId: user.id,
+                                                    title: markerName,
+                                                    description: addressFull,
+                                                    latitude: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : 0),
+                                                    longitude: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : 0),
+                                                    rawAddress: addressJson
+                                                };
+
+                                                const res = await markersApi.save(markerPayload);
+                                                if (res.success && res.data) {
+                                                    await fetchMapMarkers((res.data._id || res.data.id)?.toString());
                                                 } else {
-                                                    const { data: newRows } = await supabase.from('biodigestor_maps').insert([{ user_id: user.id, address: addressJson }]).select('id');
-                                                    if (newRows && newRows[0]) {
-                                                        await fetchMapMarkers(newRows[0].id.toString());
-                                                    } else {
-                                                        await fetchMapMarkers();
-                                                    }
+                                                    await fetchMapMarkers();
                                                 }
 
                                                 setMapModalVisible(false);
