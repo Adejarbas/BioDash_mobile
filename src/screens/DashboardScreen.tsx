@@ -23,6 +23,7 @@ import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme } from '../context/ThemeContext'
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 
 interface MetricData {
     value: number
@@ -815,24 +816,26 @@ export default function DashboardScreen() {
                         style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
                         onPress={() => setMetricsModalVisible(true)}
                     >
-                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✏️ Atualizar</Text>
+                        <MaterialCommunityIcons name="pencil-outline" size={14} color="#fff" />
+                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Atualizar</Text>
                     </TouchableOpacity>
                 </View>
 
                 {referenceDate ? (
                     <View style={{ marginBottom: 12, paddingHorizontal: 4 }}>
-                        <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>
-                            📅 Dados referentes a {referenceDate}
+                        <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13, flexDirection: 'row', alignItems: 'center' }}>
+                            <MaterialCommunityIcons name="calendar-month" size={14} color={colors.primary} style={{ marginRight: 4 }} />
+                            Dados referentes a {referenceDate}
                         </Text>
                     </View>
                 ) : null}
 
                 {/* Cards em formato 2x2 */}
                 <View style={styles.grid}>
-                    <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
-                    <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} emoji="⚡" color="#eab308" bgColor="#fef9c3" />
-                    <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} emoji="💰" color="#3b82f6" bgColor="#dbeafe" />
-                    <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} emoji="🌿" color="#16a34a" bgColor="#bbf7d0" />
+                    <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" iconProvider="MaterialCommunityIcons" color="#22c55e" bgColor="#dcfce7" />
+                    <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" iconProvider="MaterialCommunityIcons" color="#eab308" bgColor="#fef9c3" />
+                    <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" iconProvider="MaterialCommunityIcons" color="#3b82f6" bgColor="#dbeafe" />
+                    <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" iconProvider="MaterialCommunityIcons" color="#16a34a" bgColor="#bbf7d0" />
                 </View>
 
                 {/* Visão Geral (Múltiplas Métricas) */}
@@ -944,7 +947,7 @@ export default function DashboardScreen() {
                             setExportModalVisible(true);
                         }}
                     >
-                        <Text style={styles.exportIcon}>📄</Text>
+                        <MaterialCommunityIcons name="file-pdf-box" size={28} color="#dc2626" style={{ marginBottom: 8 }} />
                         <Text style={[styles.exportText, { color: '#dc2626' }]}>Gerar PDF</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -954,7 +957,7 @@ export default function DashboardScreen() {
                             setExportModalVisible(true);
                         }}
                     >
-                        <Text style={styles.exportIcon}>📗</Text>
+                        <MaterialCommunityIcons name="file-excel-box" size={28} color="#16a34a" style={{ marginBottom: 8 }} />
                         <Text style={[styles.exportText, { color: '#16a34a' }]}>Gerar Excel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -964,7 +967,7 @@ export default function DashboardScreen() {
                             setExportModalVisible(true);
                         }}
                     >
-                        <Text style={styles.exportIcon}>📊</Text>
+                        <MaterialCommunityIcons name="file-delimited" size={28} color="#2563eb" style={{ marginBottom: 8 }} />
                         <Text style={[styles.exportText, { color: '#2563eb' }]}>Gerar CSV</Text>
                     </TouchableOpacity>
                 </View>
@@ -1177,11 +1180,11 @@ export default function DashboardScreen() {
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text, marginRight: 8 }}>{m.title}</Text>
 
                                 <TouchableOpacity onPress={() => handleEditMarker(m)} style={{ padding: 6, backgroundColor: '#3b82f6', borderRadius: 10, marginRight: 6 }}>
-                                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>✎</Text>
+                                    <MaterialCommunityIcons name="pencil" size={14} color="#fff" />
                                 </TouchableOpacity>
 
                                 <TouchableOpacity onPress={() => handleDeleteMarker(m.id, m.title)} style={{ padding: 6, backgroundColor: '#dc2626', borderRadius: 10 }}>
-                                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>✕</Text>
+                                    <MaterialCommunityIcons name="close" size={14} color="#fff" />
                                 </TouchableOpacity>
                             </TouchableOpacity>
                         ))}
@@ -1203,7 +1206,7 @@ export default function DashboardScreen() {
                     <Text style={styles.footerText}></Text>
                 </View>
                 <View style={{ height: 120 }} />
-            </ScrollView >
+            </ScrollView>
 
             {/* Modal de Atualização Manual de Métricas */}
             <Modal visible={metricsModalVisible} animationType="slide" transparent={true} onRequestClose={() => setMetricsModalVisible(false)}>
@@ -1212,7 +1215,7 @@ export default function DashboardScreen() {
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: colors.text }]}>Atualizar Métricas</Text>
                             <TouchableOpacity onPress={() => setMetricsModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores consolidados para o período selecionado.</Text>
@@ -1238,7 +1241,7 @@ export default function DashboardScreen() {
                                     }}
                                 >
                                     <Text style={{ color: colors.text }}>{months[parseInt(manualMetrics.month)].label}</Text>
-                                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>{monthPickerVisible ? '▲' : '▼'}</Text>
+                                    <MaterialCommunityIcons name={monthPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
                                 </TouchableOpacity>
 
                                 {monthPickerVisible && (
@@ -1313,7 +1316,7 @@ export default function DashboardScreen() {
                                     }}
                                 >
                                     <Text style={{ color: colors.text }}>{manualMetrics.year}</Text>
-                                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>{yearPickerVisible ? '▲' : '▼'}</Text>
+                                    <MaterialCommunityIcons name={yearPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
                                 </TouchableOpacity>
 
                                 {yearPickerVisible && (
@@ -1413,7 +1416,7 @@ export default function DashboardScreen() {
 
                         {selectedMaintenance?.status === 'pending' && (
                             <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                                 onPress={() => {
                                     setActionModalVisible(false);
                                     if (selectedMaintenance) {
@@ -1421,30 +1424,33 @@ export default function DashboardScreen() {
                                     }
                                 }}
                             >
-                                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>✏️ Editar Informações</Text>
+                                <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} style={{ marginRight: 8 }} />
+                                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>Editar Informações</Text>
                             </TouchableOpacity>
                         )}
 
                         {selectedMaintenance?.status === 'pending' && (
                             <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                                 onPress={() => {
                                     setActionModalVisible(false);
                                     if (selectedMaintenance) handleMarkAsDone(selectedMaintenance.id);
                                 }}
                             >
-                                <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: 'bold' }}>✅ Marcar como Concluída</Text>
+                                <MaterialCommunityIcons name="check-circle" size={20} color="#16a34a" style={{ marginRight: 8 }} />
+                                <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: 'bold' }}>Marcar como Concluída</Text>
                             </TouchableOpacity>
                         )}
 
                         <TouchableOpacity
-                            style={{ paddingVertical: 18, alignItems: 'center' }}
+                            style={{ paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                             onPress={() => {
                                 setActionModalVisible(false);
                                 if (selectedMaintenance) handleDelete(selectedMaintenance.id);
                             }}
                         >
-                            <Text style={{ fontSize: 16, color: '#dc2626', fontWeight: 'bold' }}>🗑️ Apagar Agenda</Text>
+                            <MaterialCommunityIcons name="delete-outline" size={20} color="#dc2626" style={{ marginRight: 8 }} />
+                            <Text style={{ fontSize: 16, color: '#dc2626', fontWeight: 'bold' }}>Apagar Agenda</Text>
                         </TouchableOpacity>
                     </View>
 
@@ -1469,7 +1475,7 @@ export default function DashboardScreen() {
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: colors.text }]}>Configurar Relatório</Text>
                             <TouchableOpacity onPress={() => setExportModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 20 }]}>
@@ -1558,7 +1564,7 @@ export default function DashboardScreen() {
                                         }}
                                     >
                                         <Text style={{ color: colors.text }}>{months[parseInt(exportMonth)].label}</Text>
-                                        <Text style={{ color: colors.textMuted }}>▼</Text>
+                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
                                     </TouchableOpacity>
 
                                     {exportMonthPickerVisible && (
@@ -1598,7 +1604,7 @@ export default function DashboardScreen() {
                                         }}
                                     >
                                         <Text style={{ color: colors.text }}>{exportYear}</Text>
-                                        <Text style={{ color: colors.textMuted }}>▼</Text>
+                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
                                     </TouchableOpacity>
 
                                     {exportYearPickerVisible && (
@@ -1644,7 +1650,7 @@ export default function DashboardScreen() {
                 onAddMaintenance={() => loadDashboardData()}
                 alertsEnabled={alertsEnabled}
             />
-        </View >
+        </View>
     )
 }
 
@@ -2140,7 +2146,7 @@ function MultiBar({ month, vals, selectedTab, isHighlight, onPress, details, isA
     )
 }
 
-function StatCard({ title, value, unit, changePercent, increasing, emoji, color, bgColor }: any) {
+function StatCard({ title, value, unit, changePercent, increasing, iconName, iconProvider, color, bgColor }: any) {
     const { colors, theme } = useTheme();
     // No modo escuro, os ícones de métrica podem ficar melhor combinados usando bgColor como semi-transparente 
     // ou mantemos o original que já parece bem vibrante no design escuro.
@@ -2150,7 +2156,7 @@ function StatCard({ title, value, unit, changePercent, increasing, emoji, color,
         <View style={[styles.card, { width: '48%', backgroundColor: colors.cardBackground }]}>
             <View style={styles.cardHeader}>
                 <View style={[styles.iconBg, { backgroundColor: iconBackground }]}>
-                    <Text style={styles.iconEmoji}>{emoji}</Text>
+                    <MaterialCommunityIcons name={iconName || 'alert'} size={24} color={color} />
                 </View>
             </View>
             <View style={styles.cardValue}>

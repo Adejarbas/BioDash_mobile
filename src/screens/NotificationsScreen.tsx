@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../lib/supabase';
 
@@ -74,11 +75,11 @@ export default function NotificationsScreen({ onBack }: Props) {
 
     const getIcon = (type: string) => {
         switch (type) {
-            case 'success': return '✅';
-            case 'warning': return '⚠️';
-            case 'error': return '❌';
-            case 'info': return 'ℹ️';
-            default: return '🔔';
+            case 'success': return <MaterialCommunityIcons name="check-circle-outline" size={20} color="#16a34a" />;
+            case 'warning': return <MaterialCommunityIcons name="alert-outline" size={20} color="#d97706" />;
+            case 'error': return <MaterialCommunityIcons name="close-circle-outline" size={20} color="#dc2626" />;
+            case 'info': return <MaterialCommunityIcons name="information-outline" size={20} color="#0284c7" />;
+            default: return <MaterialCommunityIcons name="bell-outline" size={20} color={colors.primary} />;
         }
     };
 
@@ -149,7 +150,7 @@ export default function NotificationsScreen({ onBack }: Props) {
                                 index !== activities.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }
                             ]}>
                                 <View style={[styles.iconContainer, { backgroundColor: getIconColor(item.type) }]}>
-                                    <Text style={{ fontSize: 16 }}>{getIcon(item.type)}</Text>
+                                    {getIcon(item.type)}
                                 </View>
                                 <View style={styles.textContainer}>
                                     <Text style={[styles.message, { color: colors.text }]}>{item.message}</Text>

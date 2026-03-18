@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 
 interface Props {
@@ -63,10 +64,11 @@ export default function HelpCenterScreen({ onBack }: Props) {
                     </Text>
 
                     <TouchableOpacity
-                        style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+                        style={[styles.primaryBtn, { backgroundColor: colors.primary, gap: 8 }]}
                         onPress={handleContactSupport}
                     >
-                        <Text style={styles.primaryBtnText}>✉️ Contatar Suporte</Text>
+                        <MaterialCommunityIcons name="email-outline" size={20} color="#fff" />
+                        <Text style={styles.primaryBtnText}>Contatar Suporte</Text>
                     </TouchableOpacity>
                 </View>
             </ScrollView>

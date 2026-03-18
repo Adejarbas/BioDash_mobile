@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, SafeAreaView } from 'react-native'
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, SafeAreaView, Image } from 'react-native'
 import { supabase } from './src/lib/supabase'
+import LandingScreen from './src/screens/LandingScreen'
 import LoginScreen from './src/screens/LoginScreen'
 import DashboardScreen from './src/screens/DashboardScreen'
 import RegisterScreen from './src/screens/RegisterScreen'
@@ -13,6 +14,7 @@ import { StatusBar } from 'expo-status-bar'
 import type { Session } from '@supabase/supabase-js'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
+import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons'
 
 const TEST_MODE = false; // <--- MODO DE TESTE DESATIVADO
 
@@ -29,16 +31,13 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header Fixo Global */}
       <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 16) }]}>
-        <View style={[styles.headerLogo, { backgroundColor: colors.primaryLight }]}>
-          <Text style={styles.headerEmoji}>🌱</Text>
-        </View>
+        <Image source={require('./assets/logo-biodash.png')} style={{ width: 100, height: 70, marginRight: 12 }} resizeMode="contain" />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>BioDash</Text>
           <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
         </View>
 
         <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
-          <Text style={{ fontSize: 18 }}>{theme === 'light' ? '🌙' : '☀️'}</Text>
+          <MaterialCommunityIcons name={theme === 'light' ? 'weather-night' : 'white-balance-sunny'} size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -75,7 +74,7 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
           }}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabIcon, activeTab === 'home' && styles.tabIconActive]}>📊</Text>
+          <MaterialIcons name="dashboard" size={24} color={activeTab === 'home' ? colors.primary : colors.textMuted} />
           <Text style={[styles.tabLabel, activeTab === 'home' && { color: colors.primary }]}>Painel</Text>
         </TouchableOpacity>
 
@@ -87,7 +86,7 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
           }}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabIcon, activeTab === 'settings' && styles.tabIconActive]}>⚙️</Text>
+          <MaterialIcons name="settings" size={24} color={activeTab === 'settings' ? colors.primary : colors.textMuted} />
           <Text style={[styles.tabLabel, activeTab === 'settings' && { color: colors.primary }]}>Ajustes</Text>
         </TouchableOpacity>
       </View>
@@ -97,7 +96,7 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
 
 function MainApp() {
   const [session, setSession] = useState<any>(null)
-  const [currentScreen, setCurrentScreen] = useState<'login' | 'register'>('login')
+  const [currentScreen, setCurrentScreen] = useState<'landing' | 'login' | 'register'>('landing')
   const [loading, setLoading] = useState(true)
   const { theme, colors } = useTheme();
 
@@ -145,13 +144,19 @@ function MainApp() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-      {currentScreen === 'register' ? (
+      {currentScreen === 'landing' ? (
+        <LandingScreen
+          onNavigateLogin={() => setCurrentScreen('login')}
+          onNavigateRegister={() => setCurrentScreen('register')}
+        />
+      ) : currentScreen === 'register' ? (
         <RegisterScreen
           onBackToLogin={() => setCurrentScreen('login')}
           onRegisterSuccess={() => {
             // Em modo teste, loga automaticamente após o cadastro fechar
             setSession({ user: { email: 'nova_empresa@biodash.com' } })
           }}
+          onBack={() => setCurrentScreen('landing')}
         />
       ) : (
         <LoginScreen
@@ -160,6 +165,7 @@ function MainApp() {
             // We don't need to manually setSession here unless needed for forced UI updates 
           }}
           onNavigateRegister={() => setCurrentScreen('register')}
+          onBack={() => setCurrentScreen('landing')}
         />
       )}
     </View>

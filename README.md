@@ -119,45 +119,6 @@ O projeto **BioGen** propõe uma solução sustentável para o tratamento de res
 
 ---
 
-## Seções Principais
-
-### Escolha seu plano de assinatura
-
-#### **Plano Essencial**
-- R$500/mês
-- Gestão completa de biodigestores
-- Dashboard de indicadores
-- Suporte dedicado
-
-**Botão:** Assinar por R$500/mês
-
----
-
-#### **Plano Profissional**
-- R$1000/mês
-- Gestão completa de biodigestores
-- Dashboard de indicadores
-- Suporte dedicado
-
-**Botão:** Assinar por R$1000/mês
-
----
-
-#### **Plano Premium**
-- R$1500/mês
-- Gestão completa de biodigestores
-- Dashboard de indicadores
-- Suporte dedicado
-
-**Botão:** Assinar por R$1500/mês
-
----
-
-## Avaliações dos Usuários
-
-Nenhuma avaliação cadastrada ainda.
-
----
 
 ## Nossos Diferenciais
 

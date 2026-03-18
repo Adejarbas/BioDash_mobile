@@ -13,6 +13,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../lib/supabase';
 
@@ -323,7 +324,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                             <Image source={{ uri: avatarUri }} style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]} />
                         ) : (
                             <View style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]}>
-                                <Text style={{ fontSize: 20 }}>👤</Text>
+                                <MaterialCommunityIcons name="account-outline" size={30} color={colors.textMuted} />
                             </View>
                         )}
                         <View style={{ marginLeft: 16 }}>
@@ -353,7 +354,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                             <Image source={{ uri: avatarUri }} style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]} />
                         ) : (
                             <View style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]}>
-                                <Text style={{ fontSize: 20 }}>👤</Text>
+                                <MaterialCommunityIcons name="account-outline" size={30} color={colors.textMuted} />
                             </View>
                         )}
                         <View style={{ marginLeft: 16 }}>

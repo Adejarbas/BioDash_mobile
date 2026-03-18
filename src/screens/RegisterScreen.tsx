@@ -9,15 +9,18 @@ import {
     KeyboardAvoidingView,
     Platform,
     ScrollView,
+    Image,
 } from 'react-native'
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'
 
 interface Props {
     onRegisterSuccess: () => void
     onBackToLogin: () => void
+    onBack?: () => void
 }
 
-export default function RegisterScreen({ onRegisterSuccess, onBackToLogin }: Props) {
+export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBack }: Props) {
     const [name, setName] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -90,12 +93,16 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin }: Pro
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
             >
+                {/* Botão de Voltar */}
+                {onBack && (
+                    <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
+                        <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar para a tela inicial</Text>
+                    </TouchableOpacity>
+                )}
+
                 {/* Logo Reduzido */}
                 <View style={styles.logoSection}>
-                    <View style={styles.logoIcon}>
-                        <Text style={styles.logoEmoji}>🌱</Text>
-                    </View>
-                    <Text style={styles.logoTitle}>BioDash</Text>
+                    <Image source={require('../../assets/logo-biodash.png')} style={{ width: 100, height: 70 }} resizeMode="contain" />
                 </View>
 
                 {/* Card de Cadastro */}
@@ -150,7 +157,7 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin }: Pro
                                 style={styles.eyeButton}
                                 onPress={() => setShowPassword(!showPassword)}
                             >
-                                <Text style={styles.eyeEmoji}>{showPassword ? '🙈' : '👁️'}</Text>
+                                <MaterialCommunityIcons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#94a3b8" />
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -233,8 +240,9 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin }: Pro
 
                     {/* Erro */}
                     {error ? (
-                        <View style={styles.errorBox}>
-                            <Text style={styles.errorText}>⚠️ {error}</Text>
+                        <View style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}>
+                            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#dc2626" style={{ marginRight: 6 }} />
+                            <Text style={styles.errorText}>{error}</Text>
                         </View>
                     ) : null}
 
