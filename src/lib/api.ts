@@ -1,5 +1,5 @@
 // API Client - Reutilizado do BioDashFront com adaptações para React Native
-const API_BASE_URL = 'http://localhost:3003' // Troque pelo IP do seu servidor quando rodar em device real
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3003'
 
 export interface ApiResponse<T = any> {
     success: boolean

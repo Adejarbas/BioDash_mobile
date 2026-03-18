@@ -6,13 +6,18 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "server": "node server/index.js",
+    "server:dev": "node --watch server/index.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "^8.4.4",
     "@supabase/supabase-js": "^2.98.0",
     "base64-arraybuffer": "^1.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2",
     "expo": "~54.0.0",
     "expo-asset": "~12.0.12",
     "expo-file-system": "~19.0.21",
@@ -22,6 +27,8 @@
     "expo-sharing": "~14.0.8",
     "expo-status-bar": "~3.0.9",
     "expo-template-blank": "^54.0.0",
+    "helmet": "^8.1.0",
+    "mongodb": "^6.18.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.0",

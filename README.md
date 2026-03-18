@@ -92,3 +92,55 @@ Links úteis:
 - Termos
 - Privacidade
 - Contato
+
+---
+
+## Configuração MongoDB (Histórico do Mapa)
+
+Para produção, o app nao deve acessar MongoDB direto. Foi criado um backend seguro em `server/index.js`.
+
+### 1) Backend seguro
+
+Crie `server/.env` com base em `server/.env.example` e preencha:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` (recomendado)
+- `MONGODB_URI`
+- `MONGODB_DATABASE`
+- `MONGODB_COLLECTION`
+- `CORS_ORIGINS` (origens permitidas)
+
+Inicie o backend:
+
+- `npm run server` (produção)
+- `npm run server:dev` (desenvolvimento)
+
+### Teste rapido sem MongoDB
+
+Se quiser validar apenas o fluxo de ponta a ponta sem ter MongoDB ainda:
+
+- No `server/.env`, defina `USE_IN_MEMORY_DB=true`
+- Deixe `MONGODB_URI` vazio
+- Rode `npm run server`
+
+Nesse modo, os endpoints funcionam normalmente, mas os dados ficam em memoria e sao perdidos quando o servidor reinicia.
+
+### 2) App mobile
+
+No `.env` do app, configure:
+
+- `EXPO_PUBLIC_API_BASE_URL`
+
+Exemplo: `http://localhost:3003`
+
+### 3) Endpoints criados
+
+- `GET /api/map-history` (autenticado por Bearer token Supabase)
+- `POST /api/map-history` (autenticado por Bearer token Supabase)
+
+Fluxo:
+
+- O app envia o token da sessão Supabase no header `Authorization`.
+- O backend valida token no Supabase e usa `user.id` para leitura/escrita no MongoDB.
+- A chave do MongoDB fica apenas no backend.

@@ -15,7 +15,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
 import { supabase } from '../lib/supabase'
-import MapComponent from '../components/MapComponent'
+import MapComponent, { type MarkerData } from '../components/MapComponent'
+import { fetchMapHistoryByUser, saveMapHistoryMarker } from '../lib/mongodbMapHistory'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system'
@@ -66,9 +67,9 @@ export default function DashboardScreen() {
     const [markerAddress, setMarkerAddress] = useState('')
     const [markerNumber, setMarkerNumber] = useState('')
     const [cepLoading, setCepLoading] = useState(false)
+    const [mapLoading, setMapLoading] = useState(false)
     const [chartData, setChartData] = useState<ChartPoint[]>([])
 
-    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; }
     const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
 
     const [maintenances, setMaintenances] = useState([
@@ -139,15 +140,32 @@ export default function DashboardScreen() {
     const { colors, theme } = useTheme()
 
     useEffect(() => {
-        loadUser()
+        loadUserAndMapHistory()
         loadDashboardData()
         const interval = setInterval(loadDashboardData, 30_000)
         return () => clearInterval(interval)
     }, [])
 
-    const loadUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        setUserEmail(user?.email ?? 'admin@biodash.com')
+    const loadUserAndMapHistory = async () => {
+        try {
+            const { data: { user }, error } = await supabase.auth.getUser()
+            if (error) throw error
+
+            setUserEmail(user?.email ?? 'admin@biodash.com')
+
+            if (!user) {
+                setMapMarkers([])
+                return
+            }
+
+            setMapLoading(true)
+            const markers = await fetchMapHistoryByUser(user.id)
+            setMapMarkers(markers)
+        } catch (err) {
+            console.error('Erro ao carregar historico do mapa:', err)
+        } finally {
+            setMapLoading(false)
+        }
     }
 
     const loadDashboardData = async () => {
@@ -260,13 +278,12 @@ export default function DashboardScreen() {
             console.error('Error loading dashboard data:', err)
         } finally {
             setLoading(false);
-            setRefreshing(false);
         }
     }
 
     const onRefresh = () => {
         setRefreshing(true)
-        loadDashboardData()
+        Promise.all([loadDashboardData(), loadUserAndMapHistory()]).finally(() => setRefreshing(false))
     }
 
     const getMetricsArray = () => {
@@ -613,14 +630,36 @@ export default function DashboardScreen() {
                                             }
 
                                             if (typeof lat === 'number' && typeof lon === 'number') {
-                                                setMapMarkers(prev => [...prev, {
-                                                    id: Math.random().toString(),
+                                                const marker: MarkerData = {
+                                                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                                     latitude: lat as number,
                                                     longitude: lon as number,
                                                     title: markerName || 'Nova Instalação',
                                                     description: markerAddress
-                                                }]);
-                                                setTimeout(() => Alert.alert("Sucesso", `Marcador "${markerName}" adicionado ao mapa!`), 500);
+                                                };
+
+                                                setMapMarkers(prev => [...prev, marker]);
+
+                                                let persistedInMongo = false;
+                                                try {
+                                                    const { data: { user } } = await supabase.auth.getUser();
+                                                    if (user?.id) {
+                                                        const result = await saveMapHistoryMarker({
+                                                            userId: user.id,
+                                                            userEmail: user.email,
+                                                            marker,
+                                                        });
+                                                        persistedInMongo = result.persisted;
+                                                    }
+                                                } catch (mongoError) {
+                                                    console.error('Erro ao salvar marcador no MongoDB:', mongoError);
+                                                }
+
+                                                const successMessage = persistedInMongo
+                                                    ? `Marcador "${marker.title}" adicionado e salvo no MongoDB.`
+                                                    : `Marcador "${marker.title}" adicionado localmente. Verifique a configuracao do MongoDB.`;
+
+                                                setTimeout(() => Alert.alert("Sucesso", successMessage), 500);
                                             } else {
                                                 setTimeout(() => Alert.alert("Aviso", `Coordenadas não encontradas parar este endereço.\nTente preencher sem formatações ou verifique a conexão.`), 500);
                                             }
@@ -643,7 +682,14 @@ export default function DashboardScreen() {
                 </Modal>
 
                 <View style={[styles.card, { padding: 0, overflow: 'hidden', height: 220, backgroundColor: colors.cardBackground }]}>
-                    <MapComponent markers={mapMarkers} />
+                    {mapLoading ? (
+                        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                            <ActivityIndicator size="small" color={colors.primary} />
+                            <Text style={{ color: colors.textMuted, marginTop: 8, fontSize: 12 }}>Carregando historico do mapa...</Text>
+                        </View>
+                    ) : (
+                        <MapComponent markers={mapMarkers} />
+                    )}
                 </View>
 
                 <View style={styles.footer}>
