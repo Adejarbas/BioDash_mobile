@@ -102,7 +102,7 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
 
                 {/* Logo Reduzido */}
                 <View style={styles.logoSection}>
-                    <Image source={require('../../assets/logo-biodash.png')} style={{ width: 100, height: 70 }} resizeMode="contain" />
+                    <Image source={require('../../assets/logo-biodash.png')} style={{ width: 200, height: 100 }} resizeMode="contain" />
                 </View>
 
                 {/* Card de Cadastro */}
