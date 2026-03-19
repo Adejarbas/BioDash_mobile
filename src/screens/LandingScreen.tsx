@@ -8,7 +8,9 @@ import {
   SafeAreaView,
   Platform,
   Image,
+  Animated,
 } from 'react-native';
+import { useFadeInUp } from '../hooks/useFadeInUp';
 
 interface Props {
   onNavigateLogin: () => void;
@@ -16,6 +18,7 @@ interface Props {
 }
 
 export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: Props) {
+  const { animatedStyle } = useFadeInUp()
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -33,7 +36,7 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.webContainer}>
+          <Animated.View style={[styles.webContainer, animatedStyle]}>
           {/* Hero Section */}
           <View style={styles.heroSection}>
             <Text style={styles.heroTitle}>Sistema de Gestão de Biodigestores</Text>
@@ -107,7 +110,7 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
               <TouchableOpacity><Text style={styles.footerLink}>Contato</Text></TouchableOpacity>
             </View>
           </View>
-        </View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );

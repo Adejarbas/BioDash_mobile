@@ -11,7 +11,9 @@ import {
     ScrollView,
     Alert,
     Image,
+    Animated,
 } from 'react-native'
+import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'
 
@@ -56,6 +58,8 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
         }
     }
 
+    const { animatedStyle } = useFadeInUp()
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -65,6 +69,7 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                 contentContainerStyle={styles.scroll}
                 keyboardShouldPersistTaps="handled"
             >
+                <Animated.View style={animatedStyle}>
                 {/* Botão de Voltar */}
                 {onBack && (
                     <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
@@ -156,6 +161,7 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                 </View>
 
                 <Text style={styles.footer}>BioDash Mobile v1.0</Text>
+                </Animated.View>
             </ScrollView>
         </KeyboardAvoidingView>
     )

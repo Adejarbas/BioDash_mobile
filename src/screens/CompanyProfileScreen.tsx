@@ -8,8 +8,10 @@ import {
     TextInput,
     Image,
     ActivityIndicator,
-    Alert
+    Alert,
+    Animated,
 } from 'react-native';
+import { useFadeInUp } from '../hooks/useFadeInUp';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
@@ -59,6 +61,7 @@ interface Props {
 
 export default function CompanyProfileScreen({ onBack }: Props) {
     const { colors, theme } = useTheme();
+    const { animatedStyle } = useFadeInUp()
     const [loading, setLoading] = useState(false);
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
@@ -306,6 +309,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+                <Animated.View style={animatedStyle}>
                 {/* TÍTULO DA PÁGINA */}
                 <Text style={[styles.pageTitle, { color: colors.text }]}>Configurações</Text>
                 <Text style={[styles.pageSub, { color: colors.textMuted }]}>
@@ -468,6 +472,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     </View>
                 </View>
 
+                </Animated.View>
             </ScrollView>
         </View>
     );

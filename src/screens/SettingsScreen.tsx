@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native'
+import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { useTheme } from '../context/ThemeContext'
 import RatingModal from '../components/RatingModal'
@@ -20,10 +21,12 @@ export default function SettingsScreen({
     onNavigateHelpCenter
 }: Props) {
     const { colors } = useTheme()
+    const { animatedStyle } = useFadeInUp()
     const [isRatingVisible, setRatingVisible] = useState(false)
 
     return (
         <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.scroll}>
+            <Animated.View style={animatedStyle}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Configurações</Text>
             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gerencie sua conta e preferências operacionais.</Text>
 
@@ -71,6 +74,7 @@ export default function SettingsScreen({
             <View style={{ height: 60 }} />
 
             <RatingModal visible={isRatingVisible} onClose={() => setRatingVisible(false)} />
+            </Animated.View>
         </ScrollView>
     )
 }

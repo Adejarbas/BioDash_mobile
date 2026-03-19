@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Animated } from 'react-native';
+import { useFadeInUp } from '../hooks/useFadeInUp';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -18,7 +19,8 @@ interface Props {
 
 export default function NotificationsScreen({ onBack }: Props) {
     const { colors } = useTheme();
-    const [activities, setActivities] = useState<ActivityItem[]>([]);
+    const { animatedStyle } = useFadeInUp()
+    const [activities, setActivities] = useState<ActivityItem[]>([])
     const [loading, setLoading] = useState(true);
     const [alertsEnabled, setAlertsEnabled] = useState(true);
 
@@ -103,6 +105,7 @@ export default function NotificationsScreen({ onBack }: Props) {
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
+                <Animated.View style={animatedStyle}>
                 <Text style={[styles.pageTitle, { color: colors.text }]}>Notificações e Alertas</Text>
                 <Text style={[styles.pageSub, { color: colors.textMuted }]}>
                     Acompanhe o feed de atividades recentes do seu biodigestor.
@@ -160,6 +163,7 @@ export default function NotificationsScreen({ onBack }: Props) {
                         ))}
                     </View>
                 )}
+                </Animated.View>
             </ScrollView>
         </View>
     );

@@ -10,7 +10,9 @@ import {
     Platform,
     ScrollView,
     Image,
+    Animated,
 } from 'react-native'
+import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'
 
@@ -83,6 +85,8 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
         }
     }
 
+    const { animatedStyle } = useFadeInUp()
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -93,6 +97,7 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
             >
+                <Animated.View style={animatedStyle}>
                 {/* Botão de Voltar */}
                 {onBack && (
                     <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
@@ -265,6 +270,7 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                         <Text style={styles.backButtonText}>Já tenho uma conta. <Text style={{ fontWeight: 'bold', color: '#16a34a' }}>Fazer Login</Text></Text>
                     </TouchableOpacity>
                 </View>
+                </Animated.View>
                 <View style={{ height: 40 }} />
             </ScrollView>
         </KeyboardAvoidingView>

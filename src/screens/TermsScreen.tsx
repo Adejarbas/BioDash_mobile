@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated } from 'react-native';
+import { useFadeInUp } from '../hooks/useFadeInUp';
 import { useTheme } from '../context/ThemeContext';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 
 export default function TermsScreen({ onBack }: Props) {
     const { colors } = useTheme();
+    const { animatedStyle } = useFadeInUp()
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -19,6 +21,7 @@ export default function TermsScreen({ onBack }: Props) {
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
+                <Animated.View style={animatedStyle}>
                 <Text style={[styles.pageTitle, { color: colors.text }]}>Termos de Uso</Text>
                 <Text style={[styles.pageSub, { color: colors.textMuted }]}>
                     Última atualização: Março de 2026
@@ -54,6 +57,7 @@ export default function TermsScreen({ onBack }: Props) {
                         Para dúvidas, entre em contato via Central de Ajuda.
                     </Text>
                 </View>
+                </Animated.View>
             </ScrollView>
         </View>
     );

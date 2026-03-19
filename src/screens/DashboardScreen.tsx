@@ -27,6 +27,7 @@ import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme } from '../context/ThemeContext'
+import { useFadeInUp } from '../hooks/useFadeInUp'
 
 interface MetricData {
     value: number
@@ -413,6 +414,7 @@ export default function DashboardScreen() {
     ]
     const years = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() - 2 + i).toString())
     const { colors, theme } = useTheme()
+    const { animatedStyle: fadeInStyle } = useFadeInUp()
 
     useEffect(() => {
         loadUser()
@@ -906,6 +908,7 @@ export default function DashboardScreen() {
                 contentContainerStyle={styles.scroll}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
+                <Animated.View style={fadeInStyle}>
                 {/* Header movido pro MainTabs App.tsx, então exibimos apenas um título local */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <View>
@@ -1092,6 +1095,7 @@ export default function DashboardScreen() {
                         <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
                     </TouchableOpacity>
                 </View>
+                </Animated.View>
 
                 {/* Map Add Modal */}
                 <Modal visible={isMapModalVisible} transparent animationType="fade">

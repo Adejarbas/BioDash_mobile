@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Animated } from 'react-native';
+import { useFadeInUp } from '../hooks/useFadeInUp';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 
@@ -9,6 +10,7 @@ interface Props {
 
 export default function HelpCenterScreen({ onBack }: Props) {
     const { colors } = useTheme();
+    const { animatedStyle } = useFadeInUp()
 
     const handleContactSupport = () => {
         Linking.openURL('mailto:suporte@biodash.com?subject=Suporte App BioDash');
@@ -31,6 +33,7 @@ export default function HelpCenterScreen({ onBack }: Props) {
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
+                <Animated.View style={animatedStyle}>
                 <Text style={[styles.pageTitle, { color: colors.text }]}>Central de Ajuda</Text>
                 <Text style={[styles.pageSub, { color: colors.textMuted }]}>
                     Dúvidas frequentes e suporte técnico.
@@ -71,6 +74,7 @@ export default function HelpCenterScreen({ onBack }: Props) {
                         <Text style={styles.primaryBtnText}>Contatar Suporte</Text>
                     </TouchableOpacity>
                 </View>
+                </Animated.View>
             </ScrollView>
         </View>
     );
