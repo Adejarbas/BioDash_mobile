@@ -13,11 +13,9 @@ interface ActivityItem {
     timestamp: string;
 }
 
-interface Props {
-    onBack: () => void;
-}
+import { NotificationsScreenProps } from '../navigation/types';
 
-export default function NotificationsScreen({ onBack }: Props) {
+export default function NotificationsScreen({ navigation }: NotificationsScreenProps) {
     const { colors } = useTheme();
     const { animatedStyle } = useFadeInUp()
     const [activities, setActivities] = useState<ActivityItem[]>([])
@@ -98,7 +96,7 @@ export default function NotificationsScreen({ onBack }: Props) {
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                <TouchableOpacity onPress={onBack} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
                     <Text style={{ fontSize: 20, color: colors.text }}>{'<'}</Text>
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: colors.text }]}>Voltar para Ajustes</Text>

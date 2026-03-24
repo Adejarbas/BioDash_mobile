@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, SafeAreaView, Image } from 'react-native'
+import React, { useEffect, useState, ComponentProps } from 'react'
+import { View, ActivityIndicator, StyleSheet, Image, TouchableOpacity, Text } from 'react-native'
 import { supabase } from './src/lib/supabase'
 import LandingScreen from './src/screens/LandingScreen'
 import LoginScreen from './src/screens/LoginScreen'
@@ -11,92 +11,93 @@ import NotificationsScreen from './src/screens/NotificationsScreen'
 import TermsScreen from './src/screens/TermsScreen'
 import HelpCenterScreen from './src/screens/HelpCenterScreen'
 import { StatusBar } from 'expo-status-bar'
-import type { Session } from '@supabase/supabase-js'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons'
+import { NavigationContainer } from '@react-navigation/native'
+import { createNativeStackNavigator } from '@react-navigation/native-stack'
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 
-const TEST_MODE = false; // <--- MODO DE TESTE DESATIVADO
+const TEST_MODE = false;
 
-// --- COMPONENTE DE ABAS (MENU INFERIOR) ---
-type SubScreen = 'none' | 'profile' | 'notifications' | 'terms' | 'helpCenter';
+import { AuthStackParamList, SettingsStackParamList, MainTabParamList } from './src/navigation/types'
 
-function MainTabs({ onLogout }: { onLogout: () => void }) {
-  const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home')
-  const [currentSubScreen, setCurrentSubScreen] = useState<SubScreen>('none')
+const AuthStack = createNativeStackNavigator<AuthStackParamList>();
+const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
+const Tab = createBottomTabNavigator<MainTabParamList>();
+
+// --- HEADER GLOBAL ---
+function CustomHeader() {
   const { theme, toggleTheme, colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header Fixo Global */}
-      <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 16) }]}>
-        <Image source={require('./assets/logo-biodash.png')} style={{ width: 100, height: 70, marginRight: 12 }} resizeMode="contain" />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
-        </View>
-
-        <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
-          <MaterialCommunityIcons name={theme === 'light' ? 'weather-night' : 'white-balance-sunny'} size={22} color={colors.text} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Tela Ativa */}
+    <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 16) }]}>
+      <Image source={require('./assets/logo-biodash.png')} style={{ width: 100, height: 70, marginRight: 12 }} resizeMode="contain" />
       <View style={{ flex: 1 }}>
-        {activeTab === 'home' ? (
-          <DashboardScreen />
-        ) : currentSubScreen === 'profile' ? (
-          <CompanyProfileScreen onBack={() => setCurrentSubScreen('none')} />
-        ) : currentSubScreen === 'notifications' ? (
-          <NotificationsScreen onBack={() => setCurrentSubScreen('none')} />
-        ) : currentSubScreen === 'terms' ? (
-          <TermsScreen onBack={() => setCurrentSubScreen('none')} />
-        ) : currentSubScreen === 'helpCenter' ? (
-          <HelpCenterScreen onBack={() => setCurrentSubScreen('none')} />
-        ) : (
-          <SettingsScreen
-            onLogout={onLogout}
-            onNavigateProfile={() => setCurrentSubScreen('profile')}
-            onNavigateNotifications={() => setCurrentSubScreen('notifications')}
-            onNavigateTerms={() => setCurrentSubScreen('terms')}
-            onNavigateHelpCenter={() => setCurrentSubScreen('helpCenter')}
-          />
-        )}
+        <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
       </View>
 
-      {/* Barra de Navegação */}
-      <View style={[styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <TouchableOpacity
-          style={styles.tabItem}
-          onPress={() => {
-            setActiveTab('home');
-            setCurrentSubScreen('none');
-          }}
-          activeOpacity={0.7}
-        >
-          <MaterialIcons name="dashboard" size={24} color={activeTab === 'home' ? colors.primary : colors.textMuted} />
-          <Text style={[styles.tabLabel, activeTab === 'home' && { color: colors.primary }]}>Painel</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.tabItem}
-          onPress={() => {
-            setActiveTab('settings');
-            setCurrentSubScreen('none'); // Reseta a sub-tela ao clicar na tab
-          }}
-          activeOpacity={0.7}
-        >
-          <MaterialIcons name="settings" size={24} color={activeTab === 'settings' ? colors.primary : colors.textMuted} />
-          <Text style={[styles.tabLabel, activeTab === 'settings' && { color: colors.primary }]}>Ajustes</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
+        <MaterialCommunityIcons name={theme === 'light' ? 'weather-night' : 'white-balance-sunny'} size={22} color={colors.text} />
+      </TouchableOpacity>
     </View>
-  )
+  );
 }
 
+// --- STACK DE CONFIGURAÇÕES ---
+function SettingsStackNavigator({ onLogout }: { onLogout: () => void }) {
+  const { colors } = useTheme();
+
+  return (
+    <SettingsStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background }
+      }}
+    >
+      <SettingsStack.Screen name="SettingsHome">
+        {(props) => <SettingsScreen {...props} onLogout={onLogout} />}
+      </SettingsStack.Screen>
+      <SettingsStack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
+      <SettingsStack.Screen name="Notifications" component={NotificationsScreen} />
+      <SettingsStack.Screen name="Terms" component={TermsScreen} />
+      <SettingsStack.Screen name="HelpCenter" component={HelpCenterScreen} />
+    </SettingsStack.Navigator>
+  );
+}
+
+// --- TABS PRINCIPAIS ---
+function MainTabs({ onLogout }: { onLogout: () => void }) {
+  const { colors } = useTheme();
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <CustomHeader />
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarStyle: [styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }],
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textMuted,
+          tabBarIcon: ({ color, size }) => {
+            const iconName = route.name === 'Dashboard' ? 'dashboard' : 'settings';
+            return <MaterialIcons name={iconName as any} size={size} color={color} />;
+          },
+        })}
+      >
+        <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Painel' }} />
+        <Tab.Screen name="Settings" options={{ title: 'Ajustes' }}>
+          {() => <SettingsStackNavigator onLogout={onLogout} />}
+        </Tab.Screen>
+      </Tab.Navigator>
+    </View>
+  );
+}
+
+// --- APP PRINCIPAL ---
 function MainApp() {
   const [session, setSession] = useState<any>(null)
-  const [currentScreen, setCurrentScreen] = useState<'landing' | 'login' | 'register'>('landing')
   const [loading, setLoading] = useState(true)
   const { theme, colors } = useTheme();
 
@@ -106,13 +107,11 @@ function MainApp() {
       return;
     }
 
-    // Verifica sessão salva ao abrir o app
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setLoading(false)
     })
 
-    // Ouve mudanças de autenticação em tempo real
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session)
@@ -130,48 +129,21 @@ function MainApp() {
     )
   }
 
-  // Se estiver logado, exibe as abas com Painel e Configurações
-  if (session) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-        <MainTabs onLogout={() => setSession(null)} />
-      </View>
-    )
-  }
-
-  // Se não estiver logado, escolhe entre Login ou Cadastro
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <NavigationContainer>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-      {currentScreen === 'landing' ? (
-        <LandingScreen
-          onNavigateLogin={() => setCurrentScreen('login')}
-          onNavigateRegister={() => setCurrentScreen('register')}
-        />
-      ) : currentScreen === 'register' ? (
-        <RegisterScreen
-          onBackToLogin={() => setCurrentScreen('login')}
-          onRegisterSuccess={() => {
-            // Em modo teste, loga automaticamente após o cadastro fechar
-            setSession({ user: { email: 'nova_empresa@biodash.com' } })
-          }}
-          onBack={() => setCurrentScreen('landing')}
-        />
+      {session ? (
+        <MainTabs onLogout={() => supabase.auth.signOut()} />
       ) : (
-        <LoginScreen
-          onLogin={() => {
-            // The session will automatically update via the onAuthStateChange listener
-            // We don't need to manually setSession here unless needed for forced UI updates 
-          }}
-          onNavigateRegister={() => setCurrentScreen('register')}
-          onBack={() => setCurrentScreen('landing')}
-        />
+        <AuthStack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+          <AuthStack.Screen name="Landing" component={LandingScreen} />
+          <AuthStack.Screen name="Login" component={LoginScreen} />
+          <AuthStack.Screen name="Register" component={RegisterScreen} />
+        </AuthStack.Navigator>
       )}
-    </View>
+    </NavigationContainer>
   )
 }
-
 
 export default function App() {
   return (

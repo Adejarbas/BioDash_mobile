@@ -16,13 +16,9 @@ import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'
 
-interface Props {
-    onRegisterSuccess: () => void
-    onBackToLogin: () => void
-    onBack?: () => void
-}
+import { RegisterScreenProps } from '../navigation/types'
 
-export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBack }: Props) {
+export default function RegisterScreen({ navigation }: RegisterScreenProps) {
     const [name, setName] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -76,7 +72,7 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                     }
                 }
 
-                onRegisterSuccess() // Se der sucesso, volta pro login ou mostra msg de confirmação
+                navigation.navigate('Login') // Se der sucesso, volta pro login
             }
         } catch (e) {
             setError('Erro inesperado. Tente novamente mais tarde.')
@@ -99,11 +95,9 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
             >
                 <Animated.View style={animatedStyle}>
                 {/* Botão de Voltar */}
-                {onBack && (
-                    <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
-                        <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar para a tela inicial</Text>
-                    </TouchableOpacity>
-                )}
+                <TouchableOpacity style={{ marginBottom: 20 }} onPress={() => navigation.goBack()}>
+                    <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar</Text>
+                </TouchableOpacity>
 
                 {/* Logo Reduzido */}
                 <View style={styles.logoSection}>
@@ -266,7 +260,7 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                     </TouchableOpacity>
 
                     {/* Link de volta pro login */}
-                    <TouchableOpacity style={styles.backButton} onPress={onBackToLogin}>
+                    <TouchableOpacity style={styles.backButton} onPress={() => navigation.navigate('Login')}>
                         <Text style={styles.backButtonText}>Já tenho uma conta. <Text style={{ fontWeight: 'bold', color: '#16a34a' }}>Fazer Login</Text></Text>
                     </TouchableOpacity>
                 </View>

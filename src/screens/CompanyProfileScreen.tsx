@@ -55,11 +55,9 @@ const InfoRow = ({ label1, val1, label2, val2, colors }: any) => (
     </View>
 );
 
-interface Props {
-    onBack: () => void;
-}
+import { CompanyProfileScreenProps } from '../navigation/types';
 
-export default function CompanyProfileScreen({ onBack }: Props) {
+export default function CompanyProfileScreen({ navigation }: CompanyProfileScreenProps) {
     const { colors, theme } = useTheme();
     const { animatedStyle } = useFadeInUp()
     const [loading, setLoading] = useState(false);
@@ -302,7 +300,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             {/* HEADER */}
             <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                <TouchableOpacity onPress={onBack} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
                     <Text style={{ fontSize: 20, color: colors.text }}>{'<'}</Text>
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: colors.text }]}>Voltar para Ajustes</Text>

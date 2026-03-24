@@ -12,12 +12,9 @@ import {
 } from 'react-native';
 import { useFadeInUp } from '../hooks/useFadeInUp';
 
-interface Props {
-  onNavigateLogin: () => void;
-  onNavigateRegister: () => void;
-}
+import { LandingScreenProps } from '../navigation/types';
 
-export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: Props) {
+export default function LandingScreen({ navigation }: LandingScreenProps) {
   const { animatedStyle } = useFadeInUp()
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -26,10 +23,10 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
           <Image source={require('../../assets/logo-biodash.png')} style={{ width: 100, height: 70 }} resizeMode="contain" />
         </View>
         <View style={styles.headerButtons}>
-          <TouchableOpacity style={styles.loginButton} onPress={onNavigateLogin}>
+          <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate('Login')}>
             <Text style={styles.loginButtonText}>Entrar</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.registerButton} onPress={onNavigateRegister}>
+          <TouchableOpacity style={styles.registerButton} onPress={() => navigation.navigate('Register')}>
             <Text style={styles.registerButtonText}>Cadastre-se</Text>
           </TouchableOpacity>
         </View>

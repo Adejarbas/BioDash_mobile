@@ -5,21 +5,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { useTheme } from '../context/ThemeContext'
 import RatingModal from '../components/RatingModal'
 
-interface Props {
-    onLogout: () => void
-    onNavigateProfile?: () => void
-    onNavigateNotifications?: () => void
-    onNavigateTerms?: () => void
-    onNavigateHelpCenter?: () => void
-}
+import { SettingsScreenProps } from '../navigation/types'
 
 export default function SettingsScreen({
-    onLogout,
-    onNavigateProfile,
-    onNavigateNotifications,
-    onNavigateTerms,
-    onNavigateHelpCenter
-}: Props) {
+    navigation,
+    onLogout
+}: SettingsScreenProps & { onLogout: () => void }) {
     const { colors } = useTheme()
     const { animatedStyle } = useFadeInUp()
     const [isRatingVisible, setRatingVisible] = useState(false)
@@ -31,13 +22,13 @@ export default function SettingsScreen({
             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gerencie sua conta e preferências operacionais.</Text>
 
             <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
-                <TouchableOpacity style={styles.row} onPress={onNavigateProfile}>
+                <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CompanyProfile')}>
                     <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="account-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Perfil da Empresa</Text>
                     <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <TouchableOpacity style={styles.row} onPress={onNavigateNotifications}>
+                <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('Notifications')}>
                     <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="bell-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Notificações e Alertas</Text>
                     <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
@@ -47,13 +38,13 @@ export default function SettingsScreen({
             <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Aplicativo e Suporte</Text>
 
             <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
-                <TouchableOpacity style={styles.row} onPress={onNavigateHelpCenter}>
+                <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('HelpCenter')}>
                     <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="help-circle-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Central de Ajuda</Text>
                     <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <TouchableOpacity style={styles.row} onPress={onNavigateTerms}>
+                <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('Terms')}>
                     <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="file-document-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Termos de Uso e Privacidade</Text>
                     <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />

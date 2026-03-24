@@ -17,13 +17,9 @@ import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'
 
-interface Props {
-    onLogin: () => void
-    onNavigateRegister?: () => void
-    onBack?: () => void
-}
+import { LoginScreenProps } from '../navigation/types'
 
-export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Props) {
+export default function LoginScreen({ navigation }: LoginScreenProps) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
@@ -49,7 +45,7 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                 setError(authError.message === 'Invalid login credentials' ? 'Email ou Senha inválidos.' : authError.message)
             } else {
                 console.log("Login OK!");
-                onLogin()
+                // The session will automatically update via the onAuthStateChange listener
             }
         } catch (e) {
             setError('Erro inesperado. Tente novamente.')
@@ -71,11 +67,9 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
             >
                 <Animated.View style={animatedStyle}>
                 {/* Botão de Voltar */}
-                {onBack && (
-                    <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
-                        <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar para a tela inicial</Text>
-                    </TouchableOpacity>
-                )}
+                <TouchableOpacity style={{ marginBottom: 20 }} onPress={() => navigation.goBack()}>
+                    <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar</Text>
+                </TouchableOpacity>
 
                 {/* Logo */}
                 <View style={styles.logoSection}>
@@ -152,7 +146,7 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                     {/* Link para Cadastro */}
                     <TouchableOpacity
                         style={{ marginTop: 24, alignItems: 'center' }}
-                        onPress={onNavigateRegister}
+                        onPress={() => navigation.navigate('Register')}
                     >
                         <Text style={{ fontSize: 14, color: '#64748b' }}>
                             Não tem uma conta? <Text style={{ fontWeight: 'bold', color: '#16a34a' }}>Cadastre-se</Text>

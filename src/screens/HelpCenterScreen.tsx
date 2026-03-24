@@ -4,11 +4,9 @@ import { useFadeInUp } from '../hooks/useFadeInUp';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 
-interface Props {
-    onBack: () => void;
-}
+import { HelpCenterScreenProps } from '../navigation/types';
 
-export default function HelpCenterScreen({ onBack }: Props) {
+export default function HelpCenterScreen({ navigation }: HelpCenterScreenProps) {
     const { colors } = useTheme();
     const { animatedStyle } = useFadeInUp()
 
@@ -26,7 +24,7 @@ export default function HelpCenterScreen({ onBack }: Props) {
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                <TouchableOpacity onPress={onBack} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
                     <Text style={{ fontSize: 20, color: colors.text }}>{'<'}</Text>
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: colors.text }]}>Voltar para Ajustes</Text>
