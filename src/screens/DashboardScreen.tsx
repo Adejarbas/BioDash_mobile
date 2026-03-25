@@ -915,13 +915,21 @@ export default function DashboardScreen() {
                         <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
                         <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Visão geral do biodigestor.</Text>
                     </View>
-                    <TouchableOpacity
-                        style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                        onPress={() => setMetricsModalVisible(true)}
-                    >
-                        <MaterialCommunityIcons name="pencil-outline" size={14} color="#fff" />
-                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Atualizar</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                            style={{ backgroundColor: colors.cardBackground, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' }}
+                            onPress={openOrderModal}
+                        >
+                            <MaterialCommunityIcons name="sort-variant" size={20} color={colors.text} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                            onPress={() => setMetricsModalVisible(true)}
+                        >
+                            <MaterialCommunityIcons name="pencil-outline" size={14} color="#fff" />
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Atualizar</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {referenceDate ? (
@@ -934,10 +942,20 @@ export default function DashboardScreen() {
                 ) : null}
 
                 <View style={styles.grid}>
-                    <StatCard title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" iconProvider="MaterialCommunityIcons" color="#22c55e" bgColor="#dcfce7" />
-                    <StatCard title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" iconProvider="MaterialCommunityIcons" color="#eab308" bgColor="#fef9c3" />
-                    <StatCard title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" iconProvider="MaterialCommunityIcons" color="#3b82f6" bgColor="#dbeafe" />
-                    <StatCard title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" iconProvider="MaterialCommunityIcons" color="#16a34a" bgColor="#bbf7d0" />
+                    {cardOrder.map((key) => {
+                        switch (key) {
+                            case 'waste':
+                                return <StatCard key="waste" title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" iconProvider="MaterialCommunityIcons" color="#22c55e" bgColor="#dcfce7" />
+                            case 'energy':
+                                return <StatCard key="energy" title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" iconProvider="MaterialCommunityIcons" color="#eab308" bgColor="#fef9c3" />
+                            case 'tax':
+                                return <StatCard key="tax" title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" iconProvider="MaterialCommunityIcons" color="#3b82f6" bgColor="#dbeafe" />
+                            case 'efficiency':
+                                return <StatCard key="efficiency" title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" iconProvider="MaterialCommunityIcons" color="#16a34a" bgColor="#bbf7d0" />
+                            default:
+                                return null
+                        }
+                    })}
                 </View>
 
                 {/* Visão Geral (Múltiplas Métricas) */}
