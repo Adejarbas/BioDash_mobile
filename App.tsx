@@ -31,7 +31,7 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header Fixo Global */}
       <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 16) }]}>
-        <Image source={require('./assets/logo-biodash.png')} style={{ width: 100, height: 70, marginRight: 12 }} resizeMode="contain" />
+        <Image source={require('./assets/logo-biodash.png')} style={{ width: 200, height: 100, marginRight: 12 }} resizeMode="contain" />
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
         </View>
