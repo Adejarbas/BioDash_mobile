@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import jwt from 'jsonwebtoken';
 
 // MongoDB Marker Schema
 const markerSchema = new mongoose.Schema({
@@ -25,22 +26,49 @@ const connectDB = async () => {
   return connection;
 };
 
+// Helper: Extract and validate userId from JWT
+const getUserId = (event: any): string | null => {
+  try {
+    const authHeader = event.headers?.Authorization || event.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+
+    const token = authHeader.split(' ')[1];
+    const secret = process.env.SUPABASE_JWT_SECRET;
+    
+    if (!secret) {
+      console.error('SUPABASE_JWT_SECRET is not defined');
+      return null;
+    }
+
+    const decoded: any = jwt.verify(token, secret);
+    return decoded.sub; // 'sub' field in Supabase JWT is the User ID
+  } catch (err) {
+    console.error('JWT Validation Error:', err);
+    return null;
+  }
+};
+
 export const handler = async (event: any) => {
   await connectDB();
 
-  const { httpMethod, pathParameters, body, queryStringParameters } = event;
-  const userId = queryStringParameters?.userId || (body ? JSON.parse(body).userId : null);
+  const userId = getUserId(event);
+  if (!userId) {
+    return response(401, { message: 'Unauthorized: Invalid or missing token' });
+  }
+
+  const { httpMethod, pathParameters, body } = event;
 
   try {
     switch (httpMethod) {
       case 'GET':
-        if (!userId) return response(400, { message: 'userId is required' });
         const markers = await Marker.find({ userId }).sort({ createdAt: -1 });
         return response(200, markers);
 
       case 'POST':
         const data = JSON.parse(body);
-        if (!data.userId) return response(400, { message: 'userId is required' });
+        
+        // Always override userId with the one from the token for security
+        data.userId = userId;
 
         let savedMarker;
         if (data.id && mongoose.Types.ObjectId.isValid(data.id)) {
@@ -58,7 +86,14 @@ export const handler = async (event: any) => {
       case 'DELETE':
         const idToDelete = pathParameters?.id;
         if (!idToDelete) return response(400, { message: 'id is required' });
-        await Marker.findByIdAndDelete(idToDelete);
+        
+        // Ensure the user owns the marker before deleting
+        const markerToDelete = await Marker.findOne({ _id: idToDelete, userId });
+        if (!markerToDelete) {
+          return response(404, { message: 'Marker not found or access denied' });
+        }
+
+        await Marker.deleteOne({ _id: idToDelete });
         return response(200, { message: 'Marker deleted successfully' });
 
       default:
@@ -74,8 +109,9 @@ const response = (statusCode: number, body: any) => ({
   statusCode,
   headers: {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*', // Enable CORS
+    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
   },
   body: JSON.stringify(body),
 });
