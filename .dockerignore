@@ -11,3 +11,5 @@ web-build
 .git
 .github
 .vscode
+.env
+.env.*
