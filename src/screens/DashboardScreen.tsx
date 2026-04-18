@@ -182,23 +182,83 @@ export default function DashboardScreen() {
         const m = mapMarkers.find(x => x.id === id);
         if (!m) return;
 
+        // Feedback imediato na UI de que a descrição/endereço está sendo atualizada
+        setMapMarkers(prev => prev.map(x => x.id === id ? { 
+            ...x, 
+            latitude: coord.latitude, 
+            longitude: coord.longitude,
+            description: "📍 Atualizando endereço..." 
+        } : x));
+
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
+            let newDescription = m.description;
+            let newRawAddress = m.rawAddress || {};
+
+            // Realiza reverse geocoding para atualizar o endereço arrastado
+            try {
+                const headers = { 'User-Agent': 'BioDashMobileApp/1.0', 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7' };
+                const resGeo = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coord.latitude}&lon=${coord.longitude}`, { headers });
+                const geoData = await resGeo.json();
+
+                if (geoData && geoData.address) {
+                    const addr = geoData.address;
+                    const logradouro = addr.road || addr.pedestrian || addr.suburb || newRawAddress.logradouro || '';
+                    const cep = addr.postcode || newRawAddress.cep || '';
+                    const numero = addr.house_number || '';
+                    const cidade = addr.city || addr.town || addr.village || '';
+                    
+                    const addressFull = `${logradouro}${numero ? ', ' + numero : ''}${cidade ? ' - ' + cidade : ''}, ${cep}, Brasil`.replace(/^,\s*/, '');
+                    
+                    newDescription = addressFull;
+                    newRawAddress = {
+                        ...newRawAddress,
+                        full_address: addressFull,
+                        lat: coord.latitude,
+                        lon: coord.longitude,
+                        cep: cep,
+                        logradouro: logradouro,
+                        numero: numero
+                    };
+                } else {
+                     newDescription = "Endereço não identificado pelo mapa";
+                }
+            } catch (geoError) {
+                console.error("Erro na geocodificação reversa ao arrastar:", geoError);
+                newDescription = "Erro ao carregar logradouro";
+            }
+
             const updateData = {
                 id,
                 userId: user.id,
+                title: m.title,          // Mantém o title/owner do payload
+                description: newDescription, // Atualiza para o novo endereço físico
                 latitude: coord.latitude,
-                longitude: coord.longitude
+                longitude: coord.longitude,
+                rawAddress: newRawAddress
             };
 
             const res = await markersApi.save(updateData);
             if (res.success) {
-                setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, latitude: coord.latitude, longitude: coord.longitude } : x));
+                setMapMarkers(prev => prev.map(x => x.id === id ? { 
+                    ...x, 
+                    title: m.title,
+                    description: newDescription,
+                    rawAddress: newRawAddress,
+                    latitude: coord.latitude, 
+                    longitude: coord.longitude 
+                } : x));
+            } else {
+                // Reverter caso o salvamento falhe
+                setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, description: m.description, latitude: m.latitude, longitude: m.longitude } : x));
+                Alert.alert("Erro", "Não foi possível salvar a nova posição.");
             }
         } catch (e) {
             console.error("Erro ao arrastar marcador:", e);
+            // Reverter caso haja falha severa na rede/supabase
+            setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, description: m.description, latitude: m.latitude, longitude: m.longitude } : x));
         }
     };
 
@@ -1248,23 +1308,22 @@ export default function DashboardScreen() {
                                                 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
                                             };
 
-                                            // Geocodificação (apenas se for novo marcador ou se o endereço mudou)
-                                            if (!markerEditingId) {
-                                                const cleanAddress = markerAddress.replace(/[-/]/g, ',');
-                                                const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
-                                                let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
-                                                let geoData = await geoRes.json();
+                                            // Geocodificação: Faz a busca da latitude e longitude também na edição (caso tenham mudado CEP ou endereço)
+                                            // Antes estava preso no if (!markerEditingId), o que ignorava a atualização das coordenadas
+                                            const cleanAddress = markerAddress.replace(/[-/]/g, ',');
+                                            const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
+                                            let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
+                                            let geoData = await geoRes.json();
 
+                                            if (geoData && geoData.length > 0) {
+                                                lat = parseFloat(geoData[0].lat);
+                                                lon = parseFloat(geoData[0].lon);
+                                            } else if (markerCep) {
+                                                geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
+                                                geoData = await geoRes.json();
                                                 if (geoData && geoData.length > 0) {
                                                     lat = parseFloat(geoData[0].lat);
                                                     lon = parseFloat(geoData[0].lon);
-                                                } else if (markerCep) {
-                                                    geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
-                                                    geoData = await geoRes.json();
-                                                    if (geoData && geoData.length > 0) {
-                                                        lat = parseFloat(geoData[0].lat);
-                                                        lon = parseFloat(geoData[0].lon);
-                                                    }
                                                 }
                                             }
 
