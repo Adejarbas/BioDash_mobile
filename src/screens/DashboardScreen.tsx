@@ -97,7 +97,7 @@ export default function DashboardScreen() {
     const [isOrderModalVisible, setOrderModalVisible] = useState(false)
     const [tempOrder, setTempOrder] = useState<CardKey[]>(DEFAULT_CARD_ORDER)
 
-    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; rawAddress?: any; }
+    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; address?: any; }
     const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
     const [mapFocusLocation, setMapFocusLocation] = useState<{ latitude: number, longitude: number } | undefined>(undefined);
 
@@ -163,7 +163,7 @@ export default function DashboardScreen() {
                 longitude: row.longitude,
                 title: row.title,
                 description: row.description,
-                rawAddress: row.rawAddress
+                address: row.address
             }))
 
             setMapMarkers(ms)
@@ -195,7 +195,7 @@ export default function DashboardScreen() {
             if (!user) return;
 
             let newDescription = m.description;
-            let newRawAddress = m.rawAddress || {};
+            let newAddress = m.address || {};
 
             // Realiza reverse geocoding para atualizar o endereço arrastado
             try {
@@ -205,22 +205,19 @@ export default function DashboardScreen() {
 
                 if (geoData && geoData.address) {
                     const addr = geoData.address;
-                    const logradouro = addr.road || addr.pedestrian || addr.suburb || newRawAddress.logradouro || '';
-                    const cep = addr.postcode || newRawAddress.cep || '';
+                    const logradouro = addr.road || addr.pedestrian || addr.suburb || newAddress.street || '';
+                    const cep = addr.postcode || newAddress.cep || '';
                     const numero = addr.house_number || '';
                     const cidade = addr.city || addr.town || addr.village || '';
                     
                     const addressFull = `${logradouro}${numero ? ', ' + numero : ''}${cidade ? ' - ' + cidade : ''}, ${cep}, Brasil`.replace(/^,\s*/, '');
                     
                     newDescription = addressFull;
-                    newRawAddress = {
-                        ...newRawAddress,
-                        full_address: addressFull,
-                        lat: coord.latitude,
-                        lon: coord.longitude,
+                    newAddress = {
                         cep: cep,
-                        logradouro: logradouro,
-                        numero: numero
+                        street: logradouro,
+                        number: numero,
+                        complement: newAddress.complement || ''
                     };
                 } else {
                      newDescription = "Endereço não identificado pelo mapa";
@@ -233,11 +230,11 @@ export default function DashboardScreen() {
             const updateData = {
                 id,
                 userId: user.id,
-                title: m.title,          // Mantém o title/owner do payload
-                description: newDescription, // Atualiza para o novo endereço físico
+                title: m.title,
+                description: newDescription,
                 latitude: coord.latitude,
                 longitude: coord.longitude,
-                rawAddress: newRawAddress
+                address: newAddress
             };
 
             const res = await markersApi.save(updateData);
@@ -246,7 +243,7 @@ export default function DashboardScreen() {
                     ...x, 
                     title: m.title,
                     description: newDescription,
-                    rawAddress: newRawAddress,
+                    address: newAddress,
                     latitude: coord.latitude, 
                     longitude: coord.longitude 
                 } : x));
@@ -277,20 +274,17 @@ export default function DashboardScreen() {
 
     const handleEditMarker = (m: any) => {
         setMarkerEditingId(m.id);
-        const addr = m.rawAddress || {};
+        const addr = m.address || {};
 
-        // Nome: prioriza o que está no JSON 'nome', senão usa o título do marcador
-        setMarkerName(addr.nome || m.title || '');
+        setMarkerName(m.title || '');
 
-        // Se temos dados granulares, usamos eles
-        if (addr.logradouro || addr.cep) {
+        if (addr.street || addr.cep) {
             setMarkerCep(addr.cep || '');
-            setMarkerAddress(addr.logradouro || '');
-            setMarkerNumber(addr.numero || '');
-            setMarkerComplement(addr.complemento || '');
+            setMarkerAddress(addr.street || '');
+            setMarkerNumber(addr.number || '');
+            setMarkerComplement(addr.complement || '');
         } else {
-            // Fallback para dados antigos que só tinham full_address
-            const full = addr.full_address || m.description || '';
+            const full = m.description || '';
             setMarkerAddress(full.split(',')[0] || '');
             setMarkerCep('');
             setMarkerNumber('');
@@ -1328,14 +1322,10 @@ export default function DashboardScreen() {
                                             if (user) {
                                                 const addressFull = `${markerAddress}${markerNumber ? ', ' + markerNumber : ''}${markerComplement ? ' - ' + markerComplement : ''}, ${markerCep}, Brasil`.replace(/'/g, "");
                                                 const addressJson = {
-                                                    nome: markerName,
-                                                    full_address: addressFull,
-                                                    lat: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : undefined),
-                                                    lon: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : undefined),
                                                     cep: markerCep,
-                                                    logradouro: markerAddress,
-                                                    numero: markerNumber,
-                                                    complemento: markerComplement
+                                                    street: markerAddress,
+                                                    number: markerNumber,
+                                                    complement: markerComplement
                                                 };
 
                                                 const markerPayload = {
@@ -1345,7 +1335,7 @@ export default function DashboardScreen() {
                                                     description: addressFull,
                                                     latitude: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : 0),
                                                     longitude: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : 0),
-                                                    rawAddress: addressJson
+                                                    address: addressJson
                                                 };
 
                                                 const res = await markersApi.save(markerPayload);
