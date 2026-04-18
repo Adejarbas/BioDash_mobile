@@ -1,14 +1,16 @@
 {
   "name": "biodash-mobile",
-  "version": "0.3.0",
+  "version": "0.8.3",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "^8.4.4",
     "@supabase/supabase-js": "^2.98.0",
@@ -36,8 +38,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/react": "~18.3.12",
+    "@types/react": "^19.2.14",
     "typescript": "^5.3.3"
   },
   "private": true

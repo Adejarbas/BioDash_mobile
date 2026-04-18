@@ -5,3 +5,10 @@
 5. Incluir tela de registro e esqueci minha senha com validação por email.
 6. INCLUIR FILTRO PARA MAIS BIODIGESTORES POR USUÁRIO
 7. Adicionar recursos de acessibilidade
+
+
+-----------------------
+
+8. Adicionar legendas horizontais nos gráficos
+9. Alterar "Imposto Abatido" por "Benefício Fiscal Aplicável"
+10. Fazer a customização dos cards e gravar localmente

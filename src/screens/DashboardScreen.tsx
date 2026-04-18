@@ -17,7 +17,7 @@ import {
     Platform,
     UIManager
 } from 'react-native'
-import { MaterialCommunityIcons } from '@expo/vector-icons'
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
@@ -28,6 +28,7 @@ import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme } from '../context/ThemeContext'
+import { useFadeInUp } from '../hooks/useFadeInUp'
 
 interface MetricData {
     value: number
@@ -91,7 +92,7 @@ export default function DashboardScreen() {
     const [cepLoading, setCepLoading] = useState(false)
     const [chartData, setChartData] = useState<ChartPoint[]>([])
 
-    // States for custom card ordering
+
     const [cardOrder, setCardOrder] = useState<CardKey[]>(DEFAULT_CARD_ORDER)
     const [isOrderModalVisible, setOrderModalVisible] = useState(false)
     const [tempOrder, setTempOrder] = useState<CardKey[]>(DEFAULT_CARD_ORDER)
@@ -417,6 +418,7 @@ export default function DashboardScreen() {
     ]
     const years = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() - 2 + i).toString())
     const { colors, theme } = useTheme()
+    const { animatedStyle: fadeInStyle } = useFadeInUp()
 
     useEffect(() => {
         loadUser()
@@ -466,7 +468,7 @@ export default function DashboardScreen() {
     }
 
     const changedOrder = (oldOrder: CardKey[], newOrder: CardKey[]) => {
-        for (let i=0; i < oldOrder.length; i++) {
+        for (let i = 0; i < oldOrder.length; i++) {
             if (oldOrder[i] !== newOrder[i]) {
                 return true
             }
@@ -511,7 +513,7 @@ export default function DashboardScreen() {
         switch (key) {
             case 'waste': return 'Resíduos'
             case 'energy': return 'Energia'
-            case 'tax': return 'Impostos'
+            case 'tax': return 'Benefícios Aplicáveis'
             case 'efficiency': return 'Eficiência'
             default: return ''
         }
@@ -903,6 +905,27 @@ export default function DashboardScreen() {
     // Filtro de Tabs pro Gráfico
     const isHighlight = (tab: string) => selectedTab === tab
 
+    const isSingleTab = selectedTab !== 'all';
+    const chartMaxEnergy = Math.max(...chartData.map(d => d.energyGenerated), 100) * 1.1;
+    const chartMaxWaste = Math.max(...chartData.map(d => d.wasteProcessed), 100) * 1.1;
+    const chartMaxTax = Math.max(...chartData.map(d => d.taxDeduction), 100) * 1.1;
+
+    const currentMaxEnergy = isSingleTab && selectedTab === 'energy' ? chartMaxEnergy : 15000;
+    const currentMaxWaste = isSingleTab && selectedTab === 'waste' ? chartMaxWaste : 4000;
+    const currentMaxTax = isSingleTab && selectedTab === 'tax' ? chartMaxTax : 12000;
+
+    const chartAxisLabels = (() => {
+        const formatVal = (v: number) => {
+            if (v === 0) return '0';
+            if (v >= 1000) return (v / 1000).toFixed(1).replace('.0', '') + 'k';
+            return Math.round(v).toString();
+        };
+        if (selectedTab === 'energy') return [1, 0.75, 0.5, 0.25, 0].map(f => formatVal(currentMaxEnergy * f));
+        if (selectedTab === 'waste') return [1, 0.75, 0.5, 0.25, 0].map(f => formatVal(currentMaxWaste * f));
+        if (selectedTab === 'tax') return [1, 0.75, 0.5, 0.25, 0].map(f => formatVal(currentMaxTax * f));
+        return ['100%', '75%', '50%', '25%', '0%'];
+    })();
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.background }}>
             <ScrollView
@@ -910,202 +933,231 @@ export default function DashboardScreen() {
                 contentContainerStyle={styles.scroll}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
-                {/* Header movido pro MainTabs App.tsx, então exibimos apenas um título local */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <View>
-                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
-                        <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Visão geral do biodigestor.</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <TouchableOpacity
-                            style={{ backgroundColor: colors.cardBackground, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border }}
-                            onPress={openOrderModal}
-                        >
-                            <Text style={{ color: colors.text, fontSize: 12, fontWeight: 'bold' }}>⚙️ Ordenar</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                            onPress={() => setMetricsModalVisible(true)}
-                        >
-                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✏️ Atualizar</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {referenceDate ? (
-                    <View style={{ marginBottom: 12, paddingHorizontal: 4 }}>
-                        <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>
-                            📅 Dados referentes a {referenceDate}
-                        </Text>
-                    </View>
-                ) : null}
-
-                {/* Cards dinâmicos e ordenáveis */}
-                <View style={styles.grid}>
-                    {cardOrder.map(key => {
-                        if (key === 'waste') return <StatCard key="waste" title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} emoji="💧" color="#22c55e" bgColor="#dcfce7" />
-                        if (key === 'energy') return <StatCard key="energy" title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} emoji="⚡" color="#eab308" bgColor="#fef9c3" />
-                        if (key === 'tax') return <StatCard key="tax" title="Impostos" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} emoji="💰" color="#3b82f6" bgColor="#dbeafe" />
-                        if (key === 'efficiency') return <StatCard key="efficiency" title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} emoji="🌿" color="#16a34a" bgColor="#bbf7d0" />
-                        return null
-                    })}
-                </View>
-
-                {/* Visão Geral (Múltiplas Métricas) */}
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Visão Geral de Desempenho</Text>
-                <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Comparativo de Energia, Resíduos e Impostos abatidos.</Text>
-
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
-                    <TouchableOpacity style={[styles.tab, isHighlight('all') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('all')}>
-                        <Text style={[styles.tabText, isHighlight('all') ? { color: '#fff' } : { color: colors.textMuted }]}>Todas Métricas</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.tab, isHighlight('waste') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('waste')}>
-                        <Text style={[styles.tabText, isHighlight('waste') ? { color: '#fff' } : { color: colors.textMuted }]}>Resíduos</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.tab, isHighlight('energy') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('energy')}>
-                        <Text style={[styles.tabText, isHighlight('energy') ? { color: '#fff' } : { color: colors.textMuted }]}>Energia</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.tab, isHighlight('tax') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('tax')}>
-                        <Text style={[styles.tabText, isHighlight('tax') ? { color: '#fff' } : { color: colors.textMuted }]}>Impostos</Text>
-                    </TouchableOpacity>
-                </ScrollView>
-
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, marginTop: 16 }]}>
-                    {selectedTab === 'all' && (
-                        <View style={styles.legendRow}>
-                            <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#eab308' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Energia</Text></View>
-                            <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#22c55e' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Resíduos</Text></View>
-                            <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#3b82f6' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Impostos</Text></View>
+                <Animated.View style={fadeInStyle}>
+                    {/* Header movido pro MainTabs App.tsx, então exibimos apenas um título local */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
+                            <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Visão geral do biodigestor.</Text>
                         </View>
-                    )}
-
-                    <ViewShot ref={chartRef} options={{ format: "jpg", quality: 0.9, result: 'base64' }}>
-                        <TouchableOpacity
-                            activeOpacity={1}
-                            onPress={() => setSelectedChartIndex(null)}
-                            style={[styles.chartMockup, { backgroundColor: colors.cardBackground }]}
-                        >
-                            {chartData.length === 0 ? (
-                                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', height: 180 }}>
-                                    <Text style={{ color: colors.textMuted }}>Nenhum dado registrado para o gráfico.</Text>
-                                </View>
-                            ) : (
-                                chartData.map((point, index) => {
-                                    // Vamos calcular proporções para a altura da barra ser pelo menos visível.
-                                    // Isso é uma simplificação para fins visuais no RN, usando um "teto" flexível
-                                    // igual fizemos no mock anterior, limitando a 100% de altura para não quebrar o layout.
-                                    const hEnergy = Math.min(Math.max((point.energyGenerated / 15000) * 100, 5), 100);
-                                    const hWaste = Math.min(Math.max((point.wasteProcessed / 4000) * 100, 5), 100);
-                                    const hTax = Math.min(Math.max((point.taxDeduction / 12000) * 100, 5), 100);
-
-                                    return (
-                                        <MultiBar
-                                            key={index}
-                                            month={point.name}
-                                            vals={[hEnergy, hWaste, hTax]}
-                                            selectedTab={selectedTab}
-                                            isHighlight={index === selectedChartIndex}
-                                            isAnySelected={selectedChartIndex !== null}
-                                            onPress={() => setSelectedChartIndex(selectedChartIndex === index ? null : index)}
-                                            details={{
-                                                waste: point.wasteProcessed,
-                                                energy: point.energyGenerated,
-                                                tax: point.taxDeduction
-                                            }}
-                                        />
-                                    );
-                                })
-                            )}
-                        </TouchableOpacity>
-                    </ViewShot>
-                </View>
-
-                {/* Manutenção Agendada */}
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 8 }]}>Manutenções Agendadas</Text>
-                <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
-                <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
-                    {maintenances.map((item, index) => (
-                        <React.Fragment key={item.id}>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
                             <TouchableOpacity
-                                style={styles.maintenanceItem}
-                                activeOpacity={0.7}
-                                onLongPress={() => {
-                                    setSelectedMaintenance(item);
-                                    setActionModalVisible(true);
-                                }}
-                                delayLongPress={250}
+                                style={{ backgroundColor: colors.cardBackground, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' }}
+                                onPress={openOrderModal}
                             >
-                                <View style={[styles.maintenanceDot, item.status === 'done' && { backgroundColor: '#16a34a' }]} />
-                                <View style={{ flex: 1 }}>
-                                    <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
-                                    <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>{item.date}</Text>
-                                </View>
-                                <Text style={item.status === 'pending' ? styles.statusPending : [styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>
-                                    {item.status === 'pending' ? 'Pendente' : 'Concluído'}
-                                </Text>
+                                <MaterialCommunityIcons name="sort-variant" size={20} color={colors.text} />
                             </TouchableOpacity>
-                            {index < maintenances.length - 1 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
-                        </React.Fragment>
-                    ))}
-                </View>
-
-                {/* Exportar Relatórios (Movido para antes do mapa) */}
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Exportar Relatórios</Text>
-                <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gere métricas oficiais para análise externa.</Text>
-                <View style={[styles.gridExport, { marginBottom: 12 }]}>
-                    <TouchableOpacity
-                        style={[styles.exportCard, { borderColor: '#fca5a5', backgroundColor: '#fef2f2' }]}
-                        onPress={() => {
-                            setPendingExportType("pdf");
-                            setExportModalVisible(true);
-                        }}
-                    >
-                        <Text style={styles.exportIcon}>📄</Text>
-                        <Text style={[styles.exportText, { color: '#dc2626' }]}>Gerar PDF</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.exportCard, { borderColor: '#86efac', backgroundColor: '#f0fdf4' }]}
-                        onPress={() => {
-                            setPendingExportType("excel");
-                            setExportModalVisible(true);
-                        }}
-                    >
-                        <Text style={styles.exportIcon}>📗</Text>
-                        <Text style={[styles.exportText, { color: '#16a34a' }]}>Gerar Excel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.exportCard, { borderColor: '#93c5fd', backgroundColor: '#eff6ff' }]}
-                        onPress={() => {
-                            setPendingExportType("csv");
-                            setExportModalVisible(true);
-                        }}
-                    >
-                        <Text style={styles.exportIcon}>📊</Text>
-                        <Text style={[styles.exportText, { color: '#2563eb' }]}>Gerar CSV</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Mapa (Cross-Platform) */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 32 }}>
-                    <View>
-                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Localização da Empresa</Text>
-                        <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Unidade ativa do biodigestor.</Text>
+                            <TouchableOpacity
+                                style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                                onPress={() => setMetricsModalVisible(true)}
+                            >
+                                <MaterialCommunityIcons name="pencil-outline" size={14} color="#fff" />
+                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Atualizar</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                    <TouchableOpacity
-                        style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 16 }}
-                        onPress={() => {
-                            setMarkerEditingId(null);
-                            setMarkerName('');
-                            setMarkerCep('');
-                            setMarkerAddress('');
-                            setMarkerNumber('');
-                            setMarkerComplement('');
-                            setMapModalVisible(true);
-                        }}
-                    >
-                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
-                    </TouchableOpacity>
-                </View>
+
+                    {referenceDate ? (
+                        <View style={{ marginBottom: 12, paddingHorizontal: 4 }}>
+                            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13, flexDirection: 'row', alignItems: 'center' }}>
+                                <MaterialCommunityIcons name="calendar-month" size={14} color={colors.primary} style={{ marginRight: 4 }} />
+                                Dados referentes a {referenceDate}
+                            </Text>
+                        </View>
+                    ) : null}
+
+                    <View style={styles.grid}>
+                        {cardOrder.map((key) => {
+                            switch (key) {
+                                case 'waste':
+                                    return <StatCard key="waste" title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" iconProvider="MaterialCommunityIcons" color="#22c55e" bgColor="#dcfce7" />
+                                case 'energy':
+                                    return <StatCard key="energy" title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" iconProvider="MaterialCommunityIcons" color="#eab308" bgColor="#fef9c3" />
+                                case 'tax':
+                                    return <StatCard key="tax" title="Benefícios Aplicáveis" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" iconProvider="MaterialCommunityIcons" color="#3b82f6" bgColor="#dbeafe" />
+                                case 'efficiency':
+                                    return <StatCard key="efficiency" title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" iconProvider="MaterialCommunityIcons" color="#16a34a" bgColor="#bbf7d0" />
+                                default:
+                                    return null
+                            }
+                        })}
+                    </View>
+
+                    {/* Visão Geral (Múltiplas Métricas) */}
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Visão Geral de Desempenho</Text>
+                    <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Comparativo de Energia, Resíduos e Benefícios Aplicáveis.</Text>
+
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
+                        <TouchableOpacity style={[styles.tab, isHighlight('all') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('all')}>
+                            <Text style={[styles.tabText, isHighlight('all') ? { color: '#fff' } : { color: colors.textMuted }]}>Todas Métricas</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.tab, isHighlight('waste') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('waste')}>
+                            <Text style={[styles.tabText, isHighlight('waste') ? { color: '#fff' } : { color: colors.textMuted }]}>Resíduos</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.tab, isHighlight('energy') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('energy')}>
+                            <Text style={[styles.tabText, isHighlight('energy') ? { color: '#fff' } : { color: colors.textMuted }]}>Energia</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.tab, isHighlight('tax') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('tax')}>
+                            <Text style={[styles.tabText, isHighlight('tax') ? { color: '#fff' } : { color: colors.textMuted }]}>Benefícios Aplicáveis</Text>
+                        </TouchableOpacity>
+                    </ScrollView>
+
+                    <View style={[styles.card, { backgroundColor: colors.cardBackground, marginTop: 16 }]}>
+                        {selectedTab === 'all' && (
+                            <View style={styles.legendRow}>
+                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#eab308' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Energia</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#22c55e' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Resíduos</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#3b82f6' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Benefícios Aplicáveis</Text></View>
+                            </View>
+                        )}
+
+                        <ViewShot ref={chartRef} options={{ format: "jpg", quality: 0.9, result: 'base64' }}>
+                            <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={() => setSelectedChartIndex(null)}
+                                style={[styles.chartMockup, { backgroundColor: colors.cardBackground, paddingLeft: 36, position: 'relative' }]}
+                            >
+                                {/* Grid Horizontal com Valores (Eixo Y) e Linhas Verticais */}
+                                {chartData.length > 0 && (
+                                    <View style={{ position: 'absolute', top: 0, bottom: 20, left: 4, right: 4, zIndex: 0 }} pointerEvents="none">
+                                        <View style={{ flex: 1, justifyContent: 'space-between' }}>
+                                            {chartAxisLabels.map((valStr, idx) => (
+                                                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    <Text style={{ width: 26, fontSize: 9, color: colors.textMuted, textAlign: 'right', marginRight: 4 }} numberOfLines={1}>{valStr}</Text>
+                                                    <View style={{ flex: 1, height: 1, backgroundColor: colors.border, opacity: 0.3 }} />
+                                                </View>
+                                            ))}
+                                        </View>
+                                        <View style={{ position: 'absolute', top: 0, bottom: 0, left: 32, right: 0, flexDirection: 'row', justifyContent: 'space-around' }}>
+                                            {chartData.map((_, i) => (
+                                                <View key={i} style={{ width: 1, height: '100%', backgroundColor: colors.border, opacity: 0.2 }} />
+                                            ))}
+                                        </View>
+                                    </View>
+                                )}
+
+                                {chartData.length === 0 ? (
+                                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', height: 180 }}>
+                                        <Text style={{ color: colors.textMuted }}>Nenhum dado registrado para o gráfico.</Text>
+                                    </View>
+                                ) : (
+                                    chartData.map((point, index) => {
+                                        // Vamos calcular proporções para a altura da barra ser pelo menos visível.
+                                        // Isso é uma simplificação para fins visuais no RN, usando um "teto" flexível
+                                        // igual fizemos no mock anterior, limitando a 100% de altura para não quebrar o layout.
+                                        const hEnergy = Math.min(Math.max((point.energyGenerated / currentMaxEnergy) * 100, 5), 100);
+                                        const hWaste = Math.min(Math.max((point.wasteProcessed / currentMaxWaste) * 100, 5), 100);
+                                        const hTax = Math.min(Math.max((point.taxDeduction / currentMaxTax) * 100, 5), 100);
+
+                                        return (
+                                            <MultiBar
+                                                key={index}
+                                                month={point.name}
+                                                vals={[hEnergy, hWaste, hTax]}
+                                                selectedTab={selectedTab}
+                                                isHighlight={index === selectedChartIndex}
+                                                isAnySelected={selectedChartIndex !== null}
+                                                onPress={() => setSelectedChartIndex(selectedChartIndex === index ? null : index)}
+                                                details={{
+                                                    waste: point.wasteProcessed,
+                                                    energy: point.energyGenerated,
+                                                    tax: point.taxDeduction
+                                                }}
+                                            />
+                                        );
+                                    })
+                                )}
+                            </TouchableOpacity>
+                        </ViewShot>
+                    </View>
+
+                    {/* Manutenção Agendada */}
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 8 }]}>Manutenções Agendadas</Text>
+                    <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
+                    <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
+                        {maintenances.map((item, index) => (
+                            <React.Fragment key={item.id}>
+                                <TouchableOpacity
+                                    style={styles.maintenanceItem}
+                                    activeOpacity={0.7}
+                                    onLongPress={() => {
+                                        setSelectedMaintenance(item);
+                                        setActionModalVisible(true);
+                                    }}
+                                    delayLongPress={250}
+                                >
+                                    <View style={[styles.maintenanceDot, item.status === 'done' && { backgroundColor: '#16a34a' }]} />
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
+                                        <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>{item.date}</Text>
+                                    </View>
+                                    <Text style={item.status === 'pending' ? styles.statusPending : [styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>
+                                        {item.status === 'pending' ? 'Pendente' : 'Concluído'}
+                                    </Text>
+                                </TouchableOpacity>
+                                {index < maintenances.length - 1 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
+                            </React.Fragment>
+                        ))}
+                    </View>
+
+                    {/* Exportar Relatórios (Movido para antes do mapa) */}
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Exportar Relatórios</Text>
+                    <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gere métricas oficiais para análise externa.</Text>
+                    <View style={[styles.gridExport, { marginBottom: 12 }]}>
+                        <TouchableOpacity
+                            style={[styles.exportCard, { borderColor: '#fca5a5', backgroundColor: '#fef2f2' }]}
+                            onPress={() => {
+                                setPendingExportType("pdf");
+                                setExportModalVisible(true);
+                            }}
+                        >
+                            <MaterialCommunityIcons name="file-pdf-box" size={28} color="#dc2626" style={{ marginBottom: 8 }} />
+                            <Text style={[styles.exportText, { color: '#dc2626' }]}>Gerar PDF</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.exportCard, { borderColor: '#86efac', backgroundColor: '#f0fdf4' }]}
+                            onPress={() => {
+                                setPendingExportType("excel");
+                                setExportModalVisible(true);
+                            }}
+                        >
+                            <MaterialCommunityIcons name="file-excel-box" size={28} color="#16a34a" style={{ marginBottom: 8 }} />
+                            <Text style={[styles.exportText, { color: '#16a34a' }]}>Gerar Excel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.exportCard, { borderColor: '#93c5fd', backgroundColor: '#eff6ff' }]}
+                            onPress={() => {
+                                setPendingExportType("csv");
+                                setExportModalVisible(true);
+                            }}
+                        >
+                            <MaterialCommunityIcons name="file-delimited" size={28} color="#2563eb" style={{ marginBottom: 8 }} />
+                            <Text style={[styles.exportText, { color: '#2563eb' }]}>Gerar CSV</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Mapa (Cross-Platform) */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 32 }}>
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Localização da Empresa</Text>
+                            <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Unidade ativa do biodigestor.</Text>
+                        </View>
+                        <TouchableOpacity
+                            style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 16 }}
+                            onPress={() => {
+                                setMarkerEditingId(null);
+                                setMarkerName('');
+                                setMarkerCep('');
+                                setMarkerAddress('');
+                                setMarkerNumber('');
+                                setMarkerComplement('');
+                                setMapModalVisible(true);
+                            }}
+                        >
+                            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </Animated.View>
 
                 {/* Map Add Modal */}
                 <Modal visible={isMapModalVisible} transparent animationType="fade">
@@ -1298,11 +1350,11 @@ export default function DashboardScreen() {
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text, marginRight: 8 }}>{m.title}</Text>
 
                                 <TouchableOpacity onPress={() => handleEditMarker(m)} style={{ padding: 6, backgroundColor: '#3b82f6', borderRadius: 10, marginRight: 6 }}>
-                                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>✎</Text>
+                                    <MaterialCommunityIcons name="pencil" size={14} color="#fff" />
                                 </TouchableOpacity>
 
                                 <TouchableOpacity onPress={() => handleDeleteMarker(m.id, m.title)} style={{ padding: 6, backgroundColor: '#dc2626', borderRadius: 10 }}>
-                                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: 'bold' }}>✕</Text>
+                                    <MaterialCommunityIcons name="close" size={14} color="#fff" />
                                 </TouchableOpacity>
                             </TouchableOpacity>
                         ))}
@@ -1324,7 +1376,7 @@ export default function DashboardScreen() {
                     <Text style={styles.footerText}></Text>
                 </View>
                 <View style={{ height: 120 }} />
-            </ScrollView >
+            </ScrollView>
 
             {/* Modal de Atualização Manual de Métricas */}
             <Modal visible={metricsModalVisible} animationType="slide" transparent={true} onRequestClose={() => setMetricsModalVisible(false)}>
@@ -1333,7 +1385,7 @@ export default function DashboardScreen() {
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: colors.text }]}>Atualizar Métricas</Text>
                             <TouchableOpacity onPress={() => setMetricsModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores consolidados para o período selecionado.</Text>
@@ -1359,7 +1411,7 @@ export default function DashboardScreen() {
                                     }}
                                 >
                                     <Text style={{ color: colors.text }}>{months[parseInt(manualMetrics.month)].label}</Text>
-                                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>{monthPickerVisible ? '▲' : '▼'}</Text>
+                                    <MaterialCommunityIcons name={monthPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
                                 </TouchableOpacity>
 
                                 {monthPickerVisible && (
@@ -1434,7 +1486,7 @@ export default function DashboardScreen() {
                                     }}
                                 >
                                     <Text style={{ color: colors.text }}>{manualMetrics.year}</Text>
-                                    <Text style={{ color: colors.textMuted, fontSize: 10 }}>{yearPickerVisible ? '▲' : '▼'}</Text>
+                                    <MaterialCommunityIcons name={yearPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
                                 </TouchableOpacity>
 
                                 {yearPickerVisible && (
@@ -1502,7 +1554,7 @@ export default function DashboardScreen() {
                                 <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.energy} onChangeText={t => setManualMetrics({ ...manualMetrics, energy: t })} />
                             </View>
                             <View style={[styles.formGroup, { width: '100%' }]}>
-                                <Text style={[styles.label, { color: colors.text }]}>Impostos Abatidos (R$)</Text>
+                                <Text style={[styles.label, { color: colors.text }]}>Benefícios Aplicáveis (R$)</Text>
                                 <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.tax} onChangeText={t => setManualMetrics({ ...manualMetrics, tax: t })} />
                             </View>
                         </View>
@@ -1534,7 +1586,7 @@ export default function DashboardScreen() {
 
                         {selectedMaintenance?.status === 'pending' && (
                             <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                                 onPress={() => {
                                     setActionModalVisible(false);
                                     if (selectedMaintenance) {
@@ -1542,30 +1594,33 @@ export default function DashboardScreen() {
                                     }
                                 }}
                             >
-                                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>✏️ Editar Informações</Text>
+                                <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} style={{ marginRight: 8 }} />
+                                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>Editar Informações</Text>
                             </TouchableOpacity>
                         )}
 
                         {selectedMaintenance?.status === 'pending' && (
                             <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                                 onPress={() => {
                                     setActionModalVisible(false);
                                     if (selectedMaintenance) handleMarkAsDone(selectedMaintenance.id);
                                 }}
                             >
-                                <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: 'bold' }}>✅ Marcar como Concluída</Text>
+                                <MaterialCommunityIcons name="check-circle" size={20} color="#16a34a" style={{ marginRight: 8 }} />
+                                <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: 'bold' }}>Marcar como Concluída</Text>
                             </TouchableOpacity>
                         )}
 
                         <TouchableOpacity
-                            style={{ paddingVertical: 18, alignItems: 'center' }}
+                            style={{ paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                             onPress={() => {
                                 setActionModalVisible(false);
                                 if (selectedMaintenance) handleDelete(selectedMaintenance.id);
                             }}
                         >
-                            <Text style={{ fontSize: 16, color: '#dc2626', fontWeight: 'bold' }}>🗑️ Apagar Agenda</Text>
+                            <MaterialCommunityIcons name="delete-outline" size={20} color="#dc2626" style={{ marginRight: 8 }} />
+                            <Text style={{ fontSize: 16, color: '#dc2626', fontWeight: 'bold' }}>Apagar Agenda</Text>
                         </TouchableOpacity>
                     </View>
 
@@ -1590,7 +1645,7 @@ export default function DashboardScreen() {
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: colors.text }]}>Configurar Relatório</Text>
                             <TouchableOpacity onPress={() => setExportModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 20 }]}>
@@ -1679,7 +1734,7 @@ export default function DashboardScreen() {
                                         }}
                                     >
                                         <Text style={{ color: colors.text }}>{months[parseInt(exportMonth)].label}</Text>
-                                        <Text style={{ color: colors.textMuted }}>▼</Text>
+                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
                                     </TouchableOpacity>
 
                                     {exportMonthPickerVisible && (
@@ -1719,7 +1774,7 @@ export default function DashboardScreen() {
                                         }}
                                     >
                                         <Text style={{ color: colors.text }}>{exportYear}</Text>
-                                        <Text style={{ color: colors.textMuted }}>▼</Text>
+                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
                                     </TouchableOpacity>
 
                                     {exportYearPickerVisible && (
@@ -1767,40 +1822,38 @@ export default function DashboardScreen() {
                         <View style={styles.modalHeader}>
                             <Text style={[styles.modalTitle, { color: colors.text }]}>Ordenar Visão Geral</Text>
                             <TouchableOpacity onPress={() => setOrderModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Altere a ordem de exibição dos painéis principais.</Text>
 
                         <View style={{ gap: 8, marginBottom: 24 }}>
                             {tempOrder.map((key, index) => {
-                                let emoji = '';
-                                if (key === 'waste') emoji = '💧';
-                                if (key === 'energy') emoji = '⚡';
-                                if (key === 'tax') emoji = '💰';
-                                if (key === 'efficiency') emoji = '🌿';
-                                
+                                const iconMap: Record<CardKey, string> = { waste: 'water-outline', energy: 'lightning-bolt', tax: 'currency-usd', efficiency: 'leaf' };
+
                                 return (
-                                <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: data[key].color, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
-                                    <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {emoji} {getCardTitle(key)}</Text>
-                                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                                        <TouchableOpacity
-                                            style={{ backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
-                                            onPress={() => moveCard(index, 'up')}
-                                            disabled={index === 0}
-                                        >
-                                            <MaterialCommunityIcons name="chevron-up" size={20} color={index === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={{ backgroundColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
-                                            onPress={() => moveCard(index, 'down')}
-                                            disabled={index === tempOrder.length - 1}
-                                        >
-                                            <MaterialCommunityIcons name="chevron-down" size={20} color={index === tempOrder.length - 1 ? 'rgba(255,255,255,0.4)' : '#fff'} />
-                                        </TouchableOpacity>
+                                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: data[key].color, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                                        <MaterialCommunityIcons name={iconMap[key] as any} size={18} color="#fff" style={{ marginRight: 8 }} />
+                                        <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {getCardTitle(key)}</Text>
+                                        <View style={{ flexDirection: 'row', gap: 4 }}>
+                                            <TouchableOpacity
+                                                style={{ backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                                onPress={() => moveCard(index, 'up')}
+                                                disabled={index === 0}
+                                            >
+                                                <MaterialCommunityIcons name="chevron-up" size={20} color={index === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={{ backgroundColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                                onPress={() => moveCard(index, 'down')}
+                                                disabled={index === tempOrder.length - 1}
+                                            >
+                                                <MaterialCommunityIcons name="chevron-down" size={20} color={index === tempOrder.length - 1 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
-                                </View>
-                            )})}
+                                )
+                            })}
                         </View>
 
                         <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -1820,7 +1873,7 @@ export default function DashboardScreen() {
                 onAddMaintenance={() => loadDashboardData()}
                 alertsEnabled={alertsEnabled}
             />
-        </View >
+        </View>
     )
 }
 
@@ -2253,10 +2306,10 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                     {isCritical ? (
                         <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
                             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', position: 'absolute', top: -2, right: -2 }} />
-                            <Text style={{ fontSize: 16 }}>⚠️</Text>
+                            <MaterialCommunityIcons name="alert" size={18} color="#fff" />
                         </Animated.View>
                     ) : (
-                        <Text style={{ fontSize: 16 }}>📡</Text>
+                        <MaterialCommunityIcons name="access-point" size={18} color={colors.text} />
                     )}
                     <Text style={{ fontWeight: '700', color: isCritical ? '#fff' : colors.text, fontSize: 13 }}>
                         {isCritical ? 'Alerta Crítico' : 'Sensores'}
@@ -2285,26 +2338,29 @@ function MultiBar({ month, vals, selectedTab, isHighlight, onPress, details, isA
             style={styles.chartBarContainer}
         >
             {isHighlight && details && (
-                <View style={{
-                    position: 'absolute',
-                    bottom: 110,
-                    backgroundColor: colors.cardBackground,
-                    padding: 8,
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    width: 100,
-                    zIndex: 50,
-                    elevation: 4,
-                    shadowColor: '#000',
-                    shadowOpacity: 0.1,
-                    shadowRadius: 4
-                }}>
-                    <Text style={{ fontSize: 9, color: colors.text, fontWeight: 'bold', marginBottom: 2 }}>{month}</Text>
-                    {(selectedTab === 'all' || selectedTab === 'energy') && <Text style={{ fontSize: 8, color: '#eab308' }}>⚡ {details.energy} kWh</Text>}
-                    {(selectedTab === 'all' || selectedTab === 'waste') && <Text style={{ fontSize: 8, color: '#22c55e' }}>💧 {details.waste} kg</Text>}
-                    {(selectedTab === 'all' || selectedTab === 'tax') && <Text style={{ fontSize: 8, color: '#3b82f6' }}>💰 R$ {details.tax}</Text>}
-                </View>
+                <>
+                    <View style={{ position: 'absolute', top: 0, bottom: 20, width: 1, backgroundColor: colors.primary, opacity: 0.5, zIndex: 0 }} />
+                    <View style={{
+                        position: 'absolute',
+                        bottom: 110,
+                        backgroundColor: colors.cardBackground,
+                        padding: 8,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        width: 100,
+                        zIndex: 50,
+                        elevation: 4,
+                        shadowColor: '#000',
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4
+                    }}>
+                        <Text style={{ fontSize: 9, color: colors.text, fontWeight: 'bold', marginBottom: 2 }}>{month}</Text>
+                        {(selectedTab === 'all' || selectedTab === 'energy') && <Text style={{ fontSize: 8, color: '#eab308' }}>⚡ {details.energy} kWh</Text>}
+                        {(selectedTab === 'all' || selectedTab === 'waste') && <Text style={{ fontSize: 8, color: '#22c55e' }}>◉ {details.waste} kg</Text>}
+                        {(selectedTab === 'all' || selectedTab === 'tax') && <Text style={{ fontSize: 8, color: '#3b82f6' }}>R$ {details.tax}</Text>}
+                    </View>
+                </>
             )}
             <View style={styles.barsArea}>
                 {(selectedTab === 'all' || selectedTab === 'energy') && <View style={[styles.chartBar, { height: `${vals[0]}%`, backgroundColor: '#eab308' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
@@ -2316,7 +2372,7 @@ function MultiBar({ month, vals, selectedTab, isHighlight, onPress, details, isA
     )
 }
 
-function StatCard({ title, value, unit, changePercent, increasing, emoji, color, bgColor }: any) {
+function StatCard({ title, value, unit, changePercent, increasing, iconName, iconProvider, color, bgColor }: any) {
     const { colors, theme } = useTheme();
     // No modo escuro, os ícones de métrica podem ficar melhor combinados usando bgColor como semi-transparente 
     // ou mantemos o original que já parece bem vibrante no design escuro.
@@ -2326,7 +2382,7 @@ function StatCard({ title, value, unit, changePercent, increasing, emoji, color,
         <View style={[styles.card, { width: '48%', backgroundColor: colors.cardBackground }]}>
             <View style={styles.cardHeader}>
                 <View style={[styles.iconBg, { backgroundColor: iconBackground }]}>
-                    <Text style={styles.iconEmoji}>{emoji}</Text>
+                    <MaterialCommunityIcons name={iconName || 'alert'} size={24} color={color} />
                 </View>
             </View>
             <View style={styles.cardValue}>

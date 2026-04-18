@@ -141,7 +141,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
+          git add package.json package-lock.json
           git commit -m "chore(release): version ${NEW_VERSION}" || echo "Nada para commitar"
           if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
             echo "Tag v${NEW_VERSION} já existe. Pulando criação de tag."
@@ -161,35 +161,32 @@ jobs:
       #     chmod +x gradlew
       #     ./gradlew assembleRelease
  
-      # --- PASSOS DO DOCKER (COMENTADOS CONFORME SOLICITADO) ---
-      # - name: Set up Docker Buildx
-      #   if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
-      #   uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@v3
 
-      # - name: Login to Docker Hub
-      #   if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
-      #   uses: docker/login-action@v3
-      #   with:
-      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
-      #     password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Login to Docker Hub
+        if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # - name: Build and push Docker image
-      #   if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     context: .
-      #     file: ./Dockerfile
-      #     push: true
-      #     tags: |
-      #       ${{ secrets.DOCKERHUB_USERNAME }}/biodash-frontend:latest
-      #       ${{ secrets.DOCKERHUB_USERNAME }}/biodash-frontend:v${{ steps.version.outputs.new_version }}
-      #     build-args: |
-      #       NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-      #       NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-      #       LOGTAIL_TOKEN=${{ secrets.LOGTAIL_TOKEN }}
-      #       LOGTAIL_URL=${{ secrets.LOGTAIL_URL }}
-      #     cache-from: type=gha
-      #     cache-to: type=gha,mode=max
+      - name: Build and push Docker image
+        if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${{ steps.version.outputs.new_version }}
+          build-args: |
+            EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+            EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # Envio de e-mail quando pipeline FALHAR
       # - name: Enviar email se falhar

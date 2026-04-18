@@ -1,4 +1,3 @@
-# BioDash
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/4bc5211a-dc9c-48aa-b7f6-9e279f75a7ec" alt="BioGen Logo" width="200"/>
@@ -16,6 +15,24 @@ Monitore e otimize o desempenho do seu biodigestor com nosso dashboard completo 
 ## 📖 SOBRE O PROJETO
 
 O projeto **BioGen** propõe uma solução sustentável para o tratamento de resíduos orgânicos provenientes principalmente de indústrias alimentícias, atividades agrícolas e pecuárias. A iniciativa busca transformar esses resíduos em biogás por meio de biodigestores, permitindo a geração de energia elétrica limpa e acessível. A energia produzida pode ser utilizada para abastecimento elétrico ou convertida em gás para uso doméstico. O processo também gera biofertilizantes, aproveitando integralmente os resíduos orgânicos e contribuindo para uma cadeia produtiva mais sustentável.
+
+
+## Nossos Diferenciais
+
+### 🔹 Rastreamento de Resíduos
+Monitore a quantidade de resíduos processados pelo seu biodigestor em tempo real.
+
+---
+
+### 🔹 Geração de Energia
+Acompanhe a energia produzida pelo seu sistema com análises detalhadas.
+
+---
+
+### 🔹 Benefícios Fiscais
+Calcule e visualize os benefícios fiscais da sua produção de energia sustentável.
+
+---
 
 
 ## 🎯 **Objetivos de Desenvolvimento Sustentável (ODS)**
@@ -49,7 +66,8 @@ O projeto **BioGen** propõe uma solução sustentável para o tratamento de res
 ## 🖥️ PROTÓTIPO E DOCUMENTAÇÃO
 
 
-
+- Link 1
+- Link 2 
 
 ## 🔹 Requisitos Funcionais 
 
@@ -94,17 +112,19 @@ O projeto **BioGen** propõe uma solução sustentável para o tratamento de res
   <img src="https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white" alt="Badge HTML5"/>
   <img src="https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white" alt="Badge CSS3"/>
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="Badge TypeScript"/>
-   React
+  <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React"/>
+  <img src="https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React Native"/>
   <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Badge Node.js"/>
- 
-  SupaBase
+  <img src="https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase"/>
   <img src="https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white" alt="Badge Git"/>
   <img src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="Badge GitHub"/>
   <img src="https://img.shields.io/badge/Swagger-85EA2D?style=for-the-badge&logo=swagger&logoColor=black" alt="Badge Swagger"/>
   <img src="https://img.shields.io/badge/Visual%20Studio%20Code-0078D4?style=for-the-badge&logo=visualstudiocode&logoColor=white" alt="Badge Visual Studio Code"/>
   <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Badge Docker"/>
-  Expo
-  Javascript
+  <img src="https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo"/>
+  <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript"/>
+  <img src="https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS"/>
+  
 </p>
 
 
@@ -119,62 +139,8 @@ O projeto **BioGen** propõe uma solução sustentável para o tratamento de res
 
 ---
 
-## Seções Principais
 
-### Escolha seu plano de assinatura
 
-#### **Plano Essencial**
-- R$500/mês
-- Gestão completa de biodigestores
-- Dashboard de indicadores
-- Suporte dedicado
-
-**Botão:** Assinar por R$500/mês
-
----
-
-#### **Plano Profissional**
-- R$1000/mês
-- Gestão completa de biodigestores
-- Dashboard de indicadores
-- Suporte dedicado
-
-**Botão:** Assinar por R$1000/mês
-
----
-
-#### **Plano Premium**
-- R$1500/mês
-- Gestão completa de biodigestores
-- Dashboard de indicadores
-- Suporte dedicado
-
-**Botão:** Assinar por R$1500/mês
-
----
-
-## Avaliações dos Usuários
-
-Nenhuma avaliação cadastrada ainda.
-
----
-
-## Nossos Diferenciais
-
-### 🔹 Rastreamento de Resíduos
-Monitore a quantidade de resíduos processados pelo seu biodigestor em tempo real.
-
----
-
-### 🔹 Geração de Energia
-Acompanhe a energia produzida pelo seu sistema com análises detalhadas.
-
----
-
-### 🔹 Benefícios Fiscais
-Calcule e visualize os benefícios fiscais da sua produção de energia sustentável.
-
----
 
 ## 📦 **Instalação e Configuração**
 

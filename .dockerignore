@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.expo
+.idea
+*.jks
+*.p12
+*.keystore
+*.mobileprovision
+*.orig
+web-build
+.git
+.github
+.vscode
+.env
+.env.*

@@ -10,15 +10,20 @@ import {
     Platform,
     ScrollView,
     Alert,
+    Image,
+    Animated,
 } from 'react-native'
+import { useFadeInUp } from '../hooks/useFadeInUp'
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'
 
 interface Props {
     onLogin: () => void
     onNavigateRegister?: () => void
+    onBack?: () => void
 }
 
-export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
+export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Props) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
@@ -53,6 +58,8 @@ export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
         }
     }
 
+    const { animatedStyle } = useFadeInUp()
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -62,12 +69,17 @@ export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
                 contentContainerStyle={styles.scroll}
                 keyboardShouldPersistTaps="handled"
             >
+                <Animated.View style={animatedStyle}>
+                {/* Botão de Voltar */}
+                {onBack && (
+                    <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
+                        <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar para a tela inicial</Text>
+                    </TouchableOpacity>
+                )}
+
                 {/* Logo */}
                 <View style={styles.logoSection}>
-                    <View style={styles.logoIcon}>
-                        <Text style={styles.logoEmoji}>🌱</Text>
-                    </View>
-                    <Text style={styles.logoTitle}>BioDash</Text>
+                    <Image source={require('../../assets/logo-biodash.png')} style={{ width: 200, height: 100 }} resizeMode="contain" />
                     <Text style={styles.logoSubtitle}>Monitoramento de Biodigestores</Text>
                 </View>
 
@@ -110,15 +122,16 @@ export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
                                 style={styles.eyeButton}
                                 onPress={() => setShowPassword(!showPassword)}
                             >
-                                <Text style={styles.eyeEmoji}>{showPassword ? '🙈' : '👁️'}</Text>
+                                <MaterialCommunityIcons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#94a3b8" />
                             </TouchableOpacity>
                         </View>
                     </View>
 
                     {/* Erro */}
                     {error ? (
-                        <View style={styles.errorBox}>
-                            <Text style={styles.errorText}>⚠️ {error}</Text>
+                        <View style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}>
+                            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#dc2626" style={{ marginRight: 6 }} />
+                            <Text style={styles.errorText}>{error}</Text>
                         </View>
                     ) : null}
 
@@ -148,6 +161,7 @@ export default function LoginScreen({ onLogin, onNavigateRegister }: Props) {
                 </View>
 
                 <Text style={styles.footer}>BioDash Mobile v1.0</Text>
+                </Animated.View>
             </ScrollView>
         </KeyboardAvoidingView>
     )

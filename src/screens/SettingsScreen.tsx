@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native'
+import { useFadeInUp } from '../hooks/useFadeInUp'
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { useTheme } from '../context/ThemeContext'
 import RatingModal from '../components/RatingModal'
 
@@ -19,24 +21,26 @@ export default function SettingsScreen({
     onNavigateHelpCenter
 }: Props) {
     const { colors } = useTheme()
+    const { animatedStyle } = useFadeInUp()
     const [isRatingVisible, setRatingVisible] = useState(false)
 
     return (
         <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.scroll}>
+            <Animated.View style={animatedStyle}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Configurações</Text>
             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gerencie sua conta e preferências operacionais.</Text>
 
             <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
                 <TouchableOpacity style={styles.row} onPress={onNavigateProfile}>
-                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><Text style={styles.rowIcon}>👤</Text></View>
+                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="account-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Perfil da Empresa</Text>
-                    <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
                 <TouchableOpacity style={styles.row} onPress={onNavigateNotifications}>
-                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><Text style={styles.rowIcon}>🔔</Text></View>
+                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="bell-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Notificações e Alertas</Text>
-                    <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
             </View>
 
@@ -44,21 +48,21 @@ export default function SettingsScreen({
 
             <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
                 <TouchableOpacity style={styles.row} onPress={onNavigateHelpCenter}>
-                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><Text style={styles.rowIcon}>❓</Text></View>
+                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="help-circle-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Central de Ajuda</Text>
-                    <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
                 <TouchableOpacity style={styles.row} onPress={onNavigateTerms}>
-                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><Text style={styles.rowIcon}>📄</Text></View>
+                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="file-document-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Termos de Uso e Privacidade</Text>
-                    <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
                 <TouchableOpacity style={styles.row} onPress={() => setRatingVisible(true)}>
-                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><Text style={styles.rowIcon}>⭐</Text></View>
+                    <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}><MaterialCommunityIcons name="star-outline" size={18} color={colors.text} /></View>
                     <Text style={[styles.rowText, { color: colors.text }]}>Avalie nosso Sistema</Text>
-                    <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
             </View>
 
@@ -70,6 +74,7 @@ export default function SettingsScreen({
             <View style={{ height: 60 }} />
 
             <RatingModal visible={isRatingVisible} onClose={() => setRatingVisible(false)} />
+            </Animated.View>
         </ScrollView>
     )
 }
