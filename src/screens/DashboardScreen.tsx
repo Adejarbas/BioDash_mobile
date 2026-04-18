@@ -300,12 +300,11 @@ export default function DashboardScreen() {
         setMapModalVisible(true);
     };
 
-    const handleFetchCep = async () => {
-        const cleanCep = markerCep.replace(/\D/g, '');
-        if (cleanCep.length !== 8) {
-            Alert.alert("Aviso", "Digite um CEP válido com 8 dígitos.");
-            return;
-        }
+    const handleFetchCep = async (cepText?: string) => {
+        const currentCep = typeof cepText === 'string' ? cepText : markerCep;
+        const cleanCep = currentCep.replace(/\D/g, '');
+        if (cleanCep.length !== 8) return;
+
         setCepLoading(true);
         try {
             const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
@@ -313,10 +312,10 @@ export default function DashboardScreen() {
             if (!cepData.erro) {
                 setMarkerAddress(`${cepData.logradouro}, ${cepData.bairro} - ${cepData.localidade}/${cepData.uf}`);
             } else {
-                Alert.alert("Erro", "CEP não encontrado.");
+                Alert.alert("Aviso", "O CEP informado não foi encontrado.");
             }
         } catch (err) {
-            Alert.alert("Erro", "Falha ao consultar viaCEP.");
+            Alert.alert("Erro", "Falha de conexão ao consultar viaCEP.");
         } finally {
             setCepLoading(false);
         }
@@ -1237,36 +1236,38 @@ export default function DashboardScreen() {
                                 />
                             </View>
 
-                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>CEP</Text>
-                                    <TextInput
-                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
-                                        placeholder="00000-000"
-                                        placeholderTextColor={colors.textMuted}
-                                        keyboardType="numeric"
-                                        value={markerCep}
-                                        onChangeText={setMarkerCep}
-                                    />
+                            <View style={{ marginBottom: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>CEP</Text>
+                                    {cepLoading && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />}
                                 </View>
-                                <View style={{ justifyContent: 'flex-end' }}>
-                                    <TouchableOpacity style={{ backgroundColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 10, justifyContent: 'center' }} onPress={handleFetchCep} disabled={cepLoading}>
-                                        {cepLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Buscar</Text>}
-                                    </TouchableOpacity>
-                                </View>
+                                <TextInput
+                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                    placeholder="00000-000"
+                                    placeholderTextColor={colors.textMuted}
+                                    keyboardType="numeric"
+                                    value={markerCep}
+                                    onChangeText={(text) => {
+                                        setMarkerCep(text);
+                                        if (text.replace(/\D/g, '').length === 8) {
+                                            handleFetchCep(text);
+                                        }
+                                    }}
+                                />
+                            </View>
+
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço</Text>
+                                <TextInput
+                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
+                                    placeholder="Rua, Bairro..."
+                                    placeholderTextColor={colors.textMuted}
+                                    value={markerAddress}
+                                    onChangeText={setMarkerAddress}
+                                />
                             </View>
 
                             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
-                                <View style={{ flex: 2 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço</Text>
-                                    <TextInput
-                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
-                                        placeholder="Rua, Bairro..."
-                                        placeholderTextColor={colors.textMuted}
-                                        value={markerAddress}
-                                        onChangeText={setMarkerAddress}
-                                    />
-                                </View>
                                 <View style={{ flex: 1 }}>
                                     <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nº</Text>
                                     <TextInput
@@ -1278,11 +1279,7 @@ export default function DashboardScreen() {
                                         onChangeText={setMarkerNumber}
                                     />
                                 </View>
-                            </View>
-
-
-                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 2 }}>
                                     <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Complemento</Text>
                                     <TextInput
                                         style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
