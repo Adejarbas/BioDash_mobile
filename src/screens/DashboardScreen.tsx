@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
 import { supabase } from '../lib/supabase'
+import { markersApi } from '../lib/api'
 import MapComponent from '../components/MapComponent'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
@@ -96,7 +97,7 @@ export default function DashboardScreen() {
     const [isOrderModalVisible, setOrderModalVisible] = useState(false)
     const [tempOrder, setTempOrder] = useState<CardKey[]>(DEFAULT_CARD_ORDER)
 
-    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; rawAddress?: any; }
+    interface MarkerData { id: string; latitude: number; longitude: number; title: string; description: string; address?: any; }
     const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
     const [mapFocusLocation, setMapFocusLocation] = useState<{ latitude: number, longitude: number } | undefined>(undefined);
 
@@ -153,36 +154,25 @@ export default function DashboardScreen() {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) return
 
-            const { data, error } = await supabase
-                .from('biodigestor_maps')
-                .select('id, address')
-                .eq('user_id', user.id)
-                .order('id', { ascending: false })
+            const res = await markersApi.fetch()
+            if (!res.success || !res.data) return
 
-            if (error || !data) return
+            const ms: MarkerData[] = res.data.map((row: any) => ({
+                id: (row._id || row.id)?.toString(),
+                latitude: row.latitude,
+                longitude: row.longitude,
+                title: row.title,
+                description: row.description,
+                address: row.address
+            }))
 
-            const ms: MarkerData[] = []
-            for (const row of data) {
-                const addr = row.address as any
-                const fullAddress = addr?.full_address || JSON.stringify(row.address)
-
-                if (addr?.lat && addr?.lon) {
-                    const marker = {
-                        id: row.id.toString(),
-                        latitude: parseFloat(addr.lat),
-                        longitude: parseFloat(addr.lon),
-                        title: addr?.nome || fullAddress.split(',')[0],
-                        description: fullAddress,
-                        rawAddress: addr
-                    };
-                    ms.push(marker);
-
-                    if (focusId && focusId === marker.id) {
-                        setMapFocusLocation({ latitude: marker.latitude, longitude: marker.longitude });
-                    }
+            setMapMarkers(ms)
+            if (focusId) {
+                const focused = ms.find(m => m.id === focusId)
+                if (focused) {
+                    setMapFocusLocation({ latitude: focused.latitude, longitude: focused.longitude });
                 }
             }
-            setMapMarkers(ms)
         } catch (e) {
             console.error("Erro ao buscar marcadores:", e)
         }
@@ -190,11 +180,82 @@ export default function DashboardScreen() {
 
     const handleMarkerDragEnd = async (id: string, coord: { latitude: number, longitude: number }) => {
         const m = mapMarkers.find(x => x.id === id);
-        if (!m || !m.rawAddress) return;
-        const newAddr = { ...m.rawAddress, lat: coord.latitude, lon: coord.longitude };
-        const { error } = await supabase.from('biodigestor_maps').update({ address: newAddr }).eq('id', parseInt(id));
-        if (!error) {
-            setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, latitude: coord.latitude, longitude: coord.longitude } : x));
+        if (!m) return;
+
+        // Feedback imediato na UI de que a descrição/endereço está sendo atualizada
+        setMapMarkers(prev => prev.map(x => x.id === id ? { 
+            ...x, 
+            latitude: coord.latitude, 
+            longitude: coord.longitude,
+            description: "📍 Atualizando endereço..." 
+        } : x));
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            let newDescription = m.description;
+            let newAddress = m.address || {};
+
+            // Realiza reverse geocoding para atualizar o endereço arrastado
+            try {
+                const headers = { 'User-Agent': 'BioDashMobileApp/1.0', 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7' };
+                const resGeo = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coord.latitude}&lon=${coord.longitude}`, { headers });
+                const geoData = await resGeo.json();
+
+                if (geoData && geoData.address) {
+                    const addr = geoData.address;
+                    const logradouro = addr.road || addr.pedestrian || addr.suburb || newAddress.street || '';
+                    const cep = addr.postcode || newAddress.cep || '';
+                    const numero = addr.house_number || '';
+                    const cidade = addr.city || addr.town || addr.village || '';
+                    
+                    const addressFull = `${logradouro}${numero ? ', ' + numero : ''}${cidade ? ' - ' + cidade : ''}, ${cep}, Brasil`.replace(/^,\s*/, '');
+                    
+                    newDescription = addressFull;
+                    newAddress = {
+                        cep: cep,
+                        street: logradouro,
+                        number: numero,
+                        complement: newAddress.complement || ''
+                    };
+                } else {
+                     newDescription = "Endereço não identificado pelo mapa";
+                }
+            } catch (geoError) {
+                console.error("Erro na geocodificação reversa ao arrastar:", geoError);
+                newDescription = "Erro ao carregar logradouro";
+            }
+
+            const updateData = {
+                id,
+                userId: user.id,
+                title: m.title,
+                description: newDescription,
+                latitude: coord.latitude,
+                longitude: coord.longitude,
+                address: newAddress
+            };
+
+            const res = await markersApi.save(updateData);
+            if (res.success) {
+                setMapMarkers(prev => prev.map(x => x.id === id ? { 
+                    ...x, 
+                    title: m.title,
+                    description: newDescription,
+                    address: newAddress,
+                    latitude: coord.latitude, 
+                    longitude: coord.longitude 
+                } : x));
+            } else {
+                // Reverter caso o salvamento falhe
+                setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, description: m.description, latitude: m.latitude, longitude: m.longitude } : x));
+                Alert.alert("Erro", "Não foi possível salvar a nova posição.");
+            }
+        } catch (e) {
+            console.error("Erro ao arrastar marcador:", e);
+            // Reverter caso haja falha severa na rede/supabase
+            setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, description: m.description, latitude: m.latitude, longitude: m.longitude } : x));
         }
     };
 
@@ -203,8 +264,8 @@ export default function DashboardScreen() {
             { text: "Cancelar", style: "cancel" },
             {
                 text: "Excluir", style: "destructive", onPress: async () => {
-                    const { error } = await supabase.from('biodigestor_maps').delete().eq('id', parseInt(id));
-                    if (error) Alert.alert("Erro", "Não foi possível excluir");
+                    const res = await markersApi.delete(id);
+                    if (!res.success) Alert.alert("Erro", "Não foi possível excluir");
                     else fetchMapMarkers();
                 }
             }
@@ -213,20 +274,17 @@ export default function DashboardScreen() {
 
     const handleEditMarker = (m: any) => {
         setMarkerEditingId(m.id);
-        const addr = m.rawAddress || {};
+        const addr = m.address || {};
 
-        // Nome: prioriza o que está no JSON 'nome', senão usa o título do marcador
-        setMarkerName(addr.nome || m.title || '');
+        setMarkerName(m.title || '');
 
-        // Se temos dados granulares, usamos eles
-        if (addr.logradouro || addr.cep) {
+        if (addr.street || addr.cep) {
             setMarkerCep(addr.cep || '');
-            setMarkerAddress(addr.logradouro || '');
-            setMarkerNumber(addr.numero || '');
-            setMarkerComplement(addr.complemento || '');
+            setMarkerAddress(addr.street || '');
+            setMarkerNumber(addr.number || '');
+            setMarkerComplement(addr.complement || '');
         } else {
-            // Fallback para dados antigos que só tinham full_address
-            const full = addr.full_address || m.description || '';
+            const full = m.description || '';
             setMarkerAddress(full.split(',')[0] || '');
             setMarkerCep('');
             setMarkerNumber('');
@@ -236,12 +294,11 @@ export default function DashboardScreen() {
         setMapModalVisible(true);
     };
 
-    const handleFetchCep = async () => {
-        const cleanCep = markerCep.replace(/\D/g, '');
-        if (cleanCep.length !== 8) {
-            Alert.alert("Aviso", "Digite um CEP válido com 8 dígitos.");
-            return;
-        }
+    const handleFetchCep = async (cepText?: string) => {
+        const currentCep = typeof cepText === 'string' ? cepText : markerCep;
+        const cleanCep = currentCep.replace(/\D/g, '');
+        if (cleanCep.length !== 8) return;
+
         setCepLoading(true);
         try {
             const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
@@ -249,10 +306,10 @@ export default function DashboardScreen() {
             if (!cepData.erro) {
                 setMarkerAddress(`${cepData.logradouro}, ${cepData.bairro} - ${cepData.localidade}/${cepData.uf}`);
             } else {
-                Alert.alert("Erro", "CEP não encontrado.");
+                Alert.alert("Aviso", "O CEP informado não foi encontrado.");
             }
         } catch (err) {
-            Alert.alert("Erro", "Falha ao consultar viaCEP.");
+            Alert.alert("Erro", "Falha de conexão ao consultar viaCEP.");
         } finally {
             setCepLoading(false);
         }
@@ -1173,36 +1230,38 @@ export default function DashboardScreen() {
                                 />
                             </View>
 
-                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>CEP</Text>
-                                    <TextInput
-                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
-                                        placeholder="00000-000"
-                                        placeholderTextColor={colors.textMuted}
-                                        keyboardType="numeric"
-                                        value={markerCep}
-                                        onChangeText={setMarkerCep}
-                                    />
+                            <View style={{ marginBottom: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>CEP</Text>
+                                    {cepLoading && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />}
                                 </View>
-                                <View style={{ justifyContent: 'flex-end' }}>
-                                    <TouchableOpacity style={{ backgroundColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 10, justifyContent: 'center' }} onPress={handleFetchCep} disabled={cepLoading}>
-                                        {cepLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Buscar</Text>}
-                                    </TouchableOpacity>
-                                </View>
+                                <TextInput
+                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                    placeholder="00000-000"
+                                    placeholderTextColor={colors.textMuted}
+                                    keyboardType="numeric"
+                                    value={markerCep}
+                                    onChangeText={(text) => {
+                                        setMarkerCep(text);
+                                        if (text.replace(/\D/g, '').length === 8) {
+                                            handleFetchCep(text);
+                                        }
+                                    }}
+                                />
+                            </View>
+
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço</Text>
+                                <TextInput
+                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
+                                    placeholder="Rua, Bairro..."
+                                    placeholderTextColor={colors.textMuted}
+                                    value={markerAddress}
+                                    onChangeText={setMarkerAddress}
+                                />
                             </View>
 
                             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
-                                <View style={{ flex: 2 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço</Text>
-                                    <TextInput
-                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
-                                        placeholder="Rua, Bairro..."
-                                        placeholderTextColor={colors.textMuted}
-                                        value={markerAddress}
-                                        onChangeText={setMarkerAddress}
-                                    />
-                                </View>
                                 <View style={{ flex: 1 }}>
                                     <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nº</Text>
                                     <TextInput
@@ -1214,11 +1273,7 @@ export default function DashboardScreen() {
                                         onChangeText={setMarkerNumber}
                                     />
                                 </View>
-                            </View>
-
-
-                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 2 }}>
                                     <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Complemento</Text>
                                     <TextInput
                                         style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
@@ -1244,23 +1299,22 @@ export default function DashboardScreen() {
                                                 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
                                             };
 
-                                            // Geocodificação (apenas se for novo marcador ou se o endereço mudou)
-                                            if (!markerEditingId) {
-                                                const cleanAddress = markerAddress.replace(/[-/]/g, ',');
-                                                const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
-                                                let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
-                                                let geoData = await geoRes.json();
+                                            // Geocodificação: Faz a busca da latitude e longitude também na edição (caso tenham mudado CEP ou endereço)
+                                            // Antes estava preso no if (!markerEditingId), o que ignorava a atualização das coordenadas
+                                            const cleanAddress = markerAddress.replace(/[-/]/g, ',');
+                                            const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
+                                            let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
+                                            let geoData = await geoRes.json();
 
+                                            if (geoData && geoData.length > 0) {
+                                                lat = parseFloat(geoData[0].lat);
+                                                lon = parseFloat(geoData[0].lon);
+                                            } else if (markerCep) {
+                                                geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
+                                                geoData = await geoRes.json();
                                                 if (geoData && geoData.length > 0) {
                                                     lat = parseFloat(geoData[0].lat);
                                                     lon = parseFloat(geoData[0].lon);
-                                                } else if (markerCep) {
-                                                    geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
-                                                    geoData = await geoRes.json();
-                                                    if (geoData && geoData.length > 0) {
-                                                        lat = parseFloat(geoData[0].lat);
-                                                        lon = parseFloat(geoData[0].lon);
-                                                    }
                                                 }
                                             }
 
@@ -1268,26 +1322,27 @@ export default function DashboardScreen() {
                                             if (user) {
                                                 const addressFull = `${markerAddress}${markerNumber ? ', ' + markerNumber : ''}${markerComplement ? ' - ' + markerComplement : ''}, ${markerCep}, Brasil`.replace(/'/g, "");
                                                 const addressJson = {
-                                                    nome: markerName,
-                                                    full_address: addressFull,
-                                                    lat: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : undefined),
-                                                    lon: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : undefined),
                                                     cep: markerCep,
-                                                    logradouro: markerAddress,
-                                                    numero: markerNumber,
-                                                    complemento: markerComplement
+                                                    street: markerAddress,
+                                                    number: markerNumber,
+                                                    complement: markerComplement
                                                 };
 
-                                                if (markerEditingId) {
-                                                    await supabase.from('biodigestor_maps').update({ address: addressJson }).eq('id', parseInt(markerEditingId));
-                                                    await fetchMapMarkers(markerEditingId);
+                                                const markerPayload = {
+                                                    id: markerEditingId,
+                                                    userId: user.id,
+                                                    title: markerName,
+                                                    description: addressFull,
+                                                    latitude: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : 0),
+                                                    longitude: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : 0),
+                                                    address: addressJson
+                                                };
+
+                                                const res = await markersApi.save(markerPayload);
+                                                if (res.success && res.data) {
+                                                    await fetchMapMarkers((res.data._id || res.data.id)?.toString());
                                                 } else {
-                                                    const { data: newRows } = await supabase.from('biodigestor_maps').insert([{ user_id: user.id, address: addressJson }]).select('id');
-                                                    if (newRows && newRows[0]) {
-                                                        await fetchMapMarkers(newRows[0].id.toString());
-                                                    } else {
-                                                        await fetchMapMarkers();
-                                                    }
+                                                    await fetchMapMarkers();
                                                 }
 
                                                 setMapModalVisible(false);
