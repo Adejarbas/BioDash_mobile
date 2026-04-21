@@ -105,6 +105,7 @@ export default function DashboardScreen() {
     const [maintenances, setMaintenances] = useState<MaintenanceItem[]>([]);
     const [actionModalVisible, setActionModalVisible] = useState(false);
     const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceItem | null>(null);
+    const [activeIncident, setActiveIncident] = useState<any>(null);
 
     const handleMarkAsDone = async (id: string) => {
         try {
@@ -362,6 +363,9 @@ export default function DashboardScreen() {
             const yearVal = parseInt(y);
             const startDate = new Date(yearVal, monthIdx, 1).toISOString();
             const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59).toISOString();
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
 
             const { data, error } = await supabase
                 .from('biodigester_indicators')
@@ -715,6 +719,46 @@ export default function DashboardScreen() {
 
             // --- BUSCA MANUTENÇÕES DO SUPABASE ---
             if (currentUser) {
+                try {
+                    const { data: incidentData, error: incidentErr } = await supabase
+                        .from('maintenance_incidents')
+                        .select('*')
+                        .eq('user_id', currentUser.id)
+                        .order('created_at')
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (incidentErr) {
+                        console.error("Erro ao buscar incidentes:", incidentErr);
+                        setActiveIncident(null);
+                    } else if (incidentData) {
+                        // Verifica qual campo de data a tabela está usando (flexível para as duas versões)
+                        const alertDateValue = incidentData.last_notification_at || incidentData.last_alert_at || incidentData.updated_at || incidentData.created_at;
+                        
+                        if (alertDateValue) {
+                            const lastAlertDate = new Date(alertDateValue);
+                            const now = new Date();
+                            const diffHours = (now.getTime() - lastAlertDate.getTime()) / (1000 * 60 * 60);
+                            
+                            // Aumentado a janela de tolerância para 48h para facilitar os testes 
+                            // (ou exibe sempre se for muito crítico)
+                            if (diffHours <= 48) {
+                                Alert.alert(incidentData)
+                                setActiveIncident(incidentData);
+                            } else {
+                                setActiveIncident(null);
+                            }
+                        } else {
+                            setActiveIncident(null);
+                        }
+                    } else {
+                        setActiveIncident(null);
+                    }
+                } catch (incError) {
+                    console.error("Exceção cruda ao buscar incidentes:", incError);
+                    setActiveIncident(null);
+                }
+
                 const { data: maintData } = await supabase
                     .from('maintenance_schedules')
                     .select('*')
@@ -1123,6 +1167,31 @@ export default function DashboardScreen() {
                             </TouchableOpacity>
                         </ViewShot>
                     </View>
+
+                    {/* Incidentes de Manutenção */}
+                    {activeIncident && (
+                        <View style={{ backgroundColor: '#fef2f2', borderColor: '#ef4444', borderWidth: 1, padding: 16, borderRadius: 12, marginBottom: 24, flexDirection: 'row', alignItems: 'flex-start', marginTop: 16 }}>
+                            <MaterialCommunityIcons name="alert-circle" size={28} color="#ef4444" style={{ marginRight: 12, marginTop: 2 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ color: '#991b1b', fontWeight: 'bold', fontSize: 15, marginBottom: 4 }}>
+                                    Incidente Operacional Detectado
+                                </Text>
+                                <Text style={{ color: '#b91c1c', fontSize: 13, lineHeight: 18 }}>
+                                    Foi detectado {activeIncident.notifications_sent || 'múltiplos'} alertas críticos de temperatura. Uma inspeção técnica é fortemente recomendada.
+                                </Text>
+                                {activeIncident.first_alert_at && (
+                                    <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700', marginTop: 8 }}>
+                                        Primeiro alerta: {new Date(activeIncident.first_alert_at).toLocaleString('pt-BR')}
+                                    </Text>
+                                )}
+                                {activeIncident.last_alert_at && (
+                                    <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700', marginTop: 8 }}>
+                                        Último alerta: {new Date(activeIncident.last_alert_at).toLocaleString('pt-BR')}
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
+                    )}
 
                     {/* Manutenção Agendada */}
                     <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 8 }]}>Manutenções Agendadas</Text>
