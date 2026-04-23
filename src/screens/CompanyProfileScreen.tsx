@@ -18,6 +18,7 @@ import { decode } from 'base64-arraybuffer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../lib/supabase';
+import { uploadImageToS3 } from '../lib/aws-s3';
 
 const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
     <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
@@ -207,27 +208,8 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             const unique = Math.random().toString(36).slice(2);
             const fileName = `${user.id}/${unique}.${ext}`;
 
-            // Ler o arquivo como base64 usando expo-file-system
-            const base64 = await FileSystem.readAsStringAsync(uri, {
-                encoding: 'base64',
-            });
-
-            // Upload para o bucket "avatars" usando ArrayBuffer
-            const { error: uploadError } = await supabase.storage
-                .from('avatars')
-                .upload(fileName, decode(base64), {
-                    contentType: `image/${ext}`,
-                    upsert: true,
-                });
-
-            if (uploadError) throw uploadError;
-
-            // Pega a URL pública
-            const { data } = supabase.storage
-                .from('avatars')
-                .getPublicUrl(fileName);
-
-            const displayUrl = data.publicUrl;
+            // Upload para AWS S3
+            const displayUrl = await uploadImageToS3(uri, fileName);
 
             // Salva no user_profiles (igual na Web)
             const { error: updateError } = await supabase
@@ -240,11 +222,11 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             if (updateError) throw updateError;
 
             setAvatarUri(displayUrl);
-            Alert.alert("Sucesso", "Foto de perfil atualizada com sucesso!");
+            Alert.alert("Sucesso", "Foto de perfil enviada para a AWS S3 com sucesso!");
 
         } catch (e: any) {
             console.error(e);
-            Alert.alert("Erro", "Falha ao enviar a foto de perfil.");
+            Alert.alert("Erro", "Falha ao enviar a foto para a AWS S3.");
         } finally {
             setLoading(false);
         }

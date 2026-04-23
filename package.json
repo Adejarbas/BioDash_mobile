@@ -10,6 +10,7 @@
     "build:web": "expo export --platform web"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1035.0",
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "^8.4.4",
@@ -27,6 +28,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.0",
+    "react-native-get-random-values": "~1.11.0",
     "react-native-maps": "^1.18.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-url-polyfill": "^3.0.0",
