@@ -18,7 +18,7 @@ import { decode } from 'base64-arraybuffer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../lib/supabase';
-import { uploadImageToS3 } from '../lib/aws-s3';
+import { uploadImageToS3, getImageFromS3 } from '../lib/aws-s3';
 
 const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
     <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
@@ -98,7 +98,13 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     .single();
 
                 if (profile?.avatar_url) {
-                    setAvatarUri(profile.avatar_url);
+                    
+                    const key = profile.avatar_url.includes('amazonaws.com/') 
+                        ? profile.avatar_url.split('amazonaws.com/')[1] 
+                        : profile.avatar_url;
+
+                    const base64 = await getImageFromS3(key);
+                    if (base64) setAvatarUri(base64);
                 }
 
                 setFormData({
@@ -208,25 +214,26 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             const unique = Math.random().toString(36).slice(2);
             const fileName = `${user.id}/${unique}.${ext}`;
 
-            // Upload para AWS S3
-            const displayUrl = await uploadImageToS3(uri, fileName);
+            
+            const s3Key = await uploadImageToS3(uri, fileName);
 
-            // Salva no user_profiles (igual na Web)
             const { error: updateError } = await supabase
                 .from('user_profiles')
                 .upsert(
-                    { id: user.id, avatar_url: displayUrl, updated_at: new Date().toISOString() },
+                    { id: user.id, avatar_url: s3Key, updated_at: new Date().toISOString() },
                     { onConflict: 'id' }
                 );
 
             if (updateError) throw updateError;
 
-            setAvatarUri(displayUrl);
-            Alert.alert("Sucesso", "Foto de perfil enviada para a AWS S3 com sucesso!");
+           
+            const base64 = await getImageFromS3(s3Key);
+            if (base64) setAvatarUri(base64);
+            Alert.alert("Sucesso", "Foto atualizada com sucesso!");
 
         } catch (e: any) {
             console.error(e);
-            Alert.alert("Erro", "Falha ao enviar a foto para a AWS S3.");
+            Alert.alert("Erro", "Falha ao atualizar.");
         } finally {
             setLoading(false);
         }
