@@ -21,13 +21,29 @@ export async function uploadImageToS3(imageUri: string, fileName: string) {
     try {
         console.log(`Iniciando o upload do arquivo: ${imageUri}`);
 
-        const base64 = await FileSystem.readAsStringAsync(imageUri, {
-            encoding: 'base64',
-        });
+        // Valida se as credenciais AWS estão configuradas
+        const accessKey = process.env.EXPO_PUBLIC_AWS_ACCESS_KEY_ID || "";
+        if (!accessKey) {
+            throw new Error("Credenciais AWS não configuradas. Verifique o arquivo .env.");
+        }
 
-        const ext = imageUri.substring(imageUri.lastIndexOf('.') + 1) || 'jpg';
-        const arrayBuffer = decode(base64);
-        const uint8Array = new Uint8Array(arrayBuffer);
+        let uint8Array: Uint8Array;
+
+        if (imageUri.startsWith('blob:') || imageUri.startsWith('http')) {
+            // Ambiente web — blob URL ou URL remota
+            const response = await fetch(imageUri);
+            const arrayBuffer = await response.arrayBuffer();
+            uint8Array = new Uint8Array(arrayBuffer);
+        } else {
+            // Ambiente mobile — file:// URI
+            const base64 = await FileSystem.readAsStringAsync(imageUri, {
+                encoding: 'base64',
+            });
+            const arrayBuffer = decode(base64);
+            uint8Array = new Uint8Array(arrayBuffer);
+        }
+
+        const ext = fileName.substring(fileName.lastIndexOf('.') + 1) || 'jpg';
 
         const command = new PutObjectCommand({
             Bucket: BUCKET_NAME,
@@ -40,8 +56,6 @@ export async function uploadImageToS3(imageUri: string, fileName: string) {
         await s3Client.send(command);
 
         console.log("✅ Upload realizado com sucesso!");
-        
-   
         return fileName;
 
     } catch (error) {

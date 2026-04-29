@@ -4,7 +4,7 @@ import { useFadeInUp } from '../hooks/useFadeInUp';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
-import { supabase } from '../lib/supabase';
+import { alertsApi } from '../lib/api';
 
 interface ActivityItem {
     id: string | number;
@@ -44,28 +44,20 @@ export default function NotificationsScreen({ onBack }: Props) {
         } catch (e) { console.log(e); }
     };
 
-    const fetchAlerts = async () => {
+        const fetchAlerts = async () => {
         setLoading(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const { data, error } = await supabase
-                    .from('sensor_alerts')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .order('created_at', { ascending: false });
-
-                if (!error && data && data.length > 0) {
-                    const mapped = data.map(item => ({
-                        id: item.id,
-                        type: item.alert_level === 'critico' ? 'error' : item.alert_level === 'aviso' ? 'warning' : 'info',
-                        message: item.message,
-                        timestamp: new Date(item.created_at).toLocaleString('pt-BR')
-                    }));
-                    setActivities(mapped as ActivityItem[]);
-                } else {
-                    setActivities([]);
-                }
+            const res = await alertsApi.fetch();
+            if (res.success && res.data && res.data.length > 0) {
+                const mapped = res.data.map((item: any) => ({
+                    id: item.id,
+                    type: item.alert_level === 'critico' ? 'error' : item.alert_level === 'aviso' ? 'warning' : 'info',
+                    message: item.message,
+                    timestamp: new Date(item.created_at).toLocaleString('pt-BR')
+                }));
+                setActivities(mapped as ActivityItem[]);
+            } else {
+                setActivities([]);
             }
         } catch (err) {
             console.log(err);

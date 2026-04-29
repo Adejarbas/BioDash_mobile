@@ -15,7 +15,7 @@ import {
 } from 'react-native'
 import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
-import { supabase } from '../lib/supabase'
+import { authLib } from '../lib/auth'
 
 interface Props {
     onLogin: () => void
@@ -38,21 +38,14 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
         setLoading(true)
         setError(null)
 
-        try {
-            console.log("Tentando logar com:", email.trim(), "| Senha (tamanho):", password.length);
-            const { error: authError } = await supabase.auth.signInWithPassword({
-                email: email.trim(),
-                password: password.trim(), // Removido espaço acidental
-            })
-            if (authError) {
-                console.log("Erro do Supabase:", authError.message);
-                setError(authError.message === 'Invalid login credentials' ? 'Email ou Senha inválidos.' : authError.message)
-            } else {
-                console.log("Login OK!");
-                onLogin()
-            }
-        } catch (e) {
-            setError('Erro inesperado. Tente novamente.')
+            try {
+            console.log("Tentando logar com:", email.trim());
+            await authLib.signIn(email.trim(), password.trim());
+            console.log("Login OK!");
+            onLogin()
+        } catch (e: any) {
+            console.log("Erro no login:", e.message);
+            setError(e.message === 'Email ou senha inválidos.' ? 'Email ou Senha inválidos.' : (e.message || 'Erro inesperado.'))
         } finally {
             setLoading(false)
         }

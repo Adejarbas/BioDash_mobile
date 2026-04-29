@@ -14,7 +14,7 @@ import {
 } from 'react-native'
 import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
-import { supabase } from '../lib/supabase'
+import { authLib } from '../lib/auth'
 
 interface Props {
     onRegisterSuccess: () => void
@@ -44,42 +44,20 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
         setLoading(true)
         setError(null)
 
-        try {
-            const { data, error: signUpError } = await supabase.auth.signUp({
+            try {
+            await authLib.signUp({
                 email: email.trim(),
                 password,
-            })
-
-            if (signUpError) {
-                setError(signUpError.message)
-            } else {
-                // Inserir os dados na tabela pública user_profiles para integração com Web
-                if (data.user) {
-                    const { error: dbError } = await supabase.from('user_profiles').insert({
-                        id: data.user.id,
-                        name: name.trim(),
-                        company: '',
-                        razao_social: razaoSocial.trim(),
-                        cnpj: cnpj.replace(/\D/g, ''),
-                        address: endereco.trim(),
-                        numero: numero.trim() ? Number(numero.trim()) : null,
-                        city: '',
-                        state: '',
-                        zip_code: cep.replace(/\D/g, ''),
-                        phone: '',
-                        email: email.trim(),
-                        updated_at: new Date().toISOString()
-                    });
-
-                    if (dbError) {
-                        console.log('Erro ao salvar no user_profiles:', dbError);
-                    }
-                }
-
-                onRegisterSuccess() // Se der sucesso, volta pro login ou mostra msg de confirmação
-            }
-        } catch (e) {
-            setError('Erro inesperado. Tente novamente mais tarde.')
+                name: name.trim(),
+                razaoSocial: razaoSocial.trim(),
+                cnpj: cnpj.replace(/\D/g, ''),
+                address: endereco.trim(),
+                numero: numero.trim(),
+                zipCode: cep.replace(/\D/g, ''),
+            });
+            onRegisterSuccess();
+        } catch (e: any) {
+            setError(e.message || 'Erro inesperado. Tente novamente mais tarde.')
         } finally {
             setLoading(false)
         }

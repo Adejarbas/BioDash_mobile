@@ -17,7 +17,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
-import { supabase } from '../lib/supabase';
+import { authLib } from '../lib/auth';
+import { profileApi } from '../lib/api';
 import { uploadImageToS3, getImageFromS3 } from '../lib/aws-s3';
 
 const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
@@ -88,87 +89,64 @@ export default function CompanyProfileScreen({ onBack }: Props) {
 
     React.useEffect(() => {
         const loadProfile = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                // Tenta buscar no user_profiles (igual Web)
-                const { data: profile } = await supabase
-                    .from('user_profiles')
-                    .select('*')
-                    .eq('id', user.id)
-                    .single();
+            try {
+                const user = await authLib.getUser();
+                console.log('[Profile] Usuário autenticado:', user?.email);
+
+                if (!user) {
+                    console.warn('[Profile] Nenhum usuário logado.');
+                    return;
+                }
+
+                const res = await profileApi.fetch();
+                console.log('[Profile] Resposta da API:', JSON.stringify(res));
+
+                const profile = res.data;
 
                 if (profile?.avatar_url) {
-                    
-                    const key = profile.avatar_url.includes('amazonaws.com/') 
-                        ? profile.avatar_url.split('amazonaws.com/')[1] 
+                    const key = profile.avatar_url.includes('amazonaws.com/')
+                        ? profile.avatar_url.split('amazonaws.com/')[1]
                         : profile.avatar_url;
-
                     const base64 = await getImageFromS3(key);
                     if (base64) setAvatarUri(base64);
                 }
 
                 setFormData({
-                    nome: profile?.name || user.user_metadata?.name || '',
-                    nomeFantasia: profile?.company || user.user_metadata?.nomeFantasia || '',
-                    razaoSocial: profile?.razao_social || user.user_metadata?.razaoSocial || '',
-                    cnpj: profile?.cnpj || user.user_metadata?.cnpj || '',
+                    nome: profile?.name || '',
+                    nomeFantasia: profile?.company || '',
+                    razaoSocial: profile?.razao_social || '',
+                    cnpj: profile?.cnpj || '',
                     email: profile?.email || user.email || '',
-                    endereco: profile?.address || user.user_metadata?.endereco || '',
-                    numero: profile?.numero?.toString() || user.user_metadata?.numero || '',
-                    cidade: profile?.city || user.user_metadata?.cidade || '',
-                    estado: profile?.state || user.user_metadata?.estado || '',
-                    cep: profile?.zip_code || user.user_metadata?.cep || '',
-                    telefone: profile?.phone || user.user_metadata?.telefone || '',
+                    endereco: profile?.address || '',
+                    numero: profile?.numero?.toString() || '',
+                    cidade: profile?.city || '',
+                    estado: profile?.state || '',
+                    cep: profile?.zip_code || '',
+                    telefone: profile?.phone || '',
                 });
+            } catch (err) {
+                console.error('[Profile] Erro ao carregar perfil:', err);
             }
         };
         loadProfile();
     }, []);
 
-    const handleSaveProfile = async () => {
+        const handleSaveProfile = async () => {
         setLoading(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error("Usuário não logado.");
-
-            // Salva na tabela user_profiles (igual Web)
-            const payload = {
-                id: user.id,
+            await profileApi.update({
                 name: formData.nome || null,
                 company: formData.nomeFantasia || null,
-                razao_social: formData.razaoSocial || null,
+                razaoSocial: formData.razaoSocial || null,
                 cnpj: formData.cnpj || null,
                 address: formData.endereco || null,
-                numero: formData.numero ? Number(formData.numero) : null,
+                numero: formData.numero || null,
                 city: formData.cidade || null,
                 state: formData.estado || null,
-                zip_code: formData.cep || null,
+                zipCode: formData.cep || null,
                 phone: formData.telefone || null,
-                updated_at: new Date().toISOString()
-            };
-
-            const { error: dbError } = await supabase
-                .from('user_profiles')
-                .upsert(payload, { onConflict: 'id' });
-
-            if (dbError) throw dbError;
-
-            // Também podemos atualizar a auth.users para garantir sincronia se quisermos
-            await supabase.auth.updateUser({
-                data: {
-                    name: formData.nome,
-                    nomeFantasia: formData.nomeFantasia,
-                    razaoSocial: formData.razaoSocial,
-                    cnpj: formData.cnpj,
-                    endereco: formData.endereco,
-                    numero: formData.numero,
-                    cidade: formData.cidade,
-                    estado: formData.estado,
-                    cep: formData.cep,
-                    telefone: formData.telefone,
-                }
+                email: formData.email || null,
             });
-
             Alert.alert('Sucesso', 'Informações atualizadas com sucesso!');
         } catch (e: any) {
             Alert.alert('Erro', e.message || 'Falha ao atualizar o perfil.');
@@ -177,7 +155,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         }
     };
 
-    const handleChangePassword = async () => {
+        const handleChangePassword = async () => {
         if (passwordData.nova !== passwordData.confirmar) {
             Alert.alert('Erro', 'As senhas novas não coincidem.');
             return;
@@ -189,11 +167,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
 
         setLoading(true);
         try {
-            const { error } = await supabase.auth.updateUser({
-                password: passwordData.nova
-            });
-
-            if (error) throw error;
+            await authLib.updatePassword(passwordData.nova);
             Alert.alert('Sucesso', 'Senha alterada com segurança.');
             setPasswordData({ atual: '', nova: '', confirmar: '' });
         } catch (e: any) {
@@ -203,37 +177,29 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         }
     };
 
-    const uploadAvatar = async (uri: string) => {
+        const uploadAvatar = async (uri: string) => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
+            const user = await authLib.getUser();
             if (!user) throw new Error("Usuário não logado.");
 
-            // Pegar a extensão
-            const ext = uri.substring(uri.lastIndexOf('.') + 1) || 'jpg';
+            // Detecta a extensão real — ignora 'blob' e 'undefined'
+            const rawExt = uri.substring(uri.lastIndexOf('.') + 1).toLowerCase();
+            const ext = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(rawExt) ? rawExt : 'jpg';
             const unique = Math.random().toString(36).slice(2);
             const fileName = `${user.id}/${unique}.${ext}`;
 
-            
             const s3Key = await uploadImageToS3(uri, fileName);
 
-            const { error: updateError } = await supabase
-                .from('user_profiles')
-                .upsert(
-                    { id: user.id, avatar_url: s3Key, updated_at: new Date().toISOString() },
-                    { onConflict: 'id' }
-                );
+            await profileApi.update({ avatarUrl: s3Key });
 
-            if (updateError) throw updateError;
-
-           
             const base64 = await getImageFromS3(s3Key);
             if (base64) setAvatarUri(base64);
             Alert.alert("Sucesso", "Foto atualizada com sucesso!");
 
         } catch (e: any) {
-            console.error(e);
-            Alert.alert("Erro", "Falha ao atualizar.");
+            console.error('Erro ao atualizar foto:', e);
+            Alert.alert("Erro", e.message || "Falha ao atualizar a foto de perfil.");
         } finally {
             setLoading(false);
         }
