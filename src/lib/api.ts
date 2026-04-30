@@ -113,6 +113,11 @@ export const maintenanceApi = {
       body: JSON.stringify(data),
     }),
   fetchIncident: () => authRequest(`${API_BASE_URL}/maintenance/incidents`, { method: 'GET' }),
+  resolveIncident: (id: string, message: string) =>
+    authRequest(`${API_BASE_URL}/maintenance/incidents/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ resolution_message: message, status: 'resolved' }),
+    }),
 };
 
 // ==========================================

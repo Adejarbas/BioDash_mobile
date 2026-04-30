@@ -107,6 +107,70 @@ export default function DashboardScreen() {
     const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceItem | null>(null);
     const [activeIncident, setActiveIncident] = useState<any>(null);
 
+    const [incidentResolveModalVisible, setIncidentResolveModalVisible] = useState(false);
+    const [incidentResolveMessage, setIncidentResolveMessage] = useState('');
+    const [archivedModalVisible, setArchivedModalVisible] = useState(false);
+    const [archivedMaintenances, setArchivedMaintenances] = useState<MaintenanceItem[]>([]);
+
+    const handleResolveIncident = async () => {
+        if (!incidentResolveMessage.trim()) {
+            Alert.alert("Erro", "Por favor, digite uma mensagem.");
+            return;
+        }
+        try {
+            const res = await maintenanceApi.resolveIncident(activeIncident.id, incidentResolveMessage);
+            if (!res.success) throw new Error(res.error);
+            
+            Alert.alert("Sucesso", "Alerta resolvido com sucesso!");
+            setIncidentResolveModalVisible(false);
+            setIncidentResolveMessage('');
+            loadDashboardData();
+        } catch (err: any) {
+            Alert.alert("Erro", "Não foi possível resolver o alerta: " + err.message);
+        }
+    }
+
+    const handleArchiveMaintenance = async (id: string) => {
+        try {
+            const res = await maintenanceApi.updateSchedule(id, 'archived');
+            if (!res.success) throw new Error(res.error);
+            
+            Alert.alert("Sucesso", "Manutenção arquivada com sucesso!");
+            setActionModalVisible(false);
+            loadDashboardData();
+        } catch (err: any) {
+            Alert.alert("Erro", "Não foi possível arquivar: " + err.message);
+        }
+    }
+
+    const fetchArchivedMaintenances = async () => {
+        try {
+            const res = await maintenanceApi.fetchSchedules();
+            if (!res.success) throw new Error(res.error);
+
+            if (res.data) {
+                const trintaDiasAtras = new Date();
+                trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
+
+                const archived = res.data.filter((m: any) => 
+                    m.status === 'archived' && 
+                    new Date(m.created_at || m.scheduled_date) >= trintaDiasAtras
+                );
+                
+                const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
+                setArchivedMaintenances(archived.map((m: any) => ({
+                    id: m.id,
+                    title: `[${ptMap[m.priority] || m.priority.split(' - ')[0]}] ${m.name}`,
+                    date: new Date(m.scheduled_date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+                    status: m.status,
+                    raw: m
+                })));
+            }
+        } catch (err) {
+            console.error("Erro ao buscar arquivadas", err);
+        }
+    }
+
     const handleMarkAsDone = async (id: string) => {
         try {
             console.log("Marking as done:", id);
@@ -1039,13 +1103,32 @@ export default function DashboardScreen() {
                                         Último alerta: {new Date(activeIncident.last_alert_at).toLocaleString('pt-BR')}
                                     </Text>
                                 )}
+                                <TouchableOpacity 
+                                    style={{ marginTop: 12, backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, alignItems: 'center' }}
+                                    onPress={() => setIncidentResolveModalVisible(true)}
+                                >
+                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Alerta resolvido</Text>
+                                </TouchableOpacity>
                             </View>
                         </View>
                     )}
 
                     {/* Manutenção Agendada */}
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 8 }]}>Manutenções Agendadas</Text>
-                    <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 0 }]}>Manutenções Agendadas</Text>
+                            <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => {
+                                fetchArchivedMaintenances();
+                                setArchivedModalVisible(true);
+                            }}
+                            style={{ backgroundColor: colors.cardBackground, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+                        >
+                            <Text style={{ color: colors.primary, fontSize: 12, fontWeight: 'bold' }}>Exibir arquivadas</Text>
+                        </TouchableOpacity>
+                    </View>
                     <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
                         {maintenances.map((item, index) => (
                             <React.Fragment key={item.id}>
@@ -1577,6 +1660,18 @@ export default function DashboardScreen() {
                             </TouchableOpacity>
                         )}
 
+                        {selectedMaintenance?.status === 'done' && (
+                            <TouchableOpacity
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                                onPress={() => {
+                                    if (selectedMaintenance) handleArchiveMaintenance(selectedMaintenance.id);
+                                }}
+                            >
+                                <MaterialCommunityIcons name="archive-arrow-down" size={20} color="#8b5cf6" style={{ marginRight: 8 }} />
+                                <Text style={{ fontSize: 16, color: '#8b5cf6', fontWeight: 'bold' }}>Arquivar Manutenção</Text>
+                            </TouchableOpacity>
+                        )}
+
                         <TouchableOpacity
                             style={{ paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                             onPress={() => {
@@ -1597,6 +1692,64 @@ export default function DashboardScreen() {
                     </TouchableOpacity>
                 </TouchableOpacity>
             </Modal >
+
+            {/* Modal de Resolução de Incidente */}
+            <Modal visible={incidentResolveModalVisible} animationType="fade" transparent={true} onRequestClose={() => setIncidentResolveModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16 }]}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Resolver Alerta Crítico</Text>
+                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
+                        
+                        <TextInput
+                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 100, marginBottom: 20 }]}
+                            value={incidentResolveMessage}
+                            onChangeText={setIncidentResolveMessage}
+                            placeholder="Ação tomada..."
+                            placeholderTextColor={colors.textMuted}
+                            multiline
+                            textAlignVertical="top"
+                        />
+                        
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }]} onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}>
+                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0, paddingVertical: 12 }]} onPress={handleResolveIncident}>
+                                <Text style={styles.primaryButtonText}>Confirmar</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal de Manutenções Arquivadas */}
+            <Modal visible={archivedModalVisible} animationType="slide" transparent={true} onRequestClose={() => setArchivedModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, height: '70%' }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Manutenções Arquivadas</Text>
+                            <TouchableOpacity onPress={() => setArchivedModalVisible(false)}>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Histórico dos últimos 30 dias.</Text>
+                        
+                        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                            {archivedMaintenances.length === 0 ? (
+                                <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40 }}>Nenhuma manutenção arquivada neste período.</Text>
+                            ) : (
+                                archivedMaintenances.map((item, index) => (
+                                    <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                        <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
+                                        <Text style={[styles.maintenanceDate, { color: colors.textMuted, marginTop: 4 }]}>{item.date}</Text>
+                                        <Text style={{ color: '#8b5cf6', fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>Arquivado</Text>
+                                    </View>
+                                ))
+                            )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
 
             {/* Modal de Configuração de Exportação */}
             <Modal
