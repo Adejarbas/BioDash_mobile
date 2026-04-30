@@ -84,4 +84,23 @@ router.get('/incidents', authMiddleware, async (req, res) => {
   }
 });
 
+// PUT /api/maintenance/incidents/active — Resolve o incidente pendente
+router.put('/incidents/active', authMiddleware, async (req, res) => {
+  const { resolution_message } = req.body;
+  console.log(resolution_message)
+  try {
+    // Atualiza o incidente pendente mais recente do usuário
+    await pgPool.query(
+      `UPDATE maintenance_incidents 
+       SET resolution_message = $1, status = 'resolved', updated_at = NOW()
+       WHERE user_id = $2 AND (status = 'pending' OR status IS NULL OR resolution_message IS NULL)`,
+      [resolution_message, req.user.id]
+    );
+    res.json({ success: true, message: 'Incidente resolvido com sucesso.' });
+  } catch (err) {
+    console.error('Erro ao resolver incidente:', err);
+    res.status(500).json({ success: false, message: 'Erro ao resolver incidente.' });
+  }
+});
+
 module.exports = router;

@@ -118,7 +118,7 @@ export default function DashboardScreen() {
             return;
         }
         try {
-            const res = await maintenanceApi.resolveIncident(activeIncident.id, incidentResolveMessage);
+            const res = await maintenanceApi.resolveIncident(incidentResolveMessage);
             if (!res.success) throw new Error(res.error);
             
             Alert.alert("Sucesso", "Alerta resolvido com sucesso!");
@@ -680,7 +680,8 @@ export default function DashboardScreen() {
             const maintRes = await maintenanceApi.fetchSchedules();
             if (maintRes.success && maintRes.data && maintRes.data.length > 0) {
                 const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
-                setMaintenances(maintRes.data.map((m: any) => {
+                const activeSchedules = maintRes.data.filter((m: any) => m.status !== 'archived');
+                setMaintenances(activeSchedules.slice(0, 5).map((m: any) => {
                     const prLevel = ptMap[m.priority] || m.priority.split(' - ')[0];
                     return {
                         id: m.id,
@@ -1747,6 +1748,44 @@ export default function DashboardScreen() {
                                 ))
                             )}
                         </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+            
+            {/* Modal de Resolução de Incidente */}
+            <Modal visible={incidentResolveModalVisible} animationType="fade" transparent={true} onRequestClose={() => setIncidentResolveModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16 }]}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Resolver Alerta Crítico</Text>
+                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
+                        
+                        <TextInput
+                            style={{ 
+                                borderWidth: 1, 
+                                borderColor: colors.border, 
+                                borderRadius: 8, 
+                                padding: 12, 
+                                color: colors.text, 
+                                backgroundColor: colors.background, 
+                                height: 100, 
+                                marginBottom: 20 
+                            }}
+                            value={incidentResolveMessage}
+                            onChangeText={setIncidentResolveMessage}
+                            placeholder="Ação tomada..."
+                            placeholderTextColor={colors.textMuted}
+                            multiline
+                            textAlignVertical="top"
+                        />
+                        
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }]} onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}>
+                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0, paddingVertical: 12 }]} onPress={handleResolveIncident}>
+                                <Text style={styles.primaryButtonText}>Confirmar</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>
