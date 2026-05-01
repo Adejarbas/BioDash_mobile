@@ -52,7 +52,7 @@ export async function apiRequest<T = any>(
       };
     }
 
-    return { success: true, data: data.data ?? data, message: data.message };
+    return { success: true, data: data.hasOwnProperty('data') ? data.data : data, message: data.message };
   } catch (err: any) {
     console.error(`API Request Error [${endpoint}]:`, err);
     return {
