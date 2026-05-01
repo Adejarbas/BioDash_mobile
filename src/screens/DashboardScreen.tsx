@@ -1108,7 +1108,7 @@ export default function DashboardScreen() {
                                     style={{ marginTop: 12, backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, alignItems: 'center' }}
                                     onPress={() => setIncidentResolveModalVisible(true)}
                                 >
-                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Alerta resolvido</Text>
+                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Marcar alerta como resolvido</Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -1737,7 +1737,7 @@ export default function DashboardScreen() {
                         
                         <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
                             {archivedMaintenances.length === 0 ? (
-                                <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40 }}>Nenhuma manutenção arquivada neste período.</Text>
+                                <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40 }}>Nenhuma manutenção arquivada nos últimos 30 dias.</Text>
                             ) : (
                                 archivedMaintenances.map((item, index) => (
                                     <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
