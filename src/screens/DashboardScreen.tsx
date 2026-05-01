@@ -21,8 +21,8 @@ import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ViewShot from 'react-native-view-shot'
-import { supabase } from '../lib/supabase'
-import { markersApi } from '../lib/api'
+import { authLib } from '../lib/auth'
+import { markersApi, indicatorsApi, maintenanceApi, alertsApi } from '../lib/api'
 import MapComponent from '../components/MapComponent'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
@@ -107,16 +107,75 @@ export default function DashboardScreen() {
     const [selectedMaintenance, setSelectedMaintenance] = useState<MaintenanceItem | null>(null);
     const [activeIncident, setActiveIncident] = useState<any>(null);
 
+    const [incidentResolveModalVisible, setIncidentResolveModalVisible] = useState(false);
+    const [incidentResolveMessage, setIncidentResolveMessage] = useState('');
+    const [archivedModalVisible, setArchivedModalVisible] = useState(false);
+    const [archivedMaintenances, setArchivedMaintenances] = useState<MaintenanceItem[]>([]);
+
+    const handleResolveIncident = async () => {
+        if (!incidentResolveMessage.trim()) {
+            Alert.alert("Erro", "Por favor, digite uma mensagem.");
+            return;
+        }
+        try {
+            const res = await maintenanceApi.resolveIncident(incidentResolveMessage);
+            if (!res.success) throw new Error(res.error);
+            
+            Alert.alert("Sucesso", "Alerta resolvido com sucesso!");
+            setIncidentResolveModalVisible(false);
+            setIncidentResolveMessage('');
+            loadDashboardData();
+        } catch (err: any) {
+            Alert.alert("Erro", "Não foi possível resolver o alerta: " + err.message);
+        }
+    }
+
+    const handleArchiveMaintenance = async (id: string) => {
+        try {
+            const res = await maintenanceApi.updateSchedule(id, 'archived');
+            if (!res.success) throw new Error(res.error);
+            
+            Alert.alert("Sucesso", "Manutenção arquivada com sucesso!");
+            setActionModalVisible(false);
+            loadDashboardData();
+        } catch (err: any) {
+            Alert.alert("Erro", "Não foi possível arquivar: " + err.message);
+        }
+    }
+
+    const fetchArchivedMaintenances = async () => {
+        try {
+            const res = await maintenanceApi.fetchSchedules();
+            if (!res.success) throw new Error(res.error);
+
+            if (res.data) {
+                const trintaDiasAtras = new Date();
+                trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
+
+                const archived = res.data.filter((m: any) => 
+                    m.status === 'archived' && 
+                    new Date(m.created_at || m.scheduled_date) >= trintaDiasAtras
+                );
+                
+                const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
+                setArchivedMaintenances(archived.map((m: any) => ({
+                    id: m.id,
+                    title: `[${ptMap[m.priority] || m.priority.split(' - ')[0]}] ${m.name}`,
+                    date: new Date(m.scheduled_date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+                    status: m.status,
+                    raw: m
+                })));
+            }
+        } catch (err) {
+            console.error("Erro ao buscar arquivadas", err);
+        }
+    }
+
     const handleMarkAsDone = async (id: string) => {
         try {
             console.log("Marking as done:", id);
-            const { error } = await supabase
-                .from('maintenance_schedules')
-                .update({ status: 'done' })
-                .eq('id', id);
-
-            if (error) throw error;
-
+            const res = await maintenanceApi.updateSchedule(id, 'done');
+            if (!res.success) throw new Error(res.error);
             console.log("Update success");
             Alert.alert("Sucesso", "Manutenção concluída!", [{ text: "OK", onPress: () => loadDashboardData() }]);
         } catch (err: any) {
@@ -132,13 +191,8 @@ export default function DashboardScreen() {
                 text: "Apagar", style: "destructive", onPress: async () => {
                     try {
                         console.log("Deleting maintenance:", id);
-                        const { error } = await supabase
-                            .from('maintenance_schedules')
-                            .delete()
-                            .eq('id', id);
-
-                        if (error) throw error;
-
+                        const res = await maintenanceApi.deleteSchedule(id);
+                        if (!res.success) throw new Error(res.error);
                         console.log("Delete success");
                         Alert.alert("Sucesso", "Manutenção apagada com sucesso!", [{ text: "OK", onPress: () => loadDashboardData() }]);
                     } catch (err: any) {
@@ -150,11 +204,8 @@ export default function DashboardScreen() {
         ]);
     }
 
-    const fetchMapMarkers = async (focusId?: string) => {
+        const fetchMapMarkers = async (focusId?: string) => {
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
             const res = await markersApi.fetch()
             if (!res.success || !res.data) return
 
@@ -192,7 +243,7 @@ export default function DashboardScreen() {
         } : x));
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
+            const user = await authLib.getUser();
             if (!user) return;
 
             let newDescription = m.description;
@@ -361,21 +412,17 @@ export default function DashboardScreen() {
         try {
             const monthIdx = parseInt(m);
             const yearVal = parseInt(y);
-            const startDate = new Date(yearVal, monthIdx, 1).toISOString();
-            const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59).toISOString();
+            const startDate = new Date(yearVal, monthIdx, 1);
+            const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59);
 
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const res = await indicatorsApi.fetch();
+            const rows: any[] = res.data || [];
+            const data = rows.find((r: any) => {
+                const d = new Date(r.measured_at);
+                return d >= startDate && d <= endDate;
+            });
 
-            const { data, error } = await supabase
-                .from('biodigester_indicators')
-                .select('*')
-                .gte('measured_at', startDate)
-                .lte('measured_at', endDate)
-                .limit(1)
-                .single();
-
-            if (data && !error) {
+            if (data) {
                 setManualMetrics(prev => ({
                     ...prev,
                     waste: data.waste_processed?.toString() || "",
@@ -392,59 +439,19 @@ export default function DashboardScreen() {
 
     const handleSaveManualMetrics = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) throw new Error("Não autenticado")
-
             const monthIdx = parseInt(manualMetrics.month)
             const yearVal = parseInt(manualMetrics.year)
 
-            // Define a data como o dia 15 do mês para evitar problemas de fuso e centralizar no gráfico
-            const measuredDate = new Date(yearVal, monthIdx, 15)
-            const isoDate = measuredDate.toISOString()
+            const res = await indicatorsApi.save({
+                wasteProcessed: parseFloat(manualMetrics.waste) || 0,
+                energyGenerated: parseFloat(manualMetrics.energy) || 0,
+                taxSavings: parseFloat(manualMetrics.tax) || 0,
+                month: manualMetrics.month,
+                year: manualMetrics.year,
+            })
 
-            // Verifica se já existe registro para este mês/ano
-            const startDate = new Date(yearVal, monthIdx, 1).toISOString()
-            const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59).toISOString()
+            if (!res.success) throw new Error(res.error)
 
-            const { data: existing } = await supabase
-                .from('biodigester_indicators')
-                .select('id')
-                .eq('user_id', user.id)
-                .gte('measured_at', startDate)
-                .lte('measured_at', endDate)
-                .limit(1)
-                .single()
-
-            let saveError
-            if (existing) {
-                // UPDATE
-                const { error } = await supabase
-                    .from('biodigester_indicators')
-                    .update({
-                        waste_processed: parseFloat(manualMetrics.waste) || 0,
-                        energy_generated: parseFloat(manualMetrics.energy) || 0,
-                        tax_savings: parseFloat(manualMetrics.tax) || 0,
-                        measured_at: isoDate
-                    })
-                    .eq('id', existing.id)
-                saveError = error
-            } else {
-                // INSERT
-                const { error } = await supabase
-                    .from('biodigester_indicators')
-                    .insert([{
-                        user_id: user.id,
-                        waste_processed: parseFloat(manualMetrics.waste) || 0,
-                        energy_generated: parseFloat(manualMetrics.energy) || 0,
-                        tax_savings: parseFloat(manualMetrics.tax) || 0,
-                        measured_at: isoDate
-                    }])
-                saveError = error
-            }
-
-            if (saveError) throw saveError
-
-            // Persiste o último mês/ano editado
             await AsyncStorage.setItem('@biodash_last_edited', JSON.stringify({
                 month: monthIdx,
                 year: yearVal
@@ -576,57 +583,34 @@ export default function DashboardScreen() {
         }
     }
 
-    const loadUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
+        const loadUser = async () => {
+        const user = await authLib.getUser()
         setUserEmail(user?.email ?? 'admin@biodash.com')
     }
 
-    const loadDashboardData = async () => {
+        const loadDashboardData = async () => {
         fetchMapMarkers()
         try {
-            const { data: { user: currentUser } } = await supabase.auth.getUser()
-            if (!currentUser) return;
             const IDEAL_RATIO = 0.8;
 
-            // --- BUSCA OS 2 ÚLTIMOS REGISTROS PARA OS CARDS DO TOPO ---
-            // Prioridade: Mês atual > Último registro
-            const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+            const res = await indicatorsApi.fetch();
+            const allRows: any[] = res.data || [];
 
-            let query = supabase
-                .from("biodigester_indicators")
-                .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
-                .order("measured_at", { ascending: false, nullsFirst: false });
-
-            if (currentUser) {
-                query = query.eq('user_id', currentUser.id);
-            }
-
-            let { data: allRows, error } = await query;
-
-            if (error) throw error;
-
-            // Tenta recuperar qual foi o último mês editado
             const lastEditedStr = await AsyncStorage.getItem('@biodash_last_edited');
             let lastEdited = lastEditedStr ? JSON.parse(lastEditedStr) : null;
 
-            let current = undefined;
-            if (lastEdited && allRows) {
-                current = allRows.find(r => {
+            let current: any = undefined;
+            if (lastEdited && allRows.length > 0) {
+                current = allRows.find((r: any) => {
                     const d = new Date(r.measured_at);
                     return d.getMonth() === lastEdited.month && d.getFullYear() === lastEdited.year;
                 });
             }
-
-            // Se não achou o editado, ou não tem, usa o mais recente por data de medição
-            if (!current && allRows && allRows.length > 0) {
-                current = allRows[0];
-            }
+            if (!current && allRows.length > 0) current = allRows[0];
 
             // Pega o registro anterior para comparação (o próximo na lista descendente)
-            const currentIndex = allRows?.indexOf(current!) ?? -1;
-            const previous = (currentIndex !== -1 && allRows) ? allRows[currentIndex + 1] : undefined;
+                        const currentIndex = allRows.indexOf(current);
+            const previous = (currentIndex !== -1) ? allRows[currentIndex + 1] : undefined;
 
             const curEnergy = Number(current?.energy_generated ?? 0);
             const curWaste = Number(current?.waste_processed ?? 0);
@@ -660,44 +644,19 @@ export default function DashboardScreen() {
                 setReferenceDate('');
             }
 
-            // --- BUSCA HISTÓRICO DE 12 MESES PARA O GRÁFICO ---
+            // Gráfico: compilar por mês
             const since = new Date();
             since.setMonth(since.getMonth() - 12);
+            const histRows = allRows.filter((r: any) => new Date(r.measured_at) >= since);
 
-            let chartQuery = supabase
-                .from("biodigester_indicators")
-                .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
-                .eq('user_id', currentUser.id)
-                .gte("measured_at", since.toISOString())
-                .order("measured_at", { ascending: true });
-
-            let chartRes = await chartQuery;
-
-            if (chartRes.error) {
-                const fb = await supabase
-                    .from("biodigester_indicators")
-                    .select("energy_generated, waste_processed, tax_savings, measured_at, created_at")
-                    .eq('user_id', currentUser.id)
-                    .gte("created_at", since.toISOString())
-                    .order("created_at", { ascending: true });
-                if (fb.error) throw fb.error;
-                chartRes = { data: fb.data, error: null, count: null, status: 200, statusText: "OK" };
-            }
-
-            const rowsHistory = chartRes.data ?? [];
             const byMonth = new Map<string, { date: Date; w: number; e: number; t: number }>();
-
             const monthShort = (d: Date) =>
-                new Intl.DateTimeFormat("pt-BR", { month: "short" })
-                    .format(d)
-                    .replace(".", "")
-                    .replace(/^\w/, (c) => c.toUpperCase());
+                new Intl.DateTimeFormat('pt-BR', { month: 'short' })
+                    .format(d).replace('.', '').replace(/^\w/, (c) => c.toUpperCase());
 
-            for (const r of rowsHistory) {
-                const whenStr = r.measured_at ?? r.created_at;
-                if (!whenStr) continue;
-                const d = new Date(whenStr);
-                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+            for (const r of histRows) {
+                const d = new Date(r.measured_at ?? r.created_at);
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                 const acc = byMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), w: 0, e: 0, t: 0 };
                 acc.w += Number(r.waste_processed ?? 0);
                 acc.e += Number(r.energy_generated ?? 0);
@@ -717,70 +676,31 @@ export default function DashboardScreen() {
 
             setChartData(compiledChartData);
 
-            // --- BUSCA MANUTENÇÕES DO SUPABASE ---
-            if (currentUser) {
-                try {
-                    const { data: incidentData, error: incidentErr } = await supabase
-                        .from('maintenance_incidents')
-                        .select('*')
-                        .eq('user_id', currentUser.id)
-                        .order('created_at')
-                        .limit(1)
-                        .maybeSingle();
+            // Manutenções
+            const maintRes = await maintenanceApi.fetchSchedules();
+            if (maintRes.success && maintRes.data && maintRes.data.length > 0) {
+                const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
+                const activeSchedules = maintRes.data.filter((m: any) => m.status !== 'archived');
+                setMaintenances(activeSchedules.slice(0, 5).map((m: any) => {
+                    const prLevel = ptMap[m.priority] || m.priority.split(' - ')[0];
+                    return {
+                        id: m.id,
+                        title: `[${prLevel}] ${m.name}`,
+                        date: new Date(m.scheduled_date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+                        status: m.status,
+                        raw: m
+                    };
+                }));
+            } else {
+                setMaintenances([]);
+            }
 
-                    if (incidentErr) {
-                        console.error("Erro ao buscar incidentes:", incidentErr);
-                        setActiveIncident(null);
-                    } else if (incidentData) {
-                        // Verifica qual campo de data a tabela está usando (flexível para as duas versões)
-                        const alertDateValue = incidentData.last_notification_at || incidentData.last_alert_at || incidentData.updated_at || incidentData.created_at;
-                        
-                        if (alertDateValue) {
-                            const lastAlertDate = new Date(alertDateValue);
-                            const now = new Date();
-                            const diffHours = (now.getTime() - lastAlertDate.getTime()) / (1000 * 60 * 60);
-                            
-                            // Aumentado a janela de tolerância para 48h para facilitar os testes 
-                            // (ou exibe sempre se for muito crítico)
-                            if (diffHours <= 48) {
-                                Alert.alert(incidentData)
-                                setActiveIncident(incidentData);
-                            } else {
-                                setActiveIncident(null);
-                            }
-                        } else {
-                            setActiveIncident(null);
-                        }
-                    } else {
-                        setActiveIncident(null);
-                    }
-                } catch (incError) {
-                    console.error("Exceção cruda ao buscar incidentes:", incError);
-                    setActiveIncident(null);
-                }
-
-                const { data: maintData } = await supabase
-                    .from('maintenance_schedules')
-                    .select('*')
-                    .eq('user_id', currentUser.id)
-                    .order('created_at', { ascending: false })
-                    .limit(5);
-
-                if (maintData && maintData.length > 0) {
-                    const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
-                    setMaintenances(maintData.map((m: any) => {
-                        const prLevel = ptMap[m.priority] || m.priority.split(' - ')[0];
-                        return {
-                            id: m.id,
-                            title: `[${prLevel}] ${m.name}`,
-                            date: new Date(m.scheduled_date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
-                            status: m.status,
-                            raw: m
-                        };
-                    }));
-                } else {
-                    setMaintenances([]);
-                }
+            // Incidente ativo
+            const incidentRes = await maintenanceApi.fetchIncident();
+            if (incidentRes.success && incidentRes.data) {
+                setActiveIncident(incidentRes.data);
+            } else {
+                setActiveIncident(null);
             }
 
         } catch (err) {
@@ -805,30 +725,25 @@ export default function DashboardScreen() {
         ];
     };
 
-    const fetchExportData = async () => {
+        const fetchExportData = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return [];
-
-            let query = supabase
-                .from("biodigester_indicators")
-                .select("*")
-                .eq("user_id", user.id)
-                .order("measured_at", { ascending: true });
+            const rows = await indicatorsApi.fetch();
+            let data: any[] = rows.data || [];
 
             if (exportPeriodType === "12months") {
                 const since = new Date();
                 since.setMonth(since.getMonth() - 12);
-                query = query.gte("measured_at", since.toISOString());
+                data = data.filter((r: any) => new Date(r.measured_at) >= since);
             } else {
-                const startDate = new Date(parseInt(exportYear), parseInt(exportMonth), 1).toISOString();
-                const endDate = new Date(parseInt(exportYear), parseInt(exportMonth) + 1, 0, 23, 59, 59).toISOString();
-                query = query.gte("measured_at", startDate).lte("measured_at", endDate);
+                const startDate = new Date(parseInt(exportYear), parseInt(exportMonth), 1);
+                const endDate = new Date(parseInt(exportYear), parseInt(exportMonth) + 1, 0, 23, 59, 59);
+                data = data.filter((r: any) => {
+                    const d = new Date(r.measured_at);
+                    return d >= startDate && d <= endDate;
+                });
             }
 
-            const { data, error } = await query;
-            if (error) throw error;
-            return data || [];
+            return data;
         } catch (err) {
             console.error("Erro ao buscar dados para exportação:", err);
             return [];
@@ -1189,13 +1104,32 @@ export default function DashboardScreen() {
                                         Último alerta: {new Date(activeIncident.last_alert_at).toLocaleString('pt-BR')}
                                     </Text>
                                 )}
+                                <TouchableOpacity 
+                                    style={{ marginTop: 12, backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, alignItems: 'center' }}
+                                    onPress={() => setIncidentResolveModalVisible(true)}
+                                >
+                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Marcar alerta como resolvido</Text>
+                                </TouchableOpacity>
                             </View>
                         </View>
                     )}
 
                     {/* Manutenção Agendada */}
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 8 }]}>Manutenções Agendadas</Text>
-                    <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 0 }]}>Manutenções Agendadas</Text>
+                            <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => {
+                                fetchArchivedMaintenances();
+                                setArchivedModalVisible(true);
+                            }}
+                            style={{ backgroundColor: colors.cardBackground, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+                        >
+                            <Text style={{ color: colors.primary, fontSize: 12, fontWeight: 'bold' }}>Exibir arquivadas</Text>
+                        </TouchableOpacity>
+                    </View>
                     <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
                         {maintenances.map((item, index) => (
                             <React.Fragment key={item.id}>
@@ -1387,7 +1321,7 @@ export default function DashboardScreen() {
                                                 }
                                             }
 
-                                            const { data: { user } } = await supabase.auth.getUser();
+                                            const user = await authLib.getUser();
                                             if (user) {
                                                 const addressFull = `${markerAddress}${markerNumber ? ', ' + markerNumber : ''}${markerComplement ? ' - ' + markerComplement : ''}, ${markerCep}, Brasil`.replace(/'/g, "");
                                                 const addressJson = {
@@ -1727,6 +1661,18 @@ export default function DashboardScreen() {
                             </TouchableOpacity>
                         )}
 
+                        {selectedMaintenance?.status === 'done' && (
+                            <TouchableOpacity
+                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                                onPress={() => {
+                                    if (selectedMaintenance) handleArchiveMaintenance(selectedMaintenance.id);
+                                }}
+                            >
+                                <MaterialCommunityIcons name="archive-arrow-down" size={20} color="#8b5cf6" style={{ marginRight: 8 }} />
+                                <Text style={{ fontSize: 16, color: '#8b5cf6', fontWeight: 'bold' }}>Arquivar Manutenção</Text>
+                            </TouchableOpacity>
+                        )}
+
                         <TouchableOpacity
                             style={{ paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                             onPress={() => {
@@ -1747,6 +1693,102 @@ export default function DashboardScreen() {
                     </TouchableOpacity>
                 </TouchableOpacity>
             </Modal >
+
+            {/* Modal de Resolução de Incidente */}
+            <Modal visible={incidentResolveModalVisible} animationType="fade" transparent={true} onRequestClose={() => setIncidentResolveModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16 }]}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Resolver Alerta Crítico</Text>
+                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
+                        
+                        <TextInput
+                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 100, marginBottom: 20 }]}
+                            value={incidentResolveMessage}
+                            onChangeText={setIncidentResolveMessage}
+                            placeholder="Ação tomada..."
+                            placeholderTextColor={colors.textMuted}
+                            multiline
+                            textAlignVertical="top"
+                        />
+                        
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }]} onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}>
+                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0, paddingVertical: 12 }]} onPress={handleResolveIncident}>
+                                <Text style={styles.primaryButtonText}>Confirmar</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal de Manutenções Arquivadas */}
+            <Modal visible={archivedModalVisible} animationType="slide" transparent={true} onRequestClose={() => setArchivedModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, height: '70%' }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Manutenções Arquivadas</Text>
+                            <TouchableOpacity onPress={() => setArchivedModalVisible(false)}>
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Histórico dos últimos 30 dias.</Text>
+                        
+                        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                            {archivedMaintenances.length === 0 ? (
+                                <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40 }}>Nenhuma manutenção arquivada nos últimos 30 dias.</Text>
+                            ) : (
+                                archivedMaintenances.map((item, index) => (
+                                    <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                        <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
+                                        <Text style={[styles.maintenanceDate, { color: colors.textMuted, marginTop: 4 }]}>{item.date}</Text>
+                                        <Text style={{ color: '#8b5cf6', fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>Arquivado</Text>
+                                    </View>
+                                ))
+                            )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+            
+            {/* Modal de Resolução de Incidente */}
+            <Modal visible={incidentResolveModalVisible} animationType="fade" transparent={true} onRequestClose={() => setIncidentResolveModalVisible(false)}>
+                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16 }]}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Resolver Alerta Crítico</Text>
+                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
+                        
+                        <TextInput
+                            style={{ 
+                                borderWidth: 1, 
+                                borderColor: colors.border, 
+                                borderRadius: 8, 
+                                padding: 12, 
+                                color: colors.text, 
+                                backgroundColor: colors.background, 
+                                height: 100, 
+                                marginBottom: 20 
+                            }}
+                            value={incidentResolveMessage}
+                            onChangeText={setIncidentResolveMessage}
+                            placeholder="Ação tomada..."
+                            placeholderTextColor={colors.textMuted}
+                            multiline
+                            textAlignVertical="top"
+                        />
+                        
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }]} onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}>
+                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0, paddingVertical: 12 }]} onPress={handleResolveIncident}>
+                                <Text style={styles.primaryButtonText}>Confirmar</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
 
             {/* Modal de Configuração de Exportação */}
             <Modal
@@ -2066,46 +2108,26 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
         }
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                if (editingId) {
-                    const { error } = await supabase.from('maintenance_schedules').update({
-                        name: maintenanceForm.name,
-                        email: maintenanceForm.email,
-                        phone: maintenanceForm.phone,
-                        priority: maintenanceForm.priority,
-                        description: maintenanceForm.description,
-                        scheduled_date: dtIso
-                    }).eq('id', editingId);
-
-                    if (error) {
-                        Alert.alert("Erro ao atualizar", "Erro no banco: " + error.message);
-                        return;
-                    }
-                } else {
-                    const { error } = await supabase.from('maintenance_schedules').insert([{
-                        user_id: user.id,
-                        name: maintenanceForm.name,
-                        email: maintenanceForm.email,
-                        phone: maintenanceForm.phone,
-                        priority: maintenanceForm.priority,
-                        description: maintenanceForm.description,
-                        scheduled_date: dtIso,
-                        status: 'pending'
-                    }]);
-
-                    if (error) {
-                        Alert.alert("Erro ao salvar", "Erro no banco: " + error.message);
-                        return;
-                    }
+            if (editingId) {
+                const res = await maintenanceApi.updateSchedule(editingId, 'pending');
+                if (!res.success) {
+                    Alert.alert("Erro ao atualizar", res.error || 'Erro desconhecido');
+                    return;
                 }
             } else {
-                Alert.alert("Aviso", "Usuário não autenticado. Faça login novamente.");
-                return;
+                const res = await maintenanceApi.createSchedule({
+                    name: maintenanceForm.name,
+                    priority: maintenanceForm.priority,
+                    scheduledDate: dtIso,
+                });
+                if (!res.success) {
+                    Alert.alert("Erro ao salvar", res.error || 'Erro desconhecido');
+                    return;
+                }
             }
 
             if (onAddMaintenance) {
-                onAddMaintenance(); // Trigger fetch
+                onAddMaintenance();
             }
 
             Alert.alert("Sucesso", editingId ? "Manutenção atualizada!" : "Manutenção agendada com sucesso!");
@@ -2146,14 +2168,12 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
             }
             if (!alertSent) {
                 setAlertSent(true);
-                supabase.auth.getUser().then(({ data: { user } }) => {
+                authLib.getUser().then((user) => {
                     if (user) {
-                        supabase.from('sensor_alerts').insert([{
-                            user_id: user.id,
-                            sensor_type: 'Temperatura',
+                        alertsApi.create({
+                            alertLevel: 'critico',
                             message: `Temperatura atingiu ${temp.toFixed(1)}°C - Risco Crítico`,
-                            alert_level: 'critico'
-                        }]).then();
+                        });
                     }
                 });
             }

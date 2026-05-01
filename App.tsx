@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, SafeAreaView, Image } from 'react-native'
-import { supabase } from './src/lib/supabase'
+import { authLib } from './src/lib/auth'
 import LandingScreen from './src/screens/LandingScreen'
 import LoginScreen from './src/screens/LoginScreen'
 import DashboardScreen from './src/screens/DashboardScreen'
@@ -11,7 +11,6 @@ import NotificationsScreen from './src/screens/NotificationsScreen'
 import TermsScreen from './src/screens/TermsScreen'
 import HelpCenterScreen from './src/screens/HelpCenterScreen'
 import { StatusBar } from 'expo-status-bar'
-import type { Session } from '@supabase/supabase-js'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons'
@@ -106,20 +105,11 @@ function MainApp() {
       return;
     }
 
-    // Verifica sessão salva ao abrir o app
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
+    // Verifica se existe token JWT salvo (substitui supabase.auth.getSession)
+    authLib.isAuthenticated().then((authenticated) => {
+      setSession(authenticated ? true : null)
       setLoading(false)
     })
-
-    // Ouve mudanças de autenticação em tempo real
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session)
-      }
-    )
-
-    return () => subscription.unsubscribe()
   }, [])
 
   if (loading) {
@@ -135,7 +125,7 @@ function MainApp() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-        <MainTabs onLogout={() => setSession(null)} />
+        <MainTabs onLogout={async () => { await authLib.signOut(); setSession(null); }} />
       </View>
     )
   }
@@ -153,16 +143,14 @@ function MainApp() {
         <RegisterScreen
           onBackToLogin={() => setCurrentScreen('login')}
           onRegisterSuccess={() => {
-            // Em modo teste, loga automaticamente após o cadastro fechar
-            setSession({ user: { email: 'nova_empresa@biodash.com' } })
+            setSession(true) // Cadastro + login automático via authLib
           }}
           onBack={() => setCurrentScreen('landing')}
         />
       ) : (
         <LoginScreen
           onLogin={() => {
-            // The session will automatically update via the onAuthStateChange listener
-            // We don't need to manually setSession here unless needed for forced UI updates 
+            setSession(true) // Login bem-sucedido — JWT salvo pelo authLib
           }}
           onNavigateRegister={() => setCurrentScreen('register')}
           onBack={() => setCurrentScreen('landing')}
