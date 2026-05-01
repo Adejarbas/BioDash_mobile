@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS sensor_alerts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE maintenance_incidents ADD COLUMN user_email VARCHAR(255);
+
 -- ============================================================
 -- Índices para performance
 -- ============================================================
