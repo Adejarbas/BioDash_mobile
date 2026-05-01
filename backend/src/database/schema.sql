@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS sensor_alerts (
 );
 
 ALTER TABLE maintenance_incidents ADD COLUMN user_email VARCHAR(255);
+ALTER TABLE maintenance_incidents ADD COLUMN resolution_message TEXT;
+ALTER TABLE maintenance_incidents ADD COLUMN status VARCHAR(50) DEFAULT 'pending';
+
 
 -- ============================================================
 -- Índices para performance
