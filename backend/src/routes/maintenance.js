@@ -73,7 +73,7 @@ router.get('/incidents', authMiddleware, async (req, res) => {
     const since48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const result = await pgPool.query(
       `SELECT * FROM maintenance_incidents
-       WHERE user_id = $1 AND last_notification_at >= $2
+       WHERE user_id = $1 AND last_notification_at >= $2 AND (status != 'resolved' OR status IS NULL)
        ORDER BY created_at ASC LIMIT 1`,
       [req.user.id, since48h]
     );
