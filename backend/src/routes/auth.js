@@ -12,8 +12,8 @@ const pgPool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// POST /api/auth/register
-router.post('/register', async (req, res) => {
+// POST /api/auth/signup
+router.post('/signup', async (req, res) => {
   const { email, password, name, razaoSocial, cnpj, address, numero, zipCode } = req.body;
 
   if (!email || !password) {

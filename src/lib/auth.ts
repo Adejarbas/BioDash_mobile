@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const TOKEN_KEY = '@biodash_jwt_token';
 const USER_KEY = '@biodash_user';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://3.84.245.208:3003";
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://98.91.213.231:3003";
 
 export const authLib = {
   /**

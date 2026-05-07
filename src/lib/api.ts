@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // URL base do backend (conectado ao MongoDB e PostgreSQL na AWS)
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://3.84.245.208:3003";
+  process.env.EXPO_PUBLIC_API_URL || "http://98.91.213.231:3003";
 
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;
