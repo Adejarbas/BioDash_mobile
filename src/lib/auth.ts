@@ -40,14 +40,28 @@ export const authLib = {
     numero?: string;
     zipCode?: string;
   }) => {
+    const payload = {
+      email: data.email,
+      password: data.password,
+      full_name: data.name,
+      company_name: data.razaoSocial,
+      cnpj: data.cnpj,
+      address: data.address,
+      numero: data.numero,
+      zipCode: data.zipCode,
+    };
+
     const res = await fetch(`${API_URL}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
     if (!res.ok || !json.success) {
-      throw new Error(json.message || 'Erro ao realizar cadastro.');
+      const validationErrors = json?.errors as Record<string, string[]> | undefined;
+      const firstField = validationErrors ? Object.keys(validationErrors)[0] : undefined;
+      const firstValidationError = firstField ? validationErrors?.[firstField]?.[0] : undefined;
+      throw new Error(firstValidationError || json.error || json.message || 'Erro ao realizar cadastro.');
     }
     await AsyncStorage.setItem(TOKEN_KEY, json.data.token);
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(json.data.user));
