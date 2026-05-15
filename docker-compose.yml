@@ -4,8 +4,7 @@ services:
     build:
       context: .
       args:
-        EXPO_PUBLIC_SUPABASE_URL: ${EXPO_PUBLIC_SUPABASE_URL}
-        EXPO_PUBLIC_SUPABASE_ANON_KEY: ${EXPO_PUBLIC_SUPABASE_ANON_KEY}
+        EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL}
     ports:
       - "8080:80"
     container_name: biodash_mobile_web

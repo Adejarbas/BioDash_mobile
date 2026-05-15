@@ -12,8 +12,8 @@ const pgPool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// POST /api/auth/signup
-router.post('/signup', async (req, res) => {
+// POST /api/auth/signup  (e alias /register para compatibilidade com o frontend)
+async function handleSignup(req, res) {
   const { email, password, name, razaoSocial, cnpj, address, numero, zipCode } = req.body;
 
   if (!email || !password) {
@@ -48,7 +48,12 @@ router.post('/signup', async (req, res) => {
     console.error('Erro no registro:', err);
     res.status(500).json({ success: false, message: 'Erro interno no servidor.' });
   }
-});
+}
+
+router.post('/signup', handleSignup);
+router.post('/register', handleSignup); // alias para compatibilidade com o frontend
+
+
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
