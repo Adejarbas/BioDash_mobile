@@ -1,12 +1,8 @@
 const express = require('express');
-const { Pool } = require('pg');
+const pgPool = require('../database/pg');
 const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
-const pgPool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-});
 
 // GET /api/indicators — Busca todos os indicadores do usuário (últimos 13 meses)
 router.get('/', authMiddleware, async (req, res) => {

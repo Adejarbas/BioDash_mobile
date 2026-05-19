@@ -2,7 +2,8 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const { Pool } = require('pg');
+// Pool PostgreSQL compartilhado — criado apenas uma vez aqui
+const pgPool = require('./database/pg');
 
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
@@ -43,14 +44,12 @@ const Marker = mongoose.model('Marker', markerSchema);
 // ==========================================
 // 2. Conexão com PostgreSQL (RDS - Dados Principais)
 // ==========================================
-const pgPool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
 pgPool.connect()
-  .then(() => console.log('🟢 Conectado ao PostgreSQL (AWS RDS)'))
-  .catch((err) => console.error('🔴 Erro de conexão com PostgreSQL:', err));
+  .then(client => {
+    client.release();
+    console.log('🟢 Conectado ao PostgreSQL (AWS RDS)');
+  })
+  .catch((err) => console.error('🔴 Erro de conexão com PostgreSQL:', err.message));
 
 
 // ==========================================
@@ -61,6 +60,13 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/indicators', indicatorsRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/alerts', alertsRoutes);
+
+// ==========================================
+// Health Check
+// ==========================================
+app.get('/api/health', (req, res) => {
+  res.json({ success: true, status: 'ok', timestamp: new Date().toISOString() });
+});
 
 
 // ==========================================
@@ -112,5 +118,5 @@ app.delete('/api/markers/:id', async (req, res) => {
 // ==========================================
 app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Servidor backend BioDash rodando em http://0.0.0.0:${port}`);
-  console.log(`🌐 Acesse pelo IP público: http://54.91.34.164:${port}/api`);
+  console.log(`🌐 Acesse pelo IP público: http://3.80.238.82:${port}/api`);
 });

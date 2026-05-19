@@ -1,9 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // URL base do backend (EC2 AWS - node/express conectado ao MongoDB e PostgreSQL RDS)
-// EXPO_PUBLIC_API_URL deve incluir o sufixo /api, ex: http://54.91.34.164:3003/api
+// EXPO_PUBLIC_API_URL deve incluir o sufixo /api, ex: http://3.80.238.82:3003/api
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://54.91.34.164:3003/api";
+  process.env.EXPO_PUBLIC_API_URL || "http://3.80.238.82:3003/api";
 
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;

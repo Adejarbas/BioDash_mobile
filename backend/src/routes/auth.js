@@ -1,16 +1,11 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
+const pgPool = require('../database/pg');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'biodash_secret_change_in_production';
 const SALT_ROUNDS = 10;
-
-const pgPool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-});
 
 // POST /api/auth/signup  (e alias /register para compatibilidade com o frontend)
 async function handleSignup(req, res) {
