@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS sensor_alerts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ============================================================
+-- ACTIVITIES (Log de atividades para o Dashboard)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS activities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  type VARCHAR(100) NOT NULL,
+  description TEXT NOT NULL,
+  timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
 ALTER TABLE maintenance_incidents ADD COLUMN user_email VARCHAR(255);
 ALTER TABLE maintenance_incidents ADD COLUMN resolution_message TEXT;
 ALTER TABLE maintenance_incidents ADD COLUMN status VARCHAR(50) DEFAULT 'pending';
@@ -100,3 +111,5 @@ CREATE INDEX IF NOT EXISTS idx_indicators_measured_at ON biodigester_indicators(
 CREATE INDEX IF NOT EXISTS idx_maintenance_schedules_user_id ON maintenance_schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_sensor_alerts_user_id ON sensor_alerts(user_id);
 CREATE INDEX IF NOT EXISTS idx_sensor_alerts_created_at ON sensor_alerts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activities_user_id ON activities(user_id);
+CREATE INDEX IF NOT EXISTS idx_activities_timestamp ON activities(timestamp DESC);

@@ -1,19 +1,14 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
+const pgPool = require('../database/pg');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'biodash_secret_change_in_production';
 const SALT_ROUNDS = 10;
 
-const pgPool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
-// POST /api/auth/signup
-router.post('/signup', async (req, res) => {
+// POST /api/auth/signup  (e alias /register para compatibilidade com o frontend)
+async function handleSignup(req, res) {
   const { email, password, name, razaoSocial, cnpj, address, numero, zipCode } = req.body;
 
   if (!email || !password) {
@@ -48,7 +43,12 @@ router.post('/signup', async (req, res) => {
     console.error('Erro no registro:', err);
     res.status(500).json({ success: false, message: 'Erro interno no servidor.' });
   }
-});
+}
+
+router.post('/signup', handleSignup);
+router.post('/register', handleSignup); // alias para compatibilidade com o frontend
+
+
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {

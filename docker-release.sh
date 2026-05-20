@@ -146,15 +146,14 @@ set -a
 source .env
 set +a
 
-if [[ -z "${EXPO_PUBLIC_SUPABASE_URL:-}" || -z "${EXPO_PUBLIC_SUPABASE_ANON_KEY:-}" ]]; then
-  echo "Variaveis EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY devem estar definidas no .env"
+if [[ -z "${EXPO_PUBLIC_API_URL:-}" ]]; then
+  echo "Variavel EXPO_PUBLIC_API_URL deve estar definida no .env (ex: http://54.91.34.164:3003/api)"
   exit 1
 fi
 
 echo "Construindo imagem: ${IMAGE_NAME}:${VERSION} e ${IMAGE_NAME}:latest"
 docker build \
-  --build-arg EXPO_PUBLIC_SUPABASE_URL="${EXPO_PUBLIC_SUPABASE_URL}" \
-  --build-arg EXPO_PUBLIC_SUPABASE_ANON_KEY="${EXPO_PUBLIC_SUPABASE_ANON_KEY}" \
+  --build-arg EXPO_PUBLIC_API_URL="${EXPO_PUBLIC_API_URL}" \
   -t "${IMAGE_NAME}:${VERSION}" \
   -t "${IMAGE_NAME}:latest" \
   .
