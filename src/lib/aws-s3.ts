@@ -1,94 +1,109 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+/**
+ * aws-s3.ts — Upload/Download via Backend (IAM Instance Role)
+ *
+ * A EC2 que roda o Express backend possui uma IAM Instance Role com permissão
+ * ao S3. O frontend NÃO usa credenciais AWS diretamente — apenas solicita
+ * URLs pré-assinadas ao backend e usa essas URLs para upload/download.
+ *
+ * Fluxo:
+ *  1. Frontend pede URL de upload ao backend → POST /api/s3/upload-url
+ *  2. Backend gera URL pré-assinada usando a Instance Role
+ *  3. Frontend faz PUT diretamente no S3 com essa URL
+ */
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 
-import 'react-native-url-polyfill/auto';
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL || 'http://98.92.12.89:3003/api';
 
-const REGION = process.env.EXPO_PUBLIC_AWS_REGION || "us-east-1";
-const BUCKET_NAME = process.env.EXPO_PUBLIC_AWS_BUCKET_NAME || "biogen-s3";
+const TOKEN_KEY = '@biodash_jwt_token';
 
-const s3Client = new S3Client({
-    region: REGION,
-    credentials: {
-        accessKeyId: process.env.EXPO_PUBLIC_AWS_ACCESS_KEY_ID || "",
-        secretAccessKey: process.env.EXPO_PUBLIC_AWS_SECRET_ACCESS_KEY || "",
-        sessionToken: process.env.EXPO_PUBLIC_AWS_SESSION_TOKEN || ""
-    }
-});
-
-export async function uploadImageToS3(imageUri: string, fileName: string) {
-    try {
-        console.log(`Iniciando o upload do arquivo: ${imageUri}`);
-
-        // Valida se as credenciais AWS estão configuradas
-        const accessKey = process.env.EXPO_PUBLIC_AWS_ACCESS_KEY_ID || "";
-        if (!accessKey) {
-            throw new Error("Credenciais AWS não configuradas. Verifique o arquivo .env.");
-        }
-
-        let uint8Array: Uint8Array;
-
-        if (imageUri.startsWith('blob:') || imageUri.startsWith('http')) {
-            // Ambiente web — blob URL ou URL remota
-            const response = await fetch(imageUri);
-            const arrayBuffer = await response.arrayBuffer();
-            uint8Array = new Uint8Array(arrayBuffer);
-        } else {
-            // Ambiente mobile — file:// URI
-            const base64 = await FileSystem.readAsStringAsync(imageUri, {
-                encoding: 'base64',
-            });
-            const arrayBuffer = decode(base64);
-            uint8Array = new Uint8Array(arrayBuffer);
-        }
-
-        const ext = fileName.substring(fileName.lastIndexOf('.') + 1) || 'jpg';
-
-        const command = new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: fileName,
-            Body: uint8Array,
-            ContentType: `image/${ext}`
-        });
-
-        console.log("Enviando para a AWS...");
-        await s3Client.send(command);
-
-        console.log("✅ Upload realizado com sucesso!");
-        return fileName;
-
-    } catch (error) {
-        console.error("❌ Erro ao fazer o upload para o S3:", error);
-        throw error;
-    }
+async function getAuthToken(): Promise<string | null> {
+  return AsyncStorage.getItem(TOKEN_KEY);
 }
 
-export async function getImageFromS3(fileName: string) {
-    try {
-        if (!fileName) return null;
-        
-        console.log(`Gerando URL assinada para: ${fileName}`);
-        
-    
-        const command = new GetObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: fileName,
-        });
-        const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+/**
+ * Faz upload de uma imagem para o S3 via URL pré-assinada do backend.
+ * @param imageUri URI local da imagem (file:// ou blob:)
+ * @param fileName Nome do arquivo a ser enviado
+ * @returns Chave (key) do objeto no S3
+ */
+export async function uploadImageToS3(imageUri: string, fileName: string): Promise<string> {
+  const token = await getAuthToken();
+  if (!token) throw new Error('Usuário não autenticado.');
 
-        const response = await fetch(signedUrl);
-        const blob = await response.blob();
-        
-        return new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
-        
-    } catch (error) {
-        console.error("❌ Erro ao recuperar imagem do S3:", error);
-        return null;
-    }
+  // Determina o contentType pela extensão
+  const ext = fileName.split('.').pop()?.toLowerCase() || 'jpg';
+  const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+
+  // 1. Solicita URL de upload pré-assinada ao backend
+  const res = await fetch(`${API_BASE_URL}/s3/upload-url`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ fileName, contentType }),
+  });
+
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.message || 'Erro ao obter URL de upload.');
+  }
+
+  const { uploadUrl, key } = json.data;
+
+  // 2. Converte a imagem para ArrayBuffer
+  let body: Uint8Array;
+  if (imageUri.startsWith('blob:') || imageUri.startsWith('http')) {
+    const response = await fetch(imageUri);
+    const arrayBuffer = await response.arrayBuffer();
+    body = new Uint8Array(arrayBuffer);
+  } else {
+    const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: 'base64' });
+    body = new Uint8Array(decode(base64));
+  }
+
+  // 3. Faz o PUT direto no S3 com a URL pré-assinada
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body,
+  });
+
+  if (!uploadRes.ok) {
+    throw new Error(`Erro no upload S3: ${uploadRes.status}`);
+  }
+
+  console.log('✅ Upload S3 realizado com sucesso! Key:', key);
+  return key;
+}
+
+/**
+ * Obtém URL pré-assinada de leitura para uma imagem no S3.
+ * @param key Chave do objeto no S3
+ * @returns URL temporária válida por 1 hora
+ */
+export async function getImageFromS3(key: string): Promise<string | null> {
+  if (!key) return null;
+
+  const token = await getAuthToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3/download-url?key=${encodeURIComponent(key)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    const json = await res.json();
+    if (!res.ok || !json.success) return null;
+
+    return json.data.downloadUrl;
+  } catch (err) {
+    console.error('❌ Erro ao obter URL de download S3:', err);
+    return null;
+  }
 }

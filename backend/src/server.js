@@ -10,6 +10,7 @@ const profileRoutes = require('./routes/profile');
 const indicatorsRoutes = require('./routes/indicators');
 const maintenanceRoutes = require('./routes/maintenance');
 const alertsRoutes = require('./routes/alerts');
+const s3Routes = require('./routes/s3');
 
 const app = express();
 const port = process.env.PORT || 3003;
@@ -60,6 +61,7 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/indicators', indicatorsRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/alerts', alertsRoutes);
+app.use('/api/s3', s3Routes);
 
 // ==========================================
 // Health Check
@@ -118,5 +120,5 @@ app.delete('/api/markers/:id', async (req, res) => {
 // ==========================================
 app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Servidor backend BioDash rodando em http://0.0.0.0:${port}`);
-  console.log(`🌐 Acesse pelo IP público: http://3.80.238.82:${port}/api`);
+  console.log(`🌐 Acesse pelo IP público: http://98.92.12.89:${port}/api`);
 });

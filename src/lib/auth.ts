@@ -3,8 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const TOKEN_KEY = '@biodash_jwt_token';
 const USER_KEY = '@biodash_user';
 
-// EXPO_PUBLIC_API_URL deve incluir o sufixo /api, ex: http://3.80.238.82:3003/api
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://3.80.238.82:3003/api";
+// EXPO_PUBLIC_API_URL deve incluir o sufixo /api, ex: http://98.92.12.89:3003/api
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://98.92.12.89:3003/api";
 
 export const authLib = {
   /**

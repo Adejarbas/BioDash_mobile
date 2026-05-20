@@ -1,0 +1,27 @@
+# docker-compose.backend.yml
+# ==========================================
+# USAR NA EC2 DO BACKEND: 98.92.12.89
+# Comando: docker-compose -f docker-compose.backend.yml up -d
+#
+# Portas usadas:
+#   3003 → Express API (BioDash_mobile/backend)
+#   80   → Next.js Dashboard (BioDashBD) — ver docker-compose.yml do BioDashBD
+# ==========================================
+
+services:
+  biodash-backend:
+    image: thiagohmn93/biodash_backend:latest
+    build:
+      context: ./backend
+    ports:
+      - "3003:3003"
+    env_file:
+      - ./backend/.env
+    container_name: biodash_backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3003/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

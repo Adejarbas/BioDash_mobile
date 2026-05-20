@@ -1,0 +1,17 @@
+# docker-compose.frontend.yml
+# ==========================================
+# USAR NA EC2 DO FRONTEND: 54.85.37.127
+# Comando: docker-compose -f docker-compose.frontend.yml up -d
+# ==========================================
+
+services:
+  biodash-mobile:
+    image: thiagohmn93/biodash_mobile:latest
+    build:
+      context: .
+      args:
+        EXPO_PUBLIC_API_URL: http://98.92.12.89:3003/api
+    ports:
+      - "80:80"
+    container_name: biodash_mobile_web
+    restart: unless-stopped
