@@ -1,7 +1,7 @@
 services:
   # ==========================================
   # Backend Express (PostgreSQL RDS + MongoDB)
-  # EC2: 98.92.12.89 — porta 3003
+  # EC2: 18.232.70.76 — porta 3003
   # ==========================================
   biodash-backend:
     image: thiagohmn93/biodash_backend:latest
@@ -22,7 +22,7 @@ services:
 
   # ==========================================
   # Frontend Expo Web (Nginx)
-  # EC2: 54.85.37.127 — porta 80
+  # EC2: 54.159.82.145 — porta 80
   # ==========================================
   biodash-mobile:
     image: thiagohmn93/biodash_mobile:latest

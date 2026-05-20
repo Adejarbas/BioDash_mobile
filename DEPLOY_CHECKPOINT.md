@@ -9,22 +9,22 @@
 ```
 [Usuário]
     │
-    ├─→ http://54.85.37.127          → EC2 Frontend (Expo Web + Nginx, porta 80)
+    ├─→ http://54.159.82.145         → EC2 Frontend (Expo Web + Nginx, porta 80)
     │                                     BioDash_mobile (este repositório)
     │
-    └─→ http://98.92.12.89           → EC2 Backend — dois containers:
+    └─→ http://18.232.70.76          → EC2 Backend — dois containers:
            ├── porta 80  → Next.js Dashboard   (repositório BioDashBD)
            └── porta 3003 → Express API        (BioDash_mobile/backend/)
                                ├── PostgreSQL RDS (database-1.cej6...rds:5432)
-                               ├── MongoDB EC2  (3.84.153.49:27017, sem auth)
+                               ├── MongoDB EC2  (100.24.56.239:27017, sem auth)
                                └── AWS S3       (bucket: biogen-s3, via IAM Role)
 ```
 
 | Serviço | Repositório | EC2 IP | Porta | Imagem Docker |
 |---|---|---|---|---|
-| Frontend Expo/Nginx | `BioDash_mobile` | `54.85.37.127` | `80` | `thiagohmn93/biodash_mobile:latest` |
-| Express API | `BioDash_mobile/backend/` | `98.92.12.89` | `3003` | `thiagohmn93/biodash_backend:latest` |
-| Next.js Dashboard | `BioDashBD` | `98.92.12.89` | `80` | `danielrodriguesadejarbas/biodash-backend:latest` |
+| Frontend Expo/Nginx | `BioDash_mobile` | `54.159.82.145` | `80` | `thiagohmn93/biodash_mobile:latest` |
+| Express API | `BioDash_mobile/backend/` | `18.232.70.76` | `3003` | `thiagohmn93/biodash_backend:latest` |
+| Next.js Dashboard | `BioDashBD` | `18.232.70.76` | `80` | `danielrodriguesadejarbas/biodash-backend:latest` |
 
 ---
 
@@ -36,8 +36,8 @@ Todos os arquivos abaixo já foram alterados e estão no repositório. Não prec
 
 | Arquivo | O que mudou |
 |---|---|
-| `src/lib/api.ts` | IP fallback: `3.80.238.82` → `98.92.12.89` |
-| `src/lib/auth.ts` | IP fallback: `3.80.238.82` → `98.92.12.89` |
+| `src/lib/api.ts` | IP fallback: `3.80.238.82` → `18.232.70.76` |
+| `src/lib/auth.ts` | IP fallback: `3.80.238.82` → `18.232.70.76` |
 | `src/lib/aws-s3.ts` | **Reescrito** — usa pre-signed URLs do backend (sem Access Keys no frontend) |
 | `backend/src/server.js` | Rota `/api/s3` registrada; log do IP atualizado |
 | `backend/src/routes/s3.js` | **Novo** — gera URLs pre-assinadas para upload/download S3 |
@@ -45,15 +45,15 @@ Todos os arquivos abaixo já foram alterados e estão no repositório. Não prec
 | `backend/.env` | **Criado** — contém POSTGRES_URL, MONGODB_URI, JWT_SECRET, CORS_ORIGINS, AWS_REGION, S3_BUCKET_NAME |
 | `.env` | Atualizado — `EXPO_PUBLIC_API_URL` apontando para novo IP; credenciais AWS removidas |
 | `docker-compose.yml` | Porta frontend corrigida: `8080:80` → `80:80`; IPs atualizados |
-| `docker-compose.frontend.yml` | **Novo** — só o frontend; usar na EC2 `54.85.37.127` |
-| `docker-compose.backend.yml` | **Novo** — só o Express; usar na EC2 `98.92.12.89` |
+| `docker-compose.frontend.yml` | **Novo** — só o frontend; usar na EC2 `54.159.82.145` |
+| `docker-compose.backend.yml` | **Novo** — só o Express; usar na EC2 `18.232.70.76` |
 | `.github/workflows/mobile-ci-cd.yml` | `build-args` corrigido: Supabase → `EXPO_PUBLIC_API_URL` |
 
 ### `BioDashBD` — Alterações
 
 | Arquivo | O que mudou |
 |---|---|
-| `middleware.ts` | CORS atualizado: IPs antigos → `54.85.37.127` e `98.92.12.89` |
+| `middleware.ts` | CORS atualizado: IPs antigos → `54.159.82.145` e `18.232.70.76` |
 | `next.config.js` | IPs de CORS atualizados |
 | `docker-compose.yml` | Porta: `3003:3003` → `80:3003`; `NEXT_PUBLIC_SITE_URL` sem porta |
 | `Dockerfile` | `EXPOSE 3003` (porta interna); healthcheck corrigido |
@@ -73,7 +73,7 @@ Acesse: `github.com/Adejarbas/BioDash_mobile` → **Settings** → **Secrets and
 |---|---|---|
 | `[ ]` | `DOCKERHUB_USERNAME` | `thiagohmn93` |
 | `[ ]` | `DOCKERHUB_TOKEN` | *(gerar em hub.docker.com → Account Settings → Security → New Access Token)* |
-| `[ ]` | `EXPO_PUBLIC_API_URL` | `http://98.92.12.89:3003/api` |
+| `[ ]` | `EXPO_PUBLIC_API_URL` | `http://18.232.70.76:3003/api` |
 
 #### Repositório `BioDashBD`
 Acesse: `github.com/Adejarbas/BioDashBD` → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
@@ -84,8 +84,8 @@ Acesse: `github.com/Adejarbas/BioDashBD` → **Settings** → **Secrets and vari
 | `[ ]` | `DOCKERHUB_TOKEN` | *(mesmo token gerado acima)* |
 | `[ ]` | `POSTGRES_URL` | `postgresql://postgres:Biogen123!@database-1.cej6asnixj7d.us-east-1.rds.amazonaws.com:5432/postgres` |
 | `[ ]` | `JWT_SECRET` | `biodash_jwt_secret_2024_change_in_production` |
-| `[ ]` | `FRONTEND_URL` | `http://54.85.37.127` |
-| `[ ]` | `NEXT_PUBLIC_API_BASE_URL` | `http://98.92.12.89:3003` |
+| `[ ]` | `FRONTEND_URL` | `http://54.159.82.145` |
+| `[ ]` | `NEXT_PUBLIC_API_BASE_URL` | `http://18.232.70.76:3003` |
 
 ---
 
@@ -126,7 +126,7 @@ Acesse: `github.com/Adejarbas/BioDashBD` → **Settings** → **Secrets and vari
 
 #### 2.3 — Associar Role à EC2 do Backend
 1. AWS Console → **EC2** → **Instances**
-2. Selecionar a instância com IP `98.92.12.89`
+2. Selecionar a instância com IP `18.232.70.76`
 3. **Actions** → **Security** → **Modify IAM role**
 4. Selecionar `BioDashEC2Role` → **Update IAM role**
 
@@ -139,12 +139,12 @@ Após configurar as Secrets, fazer push para `main` nos dois repositórios:
 ```bash
 # No repositório BioDash_mobile
 git add .
-git commit -m "feat: configuração AWS deploy"
+git commit -m "feat: atualização IPs AWS lab reiniciado"
 git push origin main
 
 # No repositório BioDashBD
 git add .
-git commit -m "feat: configuração AWS deploy"
+git commit -m "feat: atualização IPs AWS lab reiniciado"
 git push origin main
 ```
 
@@ -174,10 +174,10 @@ sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-
 sudo chmod +x /usr/local/bin/docker-compose
 ```
 
-#### 4.2 — EC2 Frontend (`54.85.37.127`) — porta 80
+#### 4.2 — EC2 Frontend (`54.159.82.145`) — porta 80
 
 ```bash
-ssh -i sua-chave.pem ec2-user@54.85.37.127
+ssh -i sua-chave.pem ec2-user@54.159.82.145
 
 docker login -u thiagohmn93
 
@@ -194,10 +194,10 @@ docker ps
 curl http://localhost:80
 ```
 
-#### 4.3 — EC2 Backend (`98.92.12.89`) — portas 3003 e 80
+#### 4.3 — EC2 Backend (`18.232.70.76`) — portas 3003 e 80
 
 ```bash
-ssh -i sua-chave.pem ec2-user@98.92.12.89
+ssh -i sua-chave.pem ec2-user@18.232.70.76
 
 docker login -u thiagohmn93
 
@@ -211,9 +211,9 @@ docker run -d \
   -e PORT=3003 \
   -e NODE_ENV=production \
   -e POSTGRES_URL="postgresql://postgres:Biogen123!@database-1.cej6asnixj7d.us-east-1.rds.amazonaws.com:5432/postgres" \
-  -e MONGODB_URI="mongodb://3.84.153.49:27017/biodash" \
+  -e MONGODB_URI="mongodb://100.24.56.239:27017/biodash" \
   -e JWT_SECRET="biodash_jwt_secret_2024_change_in_production" \
-  -e CORS_ORIGINS="http://54.85.37.127,http://54.85.37.127:80,http://98.92.12.89,http://98.92.12.89:3003" \
+  -e CORS_ORIGINS="http://54.159.82.145,http://54.159.82.145:80,http://18.232.70.76,http://18.232.70.76:3003" \
   -e AWS_REGION="us-east-1" \
   -e S3_BUCKET_NAME="biogen-s3" \
   thiagohmn93/biodash_backend:latest
@@ -228,10 +228,10 @@ docker run -d \
   -e NODE_ENV=production \
   -e POSTGRES_URL="postgresql://postgres:Biogen123!@database-1.cej6asnixj7d.us-east-1.rds.amazonaws.com:5432/postgres" \
   -e JWT_SECRET="biodash_jwt_secret_2024_change_in_production" \
-  -e FRONTEND_URL="http://54.85.37.127" \
-  -e NEXT_PUBLIC_FRONTEND_URL="http://54.85.37.127" \
-  -e NEXT_PUBLIC_API_BASE_URL="http://98.92.12.89:3003" \
-  -e NEXT_PUBLIC_SITE_URL="http://98.92.12.89" \
+  -e FRONTEND_URL="http://54.159.82.145" \
+  -e NEXT_PUBLIC_FRONTEND_URL="http://54.159.82.145" \
+  -e NEXT_PUBLIC_API_BASE_URL="http://18.232.70.76:3003" \
+  -e NEXT_PUBLIC_SITE_URL="http://18.232.70.76" \
   danielrodriguesadejarbas/biodash-backend:latest
 
 # Verificar os dois containers
@@ -261,7 +261,7 @@ docker restart biodash_backend
 |---|---|
 | PostgreSQL senha | `Biogen123!` |
 | PostgreSQL host | `database-1.cej6asnixj7d.us-east-1.rds.amazonaws.com:5432` |
-| MongoDB IP | `3.84.153.49:27017` (sem autenticação) |
+| MongoDB IP | `100.24.56.239:27017` (sem autenticação) |
 | JWT Secret | `biodash_jwt_secret_2024_change_in_production` |
 | S3 Bucket | `biogen-s3` (região `us-east-1`) |
 | Docker Hub user | `thiagohmn93` |
@@ -273,12 +273,12 @@ docker restart biodash_backend
 Após o deploy completo, testar:
 
 ```
-[ ] http://54.85.37.127          → Deve abrir o app BioDash (tela de login)
-[ ] http://98.92.12.89:3003/api/health → {"status":"ok",...}
-[ ] http://98.92.12.89/api/health      → {"status":"ok",...}
-[ ] Login no app com email/senha       → deve autenticar via JWT
-[ ] Mapa de geolocalização             → deve carregar marcadores do MongoDB
-[ ] Upload de foto de perfil           → deve funcionar via S3
+[ ] http://54.159.82.145          → Deve abrir o app BioDash (tela de login)
+[ ] http://18.232.70.76:3003/api/health → {"status":"ok",...}
+[ ] http://18.232.70.76/api/health      → {"status":"ok",...}
+[ ] Login no app com email/senha        → deve autenticar via JWT
+[ ] Mapa de geolocalização              → deve carregar marcadores do MongoDB
+[ ] Upload de foto de perfil            → deve funcionar via S3
 ```
 
 ---
@@ -286,12 +286,12 @@ Após o deploy completo, testar:
 ## ❓ Perguntas em Aberto
 
 Nenhuma. Tudo foi resolvido:
-- ✅ IPs atualizados em todos os arquivos
+- ✅ IPs atualizados em todos os arquivos (reinício do laboratório em 2026-05-20)
 - ✅ Porta 3003 (Express) e porta 80 (Next.js) sem conflito na mesma EC2
-- ✅ MongoDB sem autenticação (`mongodb://3.84.153.49:27017/biodash`)
+- ✅ MongoDB sem autenticação (`mongodb://100.24.56.239:27017/biodash`)
 - ✅ JWT Secret igual nos dois projetos
 - ✅ S3 via IAM Instance Role (sem Access Keys — compatível com conta estudante)
-- ✅ Frontend consome o backend Express em `http://98.92.12.89:3003/api`
+- ✅ Frontend consome o backend Express em `http://18.232.70.76:3003/api`
 
 ---
 
