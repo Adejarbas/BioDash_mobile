@@ -1,6 +1,6 @@
 # docker-compose.frontend.yml
 # ==========================================
-# USAR NA EC2 DO FRONTEND: 54.159.82.145
+# USAR NA EC2 DO FRONTEND: 98.83.234.240
 # Comando: docker-compose -f docker-compose.frontend.yml up -d
 # ==========================================
 
@@ -10,7 +10,7 @@ services:
     build:
       context: .
       args:
-        EXPO_PUBLIC_API_URL: http://18.232.70.76:3003/api
+        EXPO_PUBLIC_API_URL: http://100.30.203.65:3003/api
     ports:
       - "80:80"
     container_name: biodash_mobile_web

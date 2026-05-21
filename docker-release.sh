@@ -147,7 +147,7 @@ source .env
 set +a
 
 if [[ -z "${EXPO_PUBLIC_API_URL:-}" ]]; then
-  echo "Variavel EXPO_PUBLIC_API_URL deve estar definida no .env (ex: http://54.91.34.164:3003/api)"
+  echo "Variavel EXPO_PUBLIC_API_URL deve estar definida no .env (ex: http://100.30.203.65:3003/api)"
   exit 1
 fi
 
