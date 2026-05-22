@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | Frontend Expo/Nginx | `BioDash_mobile` | `54.159.82.145` | `80` | `thiagohmn93/biodash_mobile:latest` |
 | Express API | `BioDash_mobile/backend/` | `18.232.70.76` | `3003` | `thiagohmn93/biodash_backend:latest` |
-| Next.js Dashboard | `BioDashBD` | `18.232.70.76` | `80` | `danielrodriguesadejarbas/biodash-backend:latest` |
+| Next.js Dashboard | `BioDashBD` | `18.232.70.76` | `80` | `thiagohmn93/biodash-backend:latest` |
 
 ---
 
@@ -219,7 +219,7 @@ docker run -d \
   thiagohmn93/biodash_backend:latest
 
 # --- Container 2: Next.js Dashboard (porta 80) ---
-docker pull danielrodriguesadejarbas/biodash-backend:latest
+docker pull thiagohmn93/biodash-backend:latest
 
 docker run -d \
   --name biodash_nextjs \
@@ -232,7 +232,7 @@ docker run -d \
   -e NEXT_PUBLIC_FRONTEND_URL="http://54.159.82.145" \
   -e NEXT_PUBLIC_API_BASE_URL="http://18.232.70.76:3003" \
   -e NEXT_PUBLIC_SITE_URL="http://18.232.70.76" \
-  danielrodriguesadejarbas/biodash-backend:latest
+  thiagohmn93/biodash-backend:latest
 
 # Verificar os dois containers
 docker ps
