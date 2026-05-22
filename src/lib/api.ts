@@ -98,7 +98,7 @@ export const markersApi = {
 // indicatorsApi — Indicadores do Biodigestor (PostgreSQL)
 // ==========================================
 export const indicatorsApi = {
-  fetch: () => authRequest(`${API_BASE_URL}/indicators`, { method: "GET" }),
+  fetch: () => authRequest(`${API_BASE_URL}/dashboard/indicators`, { method: "GET" }),
   save: (data: {
     wasteProcessed: number;
     energyGenerated: number;
@@ -106,7 +106,7 @@ export const indicatorsApi = {
     month: string;
     year: string;
   }) =>
-    authRequest(`${API_BASE_URL}/indicators`, {
+    authRequest(`${API_BASE_URL}/dashboard/indicators`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -161,9 +161,9 @@ export const alertsApi = {
 // profileApi — Perfil do Usuário (PostgreSQL)
 // ==========================================
 export const profileApi = {
-  fetch: () => authRequest(`${API_BASE_URL}/profile`, { method: "GET" }),
+  fetch: () => authRequest(`${API_BASE_URL}/user`, { method: "GET" }),
   update: (data: any) =>
-    authRequest(`${API_BASE_URL}/profile`, {
+    authRequest(`${API_BASE_URL}/user`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
