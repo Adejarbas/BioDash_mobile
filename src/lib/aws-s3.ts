@@ -16,7 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'http://100.30.203.65:3003/api';
+  process.env.EXPO_PUBLIC_API_URL || 'http://44.196.163.18:3003/api';
 
 const TOKEN_KEY = '@biodash_jwt_token';
 

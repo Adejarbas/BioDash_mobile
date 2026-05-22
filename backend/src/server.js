@@ -120,5 +120,5 @@ app.delete('/api/markers/:id', async (req, res) => {
 // ==========================================
 app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Servidor backend BioDash rodando em http://0.0.0.0:${port}`);
-  console.log(`🌐 Acesse pelo IP público: http://100.30.203.65:${port}/api`);
+  console.log(`🌐 Acesse pelo IP público: http://44.196.163.18:${port}/api`);
 });

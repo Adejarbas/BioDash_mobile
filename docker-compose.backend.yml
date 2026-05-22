@@ -1,6 +1,6 @@
 # docker-compose.backend.yml
 # ==========================================
-# USAR NA EC2 DO BACKEND: 100.30.203.65
+# USAR NA EC2 DO BACKEND: 44.196.163.18
 # Comando: docker-compose -f docker-compose.backend.yml up -d
 #
 # Portas usadas:
