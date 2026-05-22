@@ -184,6 +184,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${{ steps.version.outputs.new_version }}
           build-args: |
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL }}
+            EXPO_PUBLIC_NEXT_API_URL=${{ secrets.EXPO_PUBLIC_NEXT_API_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

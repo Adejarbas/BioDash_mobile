@@ -1,9 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// URL base do backend (EC2 AWS - node/express conectado ao MongoDB e PostgreSQL RDS)
-// EXPO_PUBLIC_API_URL deve incluir o sufixo /api, ex: http://100.30.203.65:3003/api
+// URL base do Express (EC2 AWS - node/express conectado ao MongoDB e PostgreSQL RDS) na porta 3003
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://100.30.203.65:3003/api";
+  process.env.EXPO_PUBLIC_API_URL || "http://44.196.163.18:3003/api";
+
+// URL base do Next.js (BioDashBD) na porta 80
+const NEXT_API_BASE_URL =
+  process.env.EXPO_PUBLIC_NEXT_API_URL || "http://44.196.163.18/api";
 
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;
@@ -95,10 +98,10 @@ export const markersApi = {
 };
 
 // ==========================================
-// indicatorsApi — Indicadores do Biodigestor (PostgreSQL)
+// indicatorsApi — Indicadores do Biodigestor (PostgreSQL via Next.js)
 // ==========================================
 export const indicatorsApi = {
-  fetch: () => authRequest(`${API_BASE_URL}/dashboard/indicators`, { method: "GET" }),
+  fetch: () => authRequest(`${NEXT_API_BASE_URL}/dashboard/indicators`, { method: "GET" }),
   save: (data: {
     wasteProcessed: number;
     energyGenerated: number;
@@ -106,7 +109,7 @@ export const indicatorsApi = {
     month: string;
     year: string;
   }) =>
-    authRequest(`${API_BASE_URL}/dashboard/indicators`, {
+    authRequest(`${NEXT_API_BASE_URL}/dashboard/indicators`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -158,12 +161,12 @@ export const alertsApi = {
 };
 
 // ==========================================
-// profileApi — Perfil do Usuário (PostgreSQL)
+// profileApi — Perfil do Usuário (PostgreSQL via Next.js)
 // ==========================================
 export const profileApi = {
-  fetch: () => authRequest(`${API_BASE_URL}/user`, { method: "GET" }),
+  fetch: () => authRequest(`${NEXT_API_BASE_URL}/user`, { method: "GET" }),
   update: (data: any) =>
-    authRequest(`${API_BASE_URL}/user`, {
+    authRequest(`${NEXT_API_BASE_URL}/user`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
