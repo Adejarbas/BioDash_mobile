@@ -4,9 +4,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL || "http://44.196.163.18:3003/api";
 
-// URL base do Next.js (BioDashBD) na porta 3003
+// URL base do Next.js (BioDashBD) na porta 80
 const NEXT_API_BASE_URL =
-  process.env.EXPO_PUBLIC_NEXT_API_URL || "http://44.196.163.18:3003/api";
+  process.env.EXPO_PUBLIC_NEXT_API_URL || "http://44.196.163.18/api";
 
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;
