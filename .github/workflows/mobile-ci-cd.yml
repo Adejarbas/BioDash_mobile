@@ -188,6 +188,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Deploy to EC2
+        if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
+            docker stop biodash_mobile_web || true
+            docker rm biodash_mobile_web || true
+            docker run -d \
+              --name biodash_mobile_web \
+              -p 80:80 \
+              ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
+
       # Envio de e-mail quando pipeline FALHAR
       # - name: Enviar email se falhar
       #   if: failure()
