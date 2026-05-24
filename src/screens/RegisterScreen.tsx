@@ -32,6 +32,39 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
     const [numero, setNumero] = useState('')
     const [endereco, setEndereco] = useState('')
 
+    const handleCnpjChange = (text: string) => {
+        let value = text.replace(/\D/g, '');
+        if (value.length > 14) value = value.slice(0, 14);
+        
+        value = value.replace(/^(\d{2})(\d)/, '$1.$2');
+        value = value.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
+        value = value.replace(/\.(\d{3})(\d)/, '.$1/$2');
+        value = value.replace(/(\d{4})(\d)/, '$1-$2');
+        
+        setCnpj(value);
+    }
+
+    const handleCepChange = async (text: string) => {
+        let value = text.replace(/\D/g, '');
+        if (value.length > 8) value = value.slice(0, 8);
+        
+        value = value.replace(/^(\d{5})(\d)/, '$1-$2');
+        setCep(value);
+
+        const pureCep = value.replace(/\D/g, '');
+        if (pureCep.length === 8) {
+            try {
+                const response = await fetch(`https://viacep.com.br/ws/${pureCep}/json/`);
+                const data = await response.json();
+                if (!data.erro) {
+                    setEndereco(`${data.logradouro}, ${data.bairro}, ${data.localidade} - ${data.uf}`);
+                }
+            } catch (err) {
+                console.log("Erro ao buscar CEP:", err);
+            }
+        }
+    }
+
     const [showPassword, setShowPassword] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -172,7 +205,8 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                             placeholderTextColor="#94a3b8"
                             keyboardType="numeric"
                             value={cnpj}
-                            onChangeText={setCnpj}
+                            maxLength={18}
+                            onChangeText={handleCnpjChange}
                         />
                     </View>
 
@@ -193,7 +227,8 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                                 placeholderTextColor="#94a3b8"
                                 keyboardType="numeric"
                                 value={cep}
-                                onChangeText={setCep}
+                                maxLength={9}
+                                onChangeText={handleCepChange}
                             />
                         </View>
                         <View style={[styles.field, { width: 100 }]}>
