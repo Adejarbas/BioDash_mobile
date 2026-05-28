@@ -821,7 +821,7 @@ export default function DashboardScreen() {
                         ${chartImageURI ? `
                             <h2 style="color: #1f2937; margin-bottom: 20px;">Tendências do Período</h2>
                             <div style="text-align: center; background: #fbfbfb; padding: 20px; border-radius: 12px; border: 1px solid #eee;">
-                                <img src="data:image/png;base64,${chartImageURI}" style="width: 100%; max-width: 600px;" />
+                                <img src="${chartImageURI.startsWith('data:') ? chartImageURI : 'data:image/png;base64,' + chartImageURI}" style="width: 100%; max-width: 600px;" />
                             </div>
                         ` : ''}
 
@@ -837,7 +837,7 @@ export default function DashboardScreen() {
             </html>
             `;
             const { uri } = await Print.printToFileAsync({ html, width: 612, height: 792 });
-            await Sharing.shareAsync(uri, { dialogTitle: 'Compartilhar Relatório PDF' });
+            await Sharing.shareAsync(uri, { UTI: 'com.adobe.pdf', mimeType: 'application/pdf', dialogTitle: 'Compartilhar Relatório PDF' });
         } catch (error: any) {
             console.error("Erro PDF:", error);
             Alert.alert('Erro', 'Não foi possível gerar o PDF: ' + (error.message || String(error)));
@@ -866,7 +866,7 @@ export default function DashboardScreen() {
             // @ts-ignore
             const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
             const fileUri = cacheDir + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
+            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
             await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar Planilha', mimeType: 'text/comma-separated-values' });
         } catch (error: any) {
             console.error("Erro Excel:", error);
@@ -895,7 +895,7 @@ export default function DashboardScreen() {
             // @ts-ignore
             const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
             const fileUri = cacheDir + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
+            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
             await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar CSV', mimeType: 'text/csv' });
         } catch (error: any) {
             console.error("Erro CSV:", error);

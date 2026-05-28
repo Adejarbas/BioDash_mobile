@@ -98,10 +98,10 @@ export const markersApi = {
 };
 
 // ==========================================
-// indicatorsApi — Indicadores do Biodigestor (PostgreSQL via Next.js)
+// indicatorsApi — Indicadores do Biodigestor (PostgreSQL via Express)
 // ==========================================
 export const indicatorsApi = {
-  fetch: () => authRequest(`${NEXT_API_BASE_URL}/dashboard/indicators`, { method: "GET" }),
+  fetch: () => authRequest(`${API_BASE_URL}/indicators`, { method: "GET" }),
   save: (data: {
     wasteProcessed: number;
     energyGenerated: number;
@@ -109,7 +109,7 @@ export const indicatorsApi = {
     month: string;
     year: string;
   }) =>
-    authRequest(`${NEXT_API_BASE_URL}/dashboard/indicators`, {
+    authRequest(`${API_BASE_URL}/indicators`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -161,12 +161,12 @@ export const alertsApi = {
 };
 
 // ==========================================
-// profileApi — Perfil do Usuário (PostgreSQL via Next.js)
+// profileApi — Perfil do Usuário (PostgreSQL via Express)
 // ==========================================
 export const profileApi = {
-  fetch: () => authRequest(`${NEXT_API_BASE_URL}/user`, { method: "GET" }),
+  fetch: () => authRequest(`${API_BASE_URL}/profile`, { method: "GET" }),
   update: (data: any) =>
-    authRequest(`${NEXT_API_BASE_URL}/user`, {
+    authRequest(`${API_BASE_URL}/profile`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),

@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 // Pool PostgreSQL compartilhado — criado apenas uma vez aqui
 const pgPool = require('./database/pg');
 
+const authMiddleware = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
 const indicatorsRoutes = require('./routes/indicators');
@@ -33,6 +34,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Schema e Modelo de Marcadores do Mapa
 const markerSchema = new mongoose.Schema({
+  userId: { type: String, required: true, index: true }, // ← vínculo com o usuário autenticado
   title: { type: String, required: true },
   latitude: { type: Number, required: true },
   longitude: { type: Number, required: true },
@@ -74,9 +76,10 @@ app.get('/api/health', (req, res) => {
 // ==========================================
 // Rotas - MongoDB (Mapas / Geolocalização)
 // ==========================================
-app.get('/api/markers', async (req, res) => {
+// GET /api/markers — retorna apenas os marcadores do usuário autenticado
+app.get('/api/markers', authMiddleware, async (req, res) => {
   try {
-    const markers = await Marker.find();
+    const markers = await Marker.find({ userId: req.user.id });
     res.json({ success: true, data: markers });
   } catch (error) {
     console.error('Erro ao buscar marcadores:', error);
@@ -84,10 +87,15 @@ app.get('/api/markers', async (req, res) => {
   }
 });
 
-app.post('/api/markers', async (req, res) => {
+// POST /api/markers — cria ou atualiza marcador vinculado ao usuário autenticado
+app.post('/api/markers', authMiddleware, async (req, res) => {
   try {
-    // Verifica se é um update (tem id) ou insert
+    // Verifica se é um update (tem id) e se pertence ao usuário
     if (req.body.id) {
+      const existing = await Marker.findOne({ _id: req.body.id, userId: req.user.id });
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Marcador não encontrado ou sem permissão.' });
+      }
       const updated = await Marker.findByIdAndUpdate(
         req.body.id,
         { title: req.body.title, latitude: req.body.latitude, longitude: req.body.longitude, description: req.body.description, address: req.body.address },
@@ -95,7 +103,8 @@ app.post('/api/markers', async (req, res) => {
       );
       return res.json({ success: true, data: updated });
     }
-    const newMarker = new Marker(req.body);
+    // Novo marcador — vincula ao usuário autenticado
+    const newMarker = new Marker({ ...req.body, userId: req.user.id });
     const saved = await newMarker.save();
     res.json({ success: true, data: saved });
   } catch (error) {
@@ -104,9 +113,13 @@ app.post('/api/markers', async (req, res) => {
   }
 });
 
-app.delete('/api/markers/:id', async (req, res) => {
+// DELETE /api/markers/:id — remove marcador apenas se pertencer ao usuário autenticado
+app.delete('/api/markers/:id', authMiddleware, async (req, res) => {
   try {
-    await Marker.findByIdAndDelete(req.params.id);
+    const deleted = await Marker.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Marcador não encontrado ou sem permissão.' });
+    }
     res.json({ success: true, message: 'Marcador removido com sucesso' });
   } catch (error) {
     console.error('Erro ao deletar marcador:', error);
