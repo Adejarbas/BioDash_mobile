@@ -20,8 +20,12 @@ export const authLib = {
     if (!res.ok || !json.success) {
       throw new Error(json.message || 'Email ou senha inválidos.');
     }
-    await AsyncStorage.setItem(TOKEN_KEY, json.data.token);
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(json.data.user));
+    if (json.data.token) {
+      await AsyncStorage.setItem(TOKEN_KEY, json.data.token);
+    }
+    if (json.data.user) {
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(json.data.user));
+    }
     return json.data;
   },
 
@@ -61,8 +65,12 @@ export const authLib = {
       const firstValidationError = firstField ? validationErrors?.[firstField]?.[0] : undefined;
       throw new Error(firstValidationError || json.error || json.message || 'Erro ao realizar cadastro.');
     }
-    await AsyncStorage.setItem(TOKEN_KEY, json.data.token);
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(json.data.user));
+    if (json.data.token) {
+      await AsyncStorage.setItem(TOKEN_KEY, json.data.token);
+    }
+    if (json.data.user) {
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(json.data.user));
+    }
     return json.data;
   },
 
@@ -78,7 +86,14 @@ export const authLib = {
    */
   getUser: async (): Promise<{ id: string; email: string } | null> => {
     const raw = await AsyncStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) : null;
+    // Proteção contra valores corrompidos: 'undefined', 'null' ou JSON inválido
+    if (!raw || raw === 'undefined' || raw === 'null') return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      await AsyncStorage.removeItem(USER_KEY); // Limpa dado corrompido
+      return null;
+    }
   },
 
   /**
