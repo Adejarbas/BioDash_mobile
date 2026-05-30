@@ -179,6 +179,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          no-cache: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${{ steps.version.outputs.new_version }}
