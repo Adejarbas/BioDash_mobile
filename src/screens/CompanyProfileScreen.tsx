@@ -10,6 +10,7 @@ import {
     ActivityIndicator,
     Alert,
     Animated,
+    Platform,
 } from 'react-native';
 import { useFadeInUp } from '../hooks/useFadeInUp';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,6 +21,33 @@ import { useTheme } from '../context/ThemeContext';
 import { authLib } from '../lib/auth';
 import { profileApi } from '../lib/api';
 import { uploadImageToS3, getImageFromS3 } from '../lib/aws-s3';
+
+// ─── Funções de máscara ────────────────────────────────────────────
+const maskCNPJ = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 14);
+    return digits
+        .replace(/^(\d{2})(\d)/, '$1.$2')
+        .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/\.\d{3}(\d)/, (m, d) => m.slice(0, -1) + '/' + d)
+        .replace(/(\d{4})(\d)/, '$1-$2');
+};
+
+const maskPhone = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 10) {
+        return digits
+            .replace(/^(\d{2})(\d)/, '($1) $2')
+            .replace(/(\d{4})(\d)/, '$1-$2');
+    }
+    return digits
+        .replace(/^(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{5})(\d)/, '$1-$2');
+};
+
+const maskCEP = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 8);
+    return digits.replace(/(\d{5})(\d)/, '$1-$2');
+};
 
 const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
     <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
@@ -65,6 +93,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
     const { colors, theme } = useTheme();
     const { animatedStyle } = useFadeInUp()
     const [loading, setLoading] = useState(false);
+    const [cepLoading, setCepLoading] = useState(false);
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
     const [formData, setFormData] = useState({
@@ -86,6 +115,30 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         nova: '',
         confirmar: ''
     });
+
+    const handleFetchCep = async (rawCep: string) => {
+        const clean = rawCep.replace(/\D/g, '');
+        if (clean.length !== 8) return;
+        setCepLoading(true);
+        try {
+            const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
+            const data = await res.json();
+            if (data.erro) {
+                Alert.alert('Aviso', 'CEP não encontrado.');
+                return;
+            }
+            setFormData(prev => ({
+                ...prev,
+                endereco: [data.logradouro, data.bairro].filter(Boolean).join(', '),
+                cidade: data.localidade || prev.cidade,
+                estado: data.uf || prev.estado,
+            }));
+        } catch {
+            Alert.alert('Erro', 'Falha ao consultar o ViaCEP.');
+        } finally {
+            setCepLoading(false);
+        }
+    };
 
     React.useEffect(() => {
         const loadProfile = async () => {
@@ -115,14 +168,14 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     nome: profile?.name || '',
                     nomeFantasia: profile?.company || '',
                     razaoSocial: profile?.razao_social || '',
-                    cnpj: profile?.cnpj || '',
+                    cnpj: maskCNPJ(profile?.cnpj || ''),
                     email: profile?.email || user.email || '',
                     endereco: profile?.address || '',
                     numero: profile?.numero?.toString() || '',
                     cidade: profile?.city || '',
                     estado: profile?.state || '',
-                    cep: profile?.zip_code || '',
-                    telefone: profile?.phone || '',
+                    cep: maskCEP(profile?.zip_code || ''),
+                    telefone: maskPhone(profile?.phone || ''),
                 });
             } catch (err) {
                 console.error('[Profile] Erro ao carregar perfil:', err);
@@ -177,7 +230,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         }
     };
 
-        const uploadAvatar = async (uri: string) => {
+    const uploadAvatar = async (uri: string) => {
         try {
             setLoading(true);
             const user = await authLib.getUser();
@@ -189,14 +242,32 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             const unique = Math.random().toString(36).slice(2);
             const fileName = `${user.id}/${unique}.${ext}`;
 
-            const s3Key = await uploadImageToS3(uri, fileName);
+            if (Platform.OS === 'web') {
+                // Na web, expo-file-system não funciona.
+                // Convertemos o blob URI para base64 via FileReader e enviamos ao S3.
+                const response = await fetch(uri);
+                const blob = await response.blob();
+                const base64String: string = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                // base64String já é "data:image/jpeg;base64,XXXX" — precisamos só do conteúdo
+                const s3Key = await uploadImageToS3(uri, fileName);
+                await profileApi.update({ avatarUrl: s3Key });
+                const downloadUrl = await getImageFromS3(s3Key);
+                if (downloadUrl) setAvatarUri(downloadUrl);
+                // Exibe preview imediato enquanto aguarda a URL do S3
+                setAvatarUri(base64String);
+            } else {
+                const s3Key = await uploadImageToS3(uri, fileName);
+                await profileApi.update({ avatarUrl: s3Key });
+                const downloadUrl = await getImageFromS3(s3Key);
+                if (downloadUrl) setAvatarUri(downloadUrl);
+            }
 
-            await profileApi.update({ avatarUrl: s3Key });
-
-            const base64 = await getImageFromS3(s3Key);
-            if (base64) setAvatarUri(base64);
             Alert.alert("Sucesso", "Foto atualizada com sucesso!");
-
         } catch (e: any) {
             console.error('Erro ao atualizar foto:', e);
             Alert.alert("Erro", e.message || "Falha ao atualizar a foto de perfil.");
@@ -205,7 +276,23 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         }
     };
 
-    const handlePickImage = () => {
+    const handlePickImage = async () => {
+        if (Platform.OS === 'web') {
+            // Na web, câmera não está disponível via expo-image-picker e Alert com múltiplas opções
+            // não funciona. Vai direto para a seleção de arquivo.
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.5,
+            });
+            if (!result.canceled && result.assets[0].uri) {
+                await uploadAvatar(result.assets[0].uri);
+            }
+            return;
+        }
+
+        // Nativo: mostra opção de câmera ou galeria
         Alert.alert(
             "Foto de Perfil",
             "Escolha de onde quer adicionar sua foto:",
@@ -344,7 +431,14 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                         </View>
                         <View style={styles.col}>
                             <InputLabel colors={colors} label="CNPJ" />
-                            <CustomInput colors={colors} value={formData.cnpj} onChangeText={(t: string) => setFormData({ ...formData, cnpj: t })} />
+                            <CustomInput
+                                colors={colors}
+                                value={formData.cnpj}
+                                placeholder="XX.XXX.XXX/XXXX-XX"
+                                onChangeText={(t: string) =>
+                                    setFormData({ ...formData, cnpj: maskCNPJ(t) })
+                                }
+                            />
                         </View>
                     </View>
 
@@ -375,13 +469,39 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                             <CustomInput colors={colors} value={formData.estado} onChangeText={(t: string) => setFormData({ ...formData, estado: t })} />
                         </View>
                         <View style={styles.col}>
-                            <InputLabel colors={colors} label="CEP" />
-                            <CustomInput colors={colors} value={formData.cep} onChangeText={(t: string) => setFormData({ ...formData, cep: t })} />
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                <Text style={[styles.inputLabel, { color: colors.textMuted }]}>CEP</Text>
+                                {cepLoading && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />}
+                            </View>
+                            <TextInput
+                                style={[
+                                    styles.input,
+                                    { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }
+                                ]}
+                                value={formData.cep}
+                                placeholder="XXXXX-XXX"
+                                placeholderTextColor={colors.textMuted}
+                                keyboardType="numeric"
+                                onChangeText={(t: string) => {
+                                    const masked = maskCEP(t);
+                                    setFormData(prev => ({ ...prev, cep: masked }));
+                                    if (masked.replace(/\D/g, '').length === 8) {
+                                        handleFetchCep(masked);
+                                    }
+                                }}
+                            />
                         </View>
                     </View>
 
                     <InputLabel colors={colors} label="Telefone" />
-                    <CustomInput colors={colors} value={formData.telefone} onChangeText={(t: string) => setFormData({ ...formData, telefone: t })} />
+                    <CustomInput
+                        colors={colors}
+                        value={formData.telefone}
+                        placeholder="(XX) XXXXX-XXXX"
+                        onChangeText={(t: string) =>
+                            setFormData({ ...formData, telefone: maskPhone(t) })
+                        }
+                    />
 
                     {/* Botão Salvar */}
                     <View style={styles.actionRow}>

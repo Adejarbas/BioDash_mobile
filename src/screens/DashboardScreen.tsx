@@ -772,6 +772,18 @@ export default function DashboardScreen() {
         ];
     };
 
+    // ─── Exportação Web: helper para download via Blob ───────────────────────────
+    const webDownload = (content: string, fileName: string, mimeType: string) => {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
+    };
+
     const handleExportPDF = async () => {
         setExportLoading(true);
         try {
@@ -783,7 +795,7 @@ export default function DashboardScreen() {
 
             let chartImageURI = '';
             if (chartRef.current && chartRef.current.capture) {
-                chartImageURI = await chartRef.current.capture();
+                try { chartImageURI = await chartRef.current.capture(); } catch { /* chart capture não disponível na web */ }
             }
 
             const rowsHTML = metrics.map(m => `
@@ -795,49 +807,53 @@ export default function DashboardScreen() {
             `).join('');
 
             const html = `
+            <!DOCTYPE html>
             <html>
-                <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 0; margin: 0; color: #333;">
-                    <div style="background-color: #16a34a; padding: 40px 30px; color: white;">
-                        <h1 style="margin: 0; font-size: 28px;">BioDash - Relatório Analítico</h1>
-                        <p style="margin-top: 8px; opacity: 0.9;">Período: ${periodLabel}</p>
-                        <p style="margin-top: 4px; opacity: 0.8; font-size: 12px;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+                <head><meta charset="utf-8"><title>BioDash - Relatório</title>
+                <style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#333;}
+                @media print{.no-print{display:none}}</style></head>
+                <body>
+                    <div style="background-color:#16a34a;padding:40px 30px;color:white;">
+                        <h1 style="margin:0;font-size:28px;">BioDash - Relatório Analítico</h1>
+                        <p style="margin-top:8px;opacity:0.9;">Período: ${periodLabel}</p>
+                        <p style="margin-top:4px;opacity:0.8;font-size:12px;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
                     </div>
-                    
-                    <div style="padding: 30px;">
-                        <h2 style="color: #1f2937; margin-bottom: 20px;">Resumo de Desempenho</h2>
-                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                            <thead>
-                                <tr style="background-color: #f0fdf4;">
-                                    <th style="padding: 15px; text-align: center; color: #16a34a; font-weight: 800; border-bottom: 2px solid #16a34a;">Métrica</th>
-                                    <th style="padding: 15px; text-align: center; color: #16a34a; font-weight: 800; border-bottom: 2px solid #16a34a;">Valor Total</th>
-                                    <th style="padding: 15px; text-align: center; color: #16a34a; font-weight: 800; border-bottom: 2px solid #16a34a;">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${rowsHTML}
-                            </tbody>
+                    <div style="padding:30px;">
+                        <h2 style="color:#1f2937;margin-bottom:20px;">Resumo de Desempenho</h2>
+                        <table style="width:100%;border-collapse:collapse;margin-bottom:40px;">
+                            <thead><tr style="background-color:#f0fdf4;">
+                                <th style="padding:15px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Métrica</th>
+                                <th style="padding:15px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Valor Total</th>
+                                <th style="padding:15px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Status</th>
+                            </tr></thead>
+                            <tbody>${rowsHTML}</tbody>
                         </table>
-
-                        ${chartImageURI ? `
-                            <h2 style="color: #1f2937; margin-bottom: 20px;">Tendências do Período</h2>
-                            <div style="text-align: center; background: #fbfbfb; padding: 20px; border-radius: 12px; border: 1px solid #eee;">
-                                <img src="${chartImageURI.startsWith('data:') ? chartImageURI : 'data:image/png;base64,' + chartImageURI}" style="width: 100%; max-width: 600px;" />
-                            </div>
-                        ` : ''}
-
-                        <div style="margin-top: 40px; padding: 20px; background-color: #f8fafc; border-radius: 12px; border-left: 5px solid #16a34a;">
-                            <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.6;">
-                                Este relatório contém dados consolidados das unidades de biodigestão monitoradas via BioDash. 
-                                Para análises granulares, exportações por unidade ou ferramentas de BI, utilize a plataforma BioDash Web.
-                            </p>
-                        </div>
-                        <p style="margin-top: 60px; font-size: 11px; color: #94a3b8; text-align: center;">BioDash Intelligence Systems © ${new Date().getFullYear()}</p>
+                        ${chartImageURI ? `<h2>Tendências do Período</h2><img src="${chartImageURI.startsWith('data:') ? chartImageURI : 'data:image/png;base64,' + chartImageURI}" style="width:100%;max-width:600px;" />` : ''}
+                        <p style="margin-top:60px;font-size:11px;color:#94a3b8;text-align:center;">BioDash Intelligence Systems © ${new Date().getFullYear()}</p>
                     </div>
                 </body>
-            </html>
-            `;
-            const { uri } = await Print.printToFileAsync({ html, width: 612, height: 792 });
-            await Sharing.shareAsync(uri, { UTI: 'com.adobe.pdf', mimeType: 'application/pdf', dialogTitle: 'Compartilhar Relatório PDF' });
+            </html>`;
+
+            if (Platform.OS === 'web') {
+                // Web: abre iframe oculto e dispara window.print()
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+                const doc = iframe.contentDocument || iframe.contentWindow?.document;
+                if (doc) {
+                    doc.open();
+                    doc.write(html);
+                    doc.close();
+                    iframe.contentWindow?.focus();
+                    setTimeout(() => {
+                        iframe.contentWindow?.print();
+                        setTimeout(() => document.body.removeChild(iframe), 2000);
+                    }, 500);
+                }
+            } else {
+                const { uri } = await Print.printToFileAsync({ html, width: 612, height: 792 });
+                await Sharing.shareAsync(uri, { UTI: 'com.adobe.pdf', mimeType: 'application/pdf', dialogTitle: 'Compartilhar Relatório PDF' });
+            }
         } catch (error: any) {
             console.error("Erro PDF:", error);
             Alert.alert('Erro', 'Não foi possível gerar o PDF: ' + (error.message || String(error)));
@@ -863,11 +879,16 @@ export default function DashboardScreen() {
             });
 
             const fileName = `biodash_${periodLabel.replace(/[\s\/]/g, '_')}.csv`;
-            // @ts-ignore
-            const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-            const fileUri = cacheDir + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar Planilha', mimeType: 'text/comma-separated-values' });
+
+            if (Platform.OS === 'web') {
+                webDownload(csvContent, fileName, 'text/csv;charset=utf-8;');
+            } else {
+                // @ts-ignore
+                const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+                const fileUri = cacheDir + fileName;
+                await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+                await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar Planilha', mimeType: 'text/comma-separated-values' });
+            }
         } catch (error: any) {
             console.error("Erro Excel:", error);
             Alert.alert('Erro', 'Não foi possível gerar a planilha: ' + (error.message || String(error)));
@@ -885,18 +906,22 @@ export default function DashboardScreen() {
                 ? "Últimos 12 Meses"
                 : `${months[parseInt(exportMonth)].label} / ${exportYear}`;
 
-            // Add BOM for better compatibility with Excel and change delimiter to semicolon
-            let csvContent = "\uFEFF" + "Metrica;Valor Total\n";
+            let csvContent = "\uFEFF" + "Metrica;Valor Total;Status\n";
             metrics.forEach(row => {
-                csvContent += `${row[0]};${row[1].replace('R$ ', '').replace('kg', '').replace('kWh', '')}\n`;
+                csvContent += `${row[0]};${row[1].replace('R$ ', '').replace('kg', '').replace('kWh', '')};${row[2]}\n`;
             });
 
             const fileName = `biodash_raw_${periodLabel.replace(/[\s\/]/g, '_')}.csv`;
-            // @ts-ignore
-            const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-            const fileUri = cacheDir + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar CSV', mimeType: 'text/csv' });
+
+            if (Platform.OS === 'web') {
+                webDownload(csvContent, fileName, 'text/csv;charset=utf-8;');
+            } else {
+                // @ts-ignore
+                const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+                const fileUri = cacheDir + fileName;
+                await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+                await Sharing.shareAsync(fileUri, { dialogTitle: 'Compartilhar CSV', mimeType: 'text/csv' });
+            }
         } catch (error: any) {
             console.error("Erro CSV:", error);
             Alert.alert('Erro', 'Não foi possível gerar o CSV: ' + (error.message || String(error)));
@@ -1245,9 +1270,12 @@ export default function DashboardScreen() {
                                     keyboardType="numeric"
                                     value={markerCep}
                                     onChangeText={(text) => {
-                                        setMarkerCep(text);
-                                        if (text.replace(/\D/g, '').length === 8) {
-                                            handleFetchCep(text);
+                                        // Máscara XXXXX-XXX
+                                        const digits = text.replace(/\D/g, '').slice(0, 8);
+                                        const masked = digits.replace(/(\d{5})(\d)/, '$1-$2');
+                                        setMarkerCep(masked);
+                                        if (digits.length === 8) {
+                                            handleFetchCep(masked);
                                         }
                                     }}
                                 />
