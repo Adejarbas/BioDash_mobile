@@ -79,6 +79,7 @@ const colorToMetric: Record<CardKey, string> = {
 }
 
 export default function DashboardScreen() {
+    const isSmallScreen = Dimensions.get('window').width < 420;
     const insets = useSafeAreaInsets()
     const chartRef = useRef<ViewShot>(null)
     const telemetryRef = useRef<any>(null)
@@ -426,6 +427,51 @@ export default function DashboardScreen() {
         setSourceDropdownOpen(false);
         setTargetDropdownOpen(false);
     };
+
+    const parseMarkerAddress = (address: any): any | null => {
+        if (!address) return null;
+        if (typeof address === 'object') return address;
+        if (typeof address === 'string') {
+            try {
+                const parsed = JSON.parse(address);
+                return parsed && typeof parsed === 'object' ? parsed : null;
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    };
+
+    const getMarkerAddressLines = (marker?: MarkerData | null): string[] => {
+        if (!marker) return [];
+
+        const addressObj = parseMarkerAddress(marker.address);
+        if (addressObj) {
+            const street = [addressObj.street, addressObj.number].filter(Boolean).join(', ');
+            const locality = [
+                addressObj.neighborhood || addressObj.district || addressObj.suburb,
+                addressObj.city,
+                addressObj.state,
+            ].filter(Boolean).join(', ');
+            const zip = addressObj.cep || addressObj.zipCode || addressObj.zip;
+            const complement = addressObj.complement;
+
+            const lines = [
+                street,
+                locality,
+                zip ? `CEP: ${zip}` : '',
+                complement ? `Complemento: ${complement}` : '',
+            ].filter((line): line is string => Boolean(line && line.trim()));
+
+            if (lines.length > 0) return lines;
+        }
+
+        const fallback = marker.description?.trim();
+        return fallback ? [fallback] : ['Endereço não informado.'];
+    };
+
+    const selectedSourceMarker = distanceSourceId ? mapMarkers.find(m => m.id === distanceSourceId) : null;
+    const selectedTargetMarker = distanceTargetId ? mapMarkers.find(m => m.id === distanceTargetId) : null;
 
     // Estados para Exportação
     const [exportModalVisible, setExportModalVisible] = useState(false);
@@ -1176,7 +1222,15 @@ export default function DashboardScreen() {
                     )}
 
                     {/* Manutenção Agendada */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                    <View
+                        style={{
+                            flexDirection: isSmallScreen ? 'column' : 'row',
+                            justifyContent: 'space-between',
+                            alignItems: isSmallScreen ? 'flex-start' : 'center',
+                            marginTop: 8,
+                            marginBottom: 12,
+                        }}
+                    >
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 0 }]}>Manutenções Agendadas</Text>
                             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
@@ -1186,9 +1240,21 @@ export default function DashboardScreen() {
                                 fetchArchivedMaintenances();
                                 setArchivedModalVisible(true);
                             }}
-                            style={{ backgroundColor: colors.cardBackground, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+                            style={{
+                                backgroundColor: colors.cardBackground,
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                                marginTop: isSmallScreen ? 10 : 0,
+                                width: isSmallScreen ? '100%' : undefined,
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                            <Text style={{ color: colors.primary, fontSize: 12, fontWeight: 'bold' }}>Exibir arquivadas</Text>
+                            <Text style={{ color: colors.primary, fontSize: 12, fontWeight: 'bold' }} numberOfLines={1}>Exibir arquivadas</Text>
                         </TouchableOpacity>
                     </View>
                     <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
@@ -1254,21 +1320,59 @@ export default function DashboardScreen() {
                     </View>
 
                     {/* Mapa (Cross-Platform) */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 32 }}>
+                    <View
+                        style={{
+                            flexDirection: isSmallScreen ? 'column' : 'row',
+                            justifyContent: 'space-between',
+                            alignItems: isSmallScreen ? 'flex-start' : 'center',
+                            marginTop: 32,
+                        }}
+                    >
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>Localização da Empresa</Text>
                             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Unidade ativa do biodigestor.</Text>
                         </View>
-                        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <View
+                            style={{
+                                flexDirection: 'row',
+                                gap: 8,
+                                marginBottom: 16,
+                                marginTop: isSmallScreen ? 10 : 0,
+                                flexWrap: 'wrap',
+                                justifyContent: isSmallScreen ? 'space-between' : 'flex-end',
+                                width: isSmallScreen ? '100%' : undefined,
+                            }}
+                        >
                             <TouchableOpacity
-                                style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                                style={{
+                                    backgroundColor: colors.primary,
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 8,
+                                    borderRadius: 8,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    width: isSmallScreen ? '48%' : undefined,
+                                    justifyContent: 'center',
+                                }}
                                 onPress={() => handleOpenDistanceModal()}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <MaterialCommunityIcons name="ruler" size={16} color="#fff" />
-                                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Calcular distância</Text>
+                                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }} numberOfLines={1}>Calcular distância</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                style={{
+                                    backgroundColor: '#16a34a',
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 8,
+                                    borderRadius: 8,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    width: isSmallScreen ? '48%' : undefined,
+                                    justifyContent: 'center',
+                                }}
                                 onPress={() => {
                                     setMarkerEditingId(null);
                                     setMarkerName('');
@@ -1278,6 +1382,7 @@ export default function DashboardScreen() {
                                     setMarkerComplement('');
                                     setMapModalVisible(true);
                                 }}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
                             </TouchableOpacity>
@@ -1479,7 +1584,7 @@ export default function DashboardScreen() {
                                             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e' }} />
                                             <Text style={{ color: distanceSourceId ? colors.text : colors.textMuted }}>
                                                 {distanceSourceId 
-                                                    ? mapMarkers.find(m => m.id === distanceSourceId)?.title 
+                                                    ? selectedSourceMarker?.title 
                                                     : "Selecione o biodigestor de origem..."}
                                             </Text>
                                         </View>
@@ -1489,6 +1594,29 @@ export default function DashboardScreen() {
                                             color={colors.textMuted} 
                                         />
                                     </TouchableOpacity>
+
+                                    {selectedSourceMarker && (
+                                        <View
+                                            style={{
+                                                marginTop: 8,
+                                                backgroundColor: colors.background,
+                                                borderRadius: 10,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                paddingVertical: 8,
+                                                paddingHorizontal: 10,
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#22c55e', textTransform: 'uppercase', marginBottom: 4 }}>
+                                                Endereço da origem
+                                            </Text>
+                                            {getMarkerAddressLines(selectedSourceMarker).map((line, index) => (
+                                                <Text key={`source-address-${selectedSourceMarker.id}-${index}`} style={{ fontSize: 12, color: colors.text, marginBottom: index === getMarkerAddressLines(selectedSourceMarker).length - 1 ? 0 : 2 }}>
+                                                    {line}
+                                                </Text>
+                                            ))}
+                                        </View>
+                                    )}
 
                                     {sourceDropdownOpen && (
                                         <View
@@ -1598,7 +1726,7 @@ export default function DashboardScreen() {
                                             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#3b82f6' }} />
                                             <Text style={{ color: distanceTargetId ? colors.text : colors.textMuted }}>
                                                 {distanceTargetId 
-                                                    ? mapMarkers.find(m => m.id === distanceTargetId)?.title 
+                                                    ? selectedTargetMarker?.title 
                                                     : "Selecione o biodigestor de destino..."}
                                             </Text>
                                         </View>
@@ -1608,6 +1736,29 @@ export default function DashboardScreen() {
                                             color={colors.textMuted} 
                                         />
                                     </TouchableOpacity>
+
+                                    {selectedTargetMarker && (
+                                        <View
+                                            style={{
+                                                marginTop: 8,
+                                                backgroundColor: colors.background,
+                                                borderRadius: 10,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                paddingVertical: 8,
+                                                paddingHorizontal: 10,
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase', marginBottom: 4 }}>
+                                                Endereço do destino
+                                            </Text>
+                                            {getMarkerAddressLines(selectedTargetMarker).map((line, index) => (
+                                                <Text key={`target-address-${selectedTargetMarker.id}-${index}`} style={{ fontSize: 12, color: colors.text, marginBottom: index === getMarkerAddressLines(selectedTargetMarker).length - 1 ? 0 : 2 }}>
+                                                    {line}
+                                                </Text>
+                                            ))}
+                                        </View>
+                                    )}
 
                                     {targetDropdownOpen && (
                                         <View
