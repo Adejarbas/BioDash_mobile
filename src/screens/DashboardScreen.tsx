@@ -391,6 +391,42 @@ export default function DashboardScreen() {
     const [selectedChartIndex, setSelectedChartIndex] = useState<number | null>(null)
     const [alertsEnabled, setAlertsEnabled] = useState(true)
 
+    // Estados para Cálculo de Distância entre Biodigestores
+    const [isDistanceModalVisible, setDistanceModalVisible] = useState(false);
+    const [distanceSourceId, setDistanceSourceId] = useState<string | null>(null);
+    const [distanceTargetId, setDistanceTargetId] = useState<string | null>(null);
+    const [sourceDropdownOpen, setSourceDropdownOpen] = useState(false);
+    const [targetDropdownOpen, setTargetDropdownOpen] = useState(false);
+
+    // Função para calcular a distância usando a fórmula de Haversine
+    const calculateHaversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371; // Raio da Terra em km
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c; // Retorna em km
+    };
+
+    const handleOpenDistanceModal = (preSelectedId?: string) => {
+        setDistanceSourceId(preSelectedId || null);
+        setDistanceTargetId(null);
+        setSourceDropdownOpen(false);
+        setTargetDropdownOpen(false);
+        setDistanceModalVisible(true);
+    };
+
+    const handleSwapBiodigesters = () => {
+        const temp = distanceSourceId;
+        setDistanceSourceId(distanceTargetId);
+        setDistanceTargetId(temp);
+        setSourceDropdownOpen(false);
+        setTargetDropdownOpen(false);
+    };
+
     // Estados para Exportação
     const [exportModalVisible, setExportModalVisible] = useState(false);
     const [pendingExportType, setPendingExportType] = useState<"pdf" | "excel" | "csv" | null>(null);
@@ -1223,20 +1259,29 @@ export default function DashboardScreen() {
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>Localização da Empresa</Text>
                             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Unidade ativa do biodigestor.</Text>
                         </View>
-                        <TouchableOpacity
-                            style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 16 }}
-                            onPress={() => {
-                                setMarkerEditingId(null);
-                                setMarkerName('');
-                                setMarkerCep('');
-                                setMarkerAddress('');
-                                setMarkerNumber('');
-                                setMarkerComplement('');
-                                setMapModalVisible(true);
-                            }}
-                        >
-                            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <TouchableOpacity
+                                style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                                onPress={() => handleOpenDistanceModal()}
+                            >
+                                <MaterialCommunityIcons name="ruler" size={16} color="#fff" />
+                                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Calcular distância</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                onPress={() => {
+                                    setMarkerEditingId(null);
+                                    setMarkerName('');
+                                    setMarkerCep('');
+                                    setMarkerAddress('');
+                                    setMarkerNumber('');
+                                    setMarkerComplement('');
+                                    setMapModalVisible(true);
+                                }}
+                            >
+                                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </Animated.View>
 
@@ -1396,6 +1441,379 @@ export default function DashboardScreen() {
                     </View>
                 </Modal>
 
+                {/* Distance Calculation Modal */}
+                <Modal visible={isDistanceModalVisible} transparent animationType="fade">
+                    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                        <View style={{ backgroundColor: colors.cardBackground, width: '92%', padding: 24, borderRadius: 16, maxHeight: '85%' }}>
+                            <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>
+                                    Calcular Distância entre Biodigestores
+                                </Text>
+                                <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>
+                                    Selecione dois biodigestores cadastrados para mensurar a distância geográfica entre eles.
+                                </Text>
+
+                                {/* Select A - Origem */}
+                                <View style={{ marginBottom: 16, zIndex: 100 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>
+                                        Biodigestor de Origem (A)
+                                    </Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setSourceDropdownOpen(!sourceDropdownOpen);
+                                            setTargetDropdownOpen(false);
+                                        }}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 12,
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e' }} />
+                                            <Text style={{ color: distanceSourceId ? colors.text : colors.textMuted }}>
+                                                {distanceSourceId 
+                                                    ? mapMarkers.find(m => m.id === distanceSourceId)?.title 
+                                                    : "Selecione o biodigestor de origem..."}
+                                            </Text>
+                                        </View>
+                                        <MaterialCommunityIcons 
+                                            name={sourceDropdownOpen ? 'chevron-up' : 'chevron-down'} 
+                                            size={18} 
+                                            color={colors.textMuted} 
+                                        />
+                                    </TouchableOpacity>
+
+                                    {sourceDropdownOpen && (
+                                        <View
+                                            style={{
+                                                position: 'absolute',
+                                                top: '100%',
+                                                left: 0,
+                                                right: 0,
+                                                backgroundColor: colors.cardBackground,
+                                                borderRadius: 10,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                marginTop: 6,
+                                                maxHeight: 180,
+                                                overflow: 'scroll',
+                                                zIndex: 9999,
+                                                elevation: 30,
+                                                shadowColor: '#000',
+                                                shadowOpacity: 0.25,
+                                                shadowRadius: 8,
+                                                shadowOffset: { width: 0, height: 4 }
+                                            }}
+                                        >
+                                            <ScrollView nestedScrollEnabled={true}>
+                                                {mapMarkers.length === 0 ? (
+                                                    <View style={{ padding: 12 }}>
+                                                        <Text style={{ color: colors.textMuted, fontSize: 13 }}>Nenhum biodigestor cadastrado.</Text>
+                                                    </View>
+                                                ) : (
+                                                    mapMarkers.map((m) => (
+                                                        <TouchableOpacity
+                                                            key={m.id}
+                                                            onPress={() => {
+                                                                setDistanceSourceId(m.id);
+                                                                setSourceDropdownOpen(false);
+                                                            }}
+                                                            style={{
+                                                                paddingVertical: 12,
+                                                                paddingHorizontal: 16,
+                                                                backgroundColor: distanceSourceId === m.id ? colors.primaryLight : 'transparent',
+                                                                borderBottomWidth: 1,
+                                                                borderBottomColor: colors.border,
+                                                            }}
+                                                        >
+                                                            <Text style={{ 
+                                                                color: distanceSourceId === m.id ? colors.primaryDark : colors.text,
+                                                                fontWeight: distanceSourceId === m.id ? '700' : '400',
+                                                                fontSize: 13 
+                                                            }}>
+                                                                {m.title}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    ))
+                                                )}
+                                            </ScrollView>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* Swap Button */}
+                                <View style={{ alignItems: 'center', marginVertical: 4, zIndex: 50 }}>
+                                    <TouchableOpacity
+                                        onPress={handleSwapBiodigesters}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            width: 36,
+                                            height: 36,
+                                            borderRadius: 18,
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            elevation: 2,
+                                            shadowColor: '#000',
+                                            shadowOpacity: 0.1,
+                                            shadowRadius: 2,
+                                            shadowOffset: { width: 0, height: 1 }
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons name="swap-vertical" size={20} color={colors.primary} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Select B - Destino */}
+                                <View style={{ marginBottom: 24, zIndex: 10 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>
+                                        Biodigestor de Destino (B)
+                                    </Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setTargetDropdownOpen(!targetDropdownOpen);
+                                            setSourceDropdownOpen(false);
+                                        }}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 12,
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#3b82f6' }} />
+                                            <Text style={{ color: distanceTargetId ? colors.text : colors.textMuted }}>
+                                                {distanceTargetId 
+                                                    ? mapMarkers.find(m => m.id === distanceTargetId)?.title 
+                                                    : "Selecione o biodigestor de destino..."}
+                                            </Text>
+                                        </View>
+                                        <MaterialCommunityIcons 
+                                            name={targetDropdownOpen ? 'chevron-up' : 'chevron-down'} 
+                                            size={18} 
+                                            color={colors.textMuted} 
+                                        />
+                                    </TouchableOpacity>
+
+                                    {targetDropdownOpen && (
+                                        <View
+                                            style={{
+                                                position: 'absolute',
+                                                top: '100%',
+                                                left: 0,
+                                                right: 0,
+                                                backgroundColor: colors.cardBackground,
+                                                borderRadius: 10,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                marginTop: 6,
+                                                maxHeight: 180,
+                                                overflow: 'scroll',
+                                                zIndex: 9999,
+                                                elevation: 30,
+                                                shadowColor: '#000',
+                                                shadowOpacity: 0.25,
+                                                shadowRadius: 8,
+                                                shadowOffset: { width: 0, height: 4 }
+                                            }}
+                                        >
+                                            <ScrollView nestedScrollEnabled={true}>
+                                                {mapMarkers.length === 0 ? (
+                                                    <View style={{ padding: 12 }}>
+                                                        <Text style={{ color: colors.textMuted, fontSize: 13 }}>Nenhum biodigestor cadastrado.</Text>
+                                                    </View>
+                                                ) : (
+                                                    (() => {
+                                                        const availableMarkers = mapMarkers.filter((m) => m.id !== distanceSourceId);
+                                                        if (availableMarkers.length === 0) {
+                                                            return (
+                                                                <View style={{ padding: 12 }}>
+                                                                    <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+                                                                        Nenhum outro biodigestor disponível.
+                                                                    </Text>
+                                                                </View>
+                                                            );
+                                                        }
+                                                        return availableMarkers.map((m) => (
+                                                            <TouchableOpacity
+                                                                key={m.id}
+                                                                onPress={() => {
+                                                                    setDistanceTargetId(m.id);
+                                                                    setTargetDropdownOpen(false);
+                                                                }}
+                                                                style={{
+                                                                    paddingVertical: 12,
+                                                                    paddingHorizontal: 16,
+                                                                    backgroundColor: distanceTargetId === m.id ? colors.primaryLight : 'transparent',
+                                                                    borderBottomWidth: 1,
+                                                                    borderBottomColor: colors.border,
+                                                                }}
+                                                            >
+                                                                <Text style={{ 
+                                                                    color: distanceTargetId === m.id ? colors.primaryDark : colors.text,
+                                                                    fontWeight: distanceTargetId === m.id ? '700' : '400',
+                                                                    fontSize: 13 
+                                                                }}>
+                                                                    {m.title}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        ));
+                                                    })()
+                                                )}
+                                            </ScrollView>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* Results View */}
+                                {(() => {
+                                    if (!distanceSourceId || !distanceTargetId) {
+                                        return (
+                                            <View style={{
+                                                backgroundColor: colors.background,
+                                                padding: 16,
+                                                borderRadius: 12,
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                marginBottom: 24,
+                                                borderStyle: 'dashed'
+                                            }}>
+                                                <MaterialCommunityIcons name="map-marker-distance" size={32} color={colors.textMuted} style={{ marginBottom: 6 }} />
+                                                <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center' }}>
+                                                    Selecione ambos os biodigestores acima para calcular.
+                                                </Text>
+                                            </View>
+                                        );
+                                    }
+
+                                    if (distanceSourceId === distanceTargetId) {
+                                        return (
+                                            <View style={{
+                                                backgroundColor: '#fffbeb',
+                                                padding: 16,
+                                                borderRadius: 12,
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                borderWidth: 1,
+                                                borderColor: '#fef3c7',
+                                                marginBottom: 24,
+                                                flexDirection: 'row',
+                                                gap: 8
+                                            }}>
+                                                <MaterialCommunityIcons name="alert" size={20} color="#d97706" />
+                                                <Text style={{ color: '#b45309', fontSize: 13, fontWeight: '600' }}>
+                                                    Aviso: Selecione dois biodigestores diferentes.
+                                                </Text>
+                                            </View>
+                                        );
+                                    }
+
+                                    const sourceNode = mapMarkers.find(m => m.id === distanceSourceId);
+                                    const targetNode = mapMarkers.find(m => m.id === distanceTargetId);
+
+                                    if (!sourceNode || !targetNode) return null;
+
+                                    const distanceKm = calculateHaversineDistance(
+                                        sourceNode.latitude, sourceNode.longitude,
+                                        targetNode.latitude, targetNode.longitude
+                                    );
+
+                                    // Elegantly format distance
+                                    const formattedDistance = distanceKm < 1 
+                                        ? `${Math.round(distanceKm * 1000)} m` 
+                                        : `${distanceKm.toFixed(1)} km`;
+
+                                    return (
+                                        <View style={{ marginBottom: 24 }}>
+                                            {/* Premium connection graphics */}
+                                            <View style={{
+                                                backgroundColor: colors.background,
+                                                borderRadius: 14,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                padding: 16,
+                                                elevation: 2,
+                                                shadowColor: '#000',
+                                                shadowOpacity: 0.05,
+                                                shadowRadius: 4,
+                                                shadowOffset: { width: 0, height: 2 }
+                                            }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#22c55e', textTransform: 'uppercase' }}>Origem</Text>
+                                                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }} numberOfLines={1}>
+                                                            {sourceNode.title}
+                                                        </Text>
+                                                    </View>
+                                                    
+                                                    <View style={{ paddingHorizontal: 12, alignItems: 'center' }}>
+                                                        <MaterialCommunityIcons name="ray-start-end" size={20} color={colors.primary} />
+                                                    </View>
+
+                                                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase' }}>Destino</Text>
+                                                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }} numberOfLines={1}>
+                                                            {targetNode.title}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+
+                                                <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
+
+                                                <View style={{ alignItems: 'center', marginTop: 8 }}>
+                                                    <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 4 }}>Distância Calculada</Text>
+                                                    <Text style={{ fontSize: 26, fontWeight: '900', color: colors.primary }}>
+                                                        {formattedDistance}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    );
+                                })()}
+
+                                {/* Actions */}
+                                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
+                                    <TouchableOpacity 
+                                        onPress={() => {
+                                            setDistanceModalVisible(false);
+                                            setDistanceSourceId(null);
+                                            setDistanceTargetId(null);
+                                        }} 
+                                        style={{ 
+                                            paddingVertical: 12, 
+                                            paddingHorizontal: 24, 
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            backgroundColor: colors.background
+                                        }}
+                                    >
+                                        <Text style={{ color: colors.text, fontWeight: 'bold', fontSize: 14 }}>
+                                            Fechar
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
+
                 {/* Lista de Locais Acima do Mapa (Novo Requisito) */}
                 {/* Lista de Locais (Refinada - Flex Wrap) */}
                 {mapMarkers.length > 0 && (
@@ -1406,6 +1824,8 @@ export default function DashboardScreen() {
                                 onPress={() => {
                                     setMapFocusLocation({ latitude: m.latitude, longitude: m.longitude });
                                 }}
+                                onLongPress={() => handleOpenDistanceModal(m.id)}
+                                delayLongPress={500}
                                 style={{
                                     backgroundColor: colors.cardBackground,
                                     paddingLeft: 14,
