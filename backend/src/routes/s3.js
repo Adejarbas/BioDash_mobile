@@ -9,6 +9,7 @@ const router = express.Router();
 // Nenhuma Access Key precisa ser configurada no código ou no .env.
 const s3 = new S3Client({
   region: process.env.AWS_REGION || 'us-east-1',
+  requestChecksumCalculation: 'WHEN_REQUIRED'
 });
 
 const BUCKET = process.env.S3_BUCKET_NAME || 'biogen-s3';
