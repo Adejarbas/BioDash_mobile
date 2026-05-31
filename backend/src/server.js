@@ -18,10 +18,24 @@ const port = process.env.PORT || 3003;
 
 // CORS — aceita origens configuradas no .env ou libera tudo em dev
 const allowedOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',')
+  ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
   : ['*'];
 
-app.use(cors({ origin: allowedOrigins.includes('*') ? '*' : allowedOrigins, methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }));
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permite requisições sem origem (como aplicativos móveis nativos, curl, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    return callback(new Error(`CORS bloqueado para a origem: ${origin}`), false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  credentials: true
+}));
 app.use(express.json());
 
 // ==========================================
@@ -133,5 +147,5 @@ app.delete('/api/markers/:id', authMiddleware, async (req, res) => {
 // ==========================================
 app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Servidor backend BioDash rodando em http://0.0.0.0:${port}`);
-  console.log(`🌐 Acesse pelo IP público: http://44.196.163.18:${port}/api`);
+  console.log(`🌐 Acesse pelo domínio público: http://biodash-api.duckdns.org:${port}/api`);
 });

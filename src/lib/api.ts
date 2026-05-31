@@ -2,11 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // URL base do Express (EC2 AWS - node/express conectado ao MongoDB e PostgreSQL RDS) na porta 3003
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://44.196.163.18:3003/api";
+  process.env.EXPO_PUBLIC_API_URL || "http://biodash-api.duckdns.org:3003/api";
 
 // URL base do Next.js (BioDashBD) na porta 80
 const NEXT_API_BASE_URL =
-  process.env.EXPO_PUBLIC_NEXT_API_URL || "http://44.196.163.18/api";
+  process.env.EXPO_PUBLIC_NEXT_API_URL || "http://biodash-api.duckdns.org/api";
 
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;
