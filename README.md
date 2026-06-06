@@ -67,7 +67,11 @@ Calcule e visualize os benefícios fiscais da sua produção de energia sustent�
 ## 🔗 PROTÓTIPO E DOCUMENTAÇÃO
 
 
-- Link 1
+- http://biodash.duckdns.org/
+
+- http://biodash-api.duckdns.org/
+
+- https://drive.google.com/file/d/1cBaFjSCvvmQXrrmZGH64rAcDUtQxmx86/view
 
 
 ## 🔹 Requisitos Funcionais 
@@ -125,20 +129,26 @@ Calcule e visualize os benefícios fiscais da sua produção de energia sustent�
   <img src="https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo"/>
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript"/>
   <img src="https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS"/>
+  <img src="https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB"/>
+  <img src="https://img.shields.io/badge/Nginx-009639?style=for-the-badge&logo=nginx&logoColor=white" alt="Nginx"/>
+  <img src="https://img.shields.io/badge/DuckDNS-DE5B49?style=for-the-badge" alt="DuckDNS"/>
   
 </p>
 
 ##  🖥️ **Integrações AWS**
 
-- **S3:** Armazenamento de fotos de perfil
+![esquema aws](https://github.com/guipiva/Readme-Biogen/blob/master/Imagem-aws.jpeg?raw=true)
+
+
+- **S3:** Armazenamento de fotos de perfil.
   
-- **Lâmbda(Serveless):** Foram criadas stacks para envio de notificação em caso de alteração nos sensores
+- **Lâmbda(Serveless):** Foram criadas stacks para envio de notificação em caso de alteração nos sensores.
   
 - **EC2:** Foi implementado o mongoDB com uma API exposta por PM2.
   
-- **Amazon RDS:** Foi implementado o banco de dados relacional Postgre
+- **Amazon RDS:** Foi implementado o banco de dados relacional Postgre.
   
-- **CloudWatch:**
+- **CloudWatch:** Foi implementado a Api de Geolocalização.
 
 
 
@@ -188,7 +198,125 @@ Exibição e cadastro dos alertas emitidos automaticamente quando surgem anomali
 - **GET /api/alerts (Requer autenticação)** - Retorna as 50 notificações/alertas emitidos mais recentes
 - **POST /api/alerts (Requer autenticação)** - Cria um novo registro de emissão de alerta associado ao usuário
 
-## 📦 **Instalação e Configuração**
+## 📦 *Instalação e Configuração*
+
+Esta seção descreve os passos necessários para configurar e executar localmente o projeto *BioGen* (tanto o frontend mobile/web em Expo quanto o backend em Node.js), além de instruções para execução via *Docker*.
+
+---
+
+### 📋 Pré-requisitos
+
+Antes de iniciar, certifique-se de ter instalado em sua máquina:
+* *Node.js* (versão 20.x recomendada, ou superior)
+* *npm* (gerenciador de pacotes padrão do Node)
+* *Git* (para clonagem do repositório)
+* *Docker & Docker Compose* (opcional, para execução simplificada via contêineres)
+* *Expo Go* (aplicativo móvel disponível para Android/iOS para testar o aplicativo diretamente no seu celular físico)
+
+---
+
+### 💻 Passo 1: Clonar o Repositório
+
+Primeiramente, clone este repositório para o seu ambiente de desenvolvimento local:
+
+bash
+git clone https://github.com/Adejarbas/BioDash_mobile.git
+cd BioDash_mobile
+
+
+---
+
+### ⚙️ Passo 2: Configuração e Execução do Backend
+
+O backend é uma API em Node.js construída com Express, que se comunica com o *PostgreSQL (AWS RDS)* e *MongoDB*.
+
+1. *Acesse o diretório do backend:*
+   bash
+   cd backend
+   
+
+2. *Crie e configure o arquivo .env:*
+   Crie um arquivo .env na pasta backend com base nas variáveis a seguir:
+   env
+   NODE_ENV=development
+   PORT=3003
+   POSTGRES_URL=sua_string_de_conexao_postgresql_rds
+   JWT_SECRET=sua_chave_secreta_para_jwt
+   MONGODB_URI=sua_string_de_conexao_mongodb
+   CORS_ORIGINS=http://localhost:8081,http://localhost:19006,http://localhost:3000,http://localhost:80
+   
+
+3. *Instale as dependências:*
+   bash
+   npm install
+   
+
+4. *Inicie o servidor em modo de desenvolvimento:*
+   bash
+   npm run dev
+   
+   O backend estará rodando localmente em http://localhost:3003.
+
+---
+
+### 📱 Passo 3: Configuração e Execução do Frontend (Expo)
+
+O frontend foi construído utilizando *React Native* com *Expo* e suporta plataformas Mobile (iOS/Android) e Web.
+
+1. *Retorne à raiz do projeto:*
+   bash
+   cd ..
+   
+
+2. *Configure o arquivo de variáveis de ambiente:*
+   Crie um arquivo .env com base no arquivo .env-exemple:
+   bash
+   cp .env-exemple .env
+   
+   Caso esteja no Windows PowerShell, use:
+   powershell
+   copy .env-exemple .env
+   
+   Edite o .env recém-criado, preenchendo as chaves necessárias:
+   env
+   EXPO_PUBLIC_SUPABASE_URL=sua_url_do_supabase
+   EXPO_PUBLIC_SUPABASE_ANON_KEY=sua_chave_anonima_do_supabase
+   EXPO_PUBLIC_API_URL=http://localhost:3003/api
+   EXPO_PUBLIC_AWS_REGION=us-east-1
+   EXPO_PUBLIC_AWS_BUCKET_NAME=seu_nome_de_bucket_s3
+   EXPO_PUBLIC_AWS_ACCESS_KEY_ID=seu_access_key_id_aws
+   EXPO_PUBLIC_AWS_SECRET_ACCESS_KEY=sua_secret_key_aws
+   
+
+3. *Instale as dependências da aplicação:*
+   bash
+   npm install
+   
+
+4. *Inicie o servidor do Expo:*
+   bash
+   npm run start
+   
+
+5. *Execute na plataforma desejada:*
+   * *Mobile (Físico):* Abra o aplicativo *Expo Go* em seu dispositivo móvel e escaneie o *QR Code* gerado no seu terminal.
+   * *Android:* Pressione a no terminal para abrir em um emulador Android (requer Android Studio configurado).
+   * *iOS:* Pressione i no terminal para abrir no simulador iOS (requer macOS e Xcode configurado).
+   * *Web:* Pressione w no terminal para compilar e abrir no navegador web padrão.
+
+---
+
+### 🐳 Executando com Docker
+
+Se preferir rodar toda a aplicação de forma automatizada e isolada utilizando contêineres Docker, nós fornecemos configurações prontas para Docker Compose.
+
+#### 1. Executar tudo (Backend + Frontend Web)
+Certifique-se de configurar as variáveis de ambiente necessárias e execute:
+bash
+docker-compose up --build
+
+* O Backend estará acessível em http://localhost:3003.
+* O Frontend Web (servido via Nginx) estará acessível em http://localhost:80.
 
 
 ## 👥 EQUIPE
@@ -204,7 +332,7 @@ Exibição e cadastro dos alertas emitidos automaticamente quando surgem anomali
     <tr>
       <td>Alessandro Rodrigues</td>
       <td>
-       <a href="[https://github.com/FernandoRSantos](https://github.com/alerodriguesm02)" target="_blank">
+       <a href="https://github.com/alerodriguesm02" target="_blank">
           <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Alessandro Rodrigues">
         </a>
       </td>
@@ -234,14 +362,6 @@ Exibição e cadastro dos alertas emitidos automaticamente quando surgem anomali
       </td>
     </tr>
     <tr>
-      <td>Mayara Barros</td>
-      <td>
-      <a href="https://github.com/Mayarasb" target="_blank">
-          <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Mayara Barros">
-        </a>
-      </td>
-    </tr>
-    <tr>
       <td>Matheus Gueff</td>
       <td>
       <a href="https://github.com/MathGueff" target="_blank">
@@ -250,10 +370,10 @@ Exibição e cadastro dos alertas emitidos automaticamente quando surgem anomali
       </td>
     </tr>
     <tr>
-      <td>Vanessa Capuano</td>
+      <td>Mayara Barros</td>
       <td>
-        <a href="https://github.com/Vanessa-Nobrega" target="_blank">
-          <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Vanessa Capuano">
+      <a href="https://github.com/Mayarasb" target="_blank">
+          <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Mayara Barros">
         </a>
       </td>
     </tr>
@@ -265,11 +385,17 @@ Exibição e cadastro dos alertas emitidos automaticamente quando surgem anomali
         </a>
       </td>
     </tr>
+    <tr>
+      <td>Vanessa Capuano</td>
+      <td>
+        <a href="https://github.com/Vanessa-Nobrega" target="_blank">
+          <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Vanessa Capuano">
+        </a>
+      </td>
+    </tr>
   </tbody>
 </table>
 
 ## Rodapé
 
 ©️ 2026 BioDash. Todos os direitos reservados.
-
-
