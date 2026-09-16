@@ -171,3 +171,34 @@ export const profileApi = {
       body: JSON.stringify(data),
     }),
 };
+
+// ==========================================
+// AI Service (Python - TF-IDF + SVM Chatbot + Busca Semântica)
+// ==========================================
+// No browser (Expo Web), usa localhost; no app mobile, usa o IP configurado
+const AI_SERVICE_URL = (() => {
+  if (typeof window !== 'undefined' && window?.location?.hostname === 'localhost') {
+    return 'http://localhost:5000';
+  }
+  return process.env.EXPO_PUBLIC_AI_SERVICE_URL || 'http://192.168.15.14:5000';
+})();
+
+export const chatbotApi = {
+  send: (data: {
+    message: string;
+    markers?: any[];
+    indicators?: any[];
+  }) =>
+    apiRequest(`${AI_SERVICE_URL}/chatbot`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};
+
+export const semanticSearchApi = {
+  search: (data: { query: string; markers: any[] }) =>
+    apiRequest(`${AI_SERVICE_URL}/semantic-search`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};

@@ -65,6 +65,11 @@ router.post('/login', async (req, res) => {
     }
 
     const user = result.rows[0];
+    
+    if (!user.password_hash) {
+      return res.status(401).json({ success: false, message: 'Conta inválida ou senha não configurada.' });
+    }
+
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ success: false, message: 'Email ou senha inválidos.' });
