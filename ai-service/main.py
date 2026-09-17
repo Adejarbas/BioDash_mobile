@@ -4,12 +4,13 @@ BioDash AI Service
 Microserviço Python para PLN (Processamento de Linguagem Natural).
 - Chatbot com TF-IDF + SVM (scikit-learn)
 - Busca Semântica por biodigestores (similaridade de cosseno)
+- Extração de Entidades (datas, números, prioridade)
+- Fluxos conversacionais: agendamento, métricas, endereços, relatórios por período
 
 Run: uvicorn main:app --host 0.0.0.0 --port 5000 --reload
 """
 
 import os
-import json
 import re
 from typing import Optional, List, Any, Dict
 
@@ -27,8 +28,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 app = FastAPI(
     title="BioDash AI Service",
-    description="Chatbot (TF-IDF + SVM) e Busca Semântica para o BioDash",
-    version="1.0.0"
+    description="Chatbot (TF-IDF + SVM), Busca Semântica e Fluxos Conversacionais para o BioDash",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -43,7 +44,6 @@ app.add_middleware(
 # 1. TREINAMENTO DO CHATBOT (TF-IDF + SVM)
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Dataset de treinamento: frases em português por intenção
 TRAINING_DATA = [
     # ─── SAUDAÇÃO ───────────────────────────────────────────────────────────
     ("saudacao", "olá"),
@@ -143,6 +143,118 @@ TRAINING_DATA = [
     ("pedido_exportar_excel", "criar excel"),
     ("pedido_exportar_excel", "planilha excel"),
 
+    # ─── AGENDAR MANUTENÇÃO ──────────────────────────────────────────────────
+    ("agendar_manutencao", "agendar manutenção"),
+    ("agendar_manutencao", "quero agendar uma manutenção"),
+    ("agendar_manutencao", "criar manutenção"),
+    ("agendar_manutencao", "programar manutenção"),
+    ("agendar_manutencao", "nova manutenção"),
+    ("agendar_manutencao", "agendar revisão"),
+    ("agendar_manutencao", "marcar manutenção"),
+    ("agendar_manutencao", "preciso agendar manutenção"),
+    ("agendar_manutencao", "quero criar um agendamento"),
+    ("agendar_manutencao", "agendar serviço de manutenção"),
+    ("agendar_manutencao", "programar revisão do biodigestor"),
+    ("agendar_manutencao", "adicionar manutenção"),
+    ("agendar_manutencao", "agendar troca de filtro"),
+    ("agendar_manutencao", "quero marcar uma revisão"),
+
+    # ─── INCLUIR MÉTRICA ────────────────────────────────────────────────────
+    ("incluir_metrica", "adicionar métricas"),
+    ("incluir_metrica", "registrar resíduos"),
+    ("incluir_metrica", "incluir dados"),
+    ("incluir_metrica", "inserir indicadores"),
+    ("incluir_metrica", "adicionar dados do biodigestor"),
+    ("incluir_metrica", "registrar métricas"),
+    ("incluir_metrica", "incluir métricas"),
+    ("incluir_metrica", "inserir métricas"),
+    ("incluir_metrica", "adicionar indicadores"),
+    ("incluir_metrica", "novo registro de métricas"),
+    ("incluir_metrica", "inserir dados de energia e resíduos"),
+    ("incluir_metrica", "quero adicionar as métricas do mês"),
+    ("incluir_metrica", "registrar produção do biodigestor"),
+    ("incluir_metrica", "lançar métricas"),
+
+    # ─── EDITAR MÉTRICA ─────────────────────────────────────────────────────
+    ("editar_metrica", "editar métricas"),
+    ("editar_metrica", "atualizar resíduos"),
+    ("editar_metrica", "corrigir dados"),
+    ("editar_metrica", "alterar indicadores"),
+    ("editar_metrica", "modificar métricas"),
+    ("editar_metrica", "quero editar as métricas"),
+    ("editar_metrica", "preciso corrigir os dados"),
+    ("editar_metrica", "alterar os dados do mês"),
+    ("editar_metrica", "atualizar métricas"),
+    ("editar_metrica", "editar indicadores"),
+    ("editar_metrica", "corrigir métricas"),
+    ("editar_metrica", "modificar dados do biodigestor"),
+    ("editar_metrica", "atualizar dados do mês passado"),
+
+    # ─── ADICIONAR ENDEREÇO ─────────────────────────────────────────────────
+    ("adicionar_endereco", "adicionar biodigestor"),
+    ("adicionar_endereco", "cadastrar endereço"),
+    ("adicionar_endereco", "novo biodigestor"),
+    ("adicionar_endereco", "registrar localização"),
+    ("adicionar_endereco", "adicionar localização"),
+    ("adicionar_endereco", "cadastrar biodigestor"),
+    ("adicionar_endereco", "quero adicionar um biodigestor"),
+    ("adicionar_endereco", "incluir novo biodigestor"),
+    ("adicionar_endereco", "registrar biodigestor"),
+    ("adicionar_endereco", "novo ponto no mapa"),
+    ("adicionar_endereco", "adicionar ponto no mapa"),
+    ("adicionar_endereco", "quero cadastrar um novo biodigestor"),
+    ("adicionar_endereco", "incluir endereço no mapa"),
+
+    # ─── RELATÓRIO POR PERÍODO ───────────────────────────────────────────────
+    ("relatorio_periodo", "relatório de outubro"),
+    ("relatorio_periodo", "relatório do mês"),
+    ("relatorio_periodo", "exportar período"),
+    ("relatorio_periodo", "relatório entre datas"),
+    ("relatorio_periodo", "relatório por período"),
+    ("relatorio_periodo", "relatório de um período específico"),
+    ("relatorio_periodo", "quero relatório de um período"),
+    ("relatorio_periodo", "gerar relatório do período"),
+    ("relatorio_periodo", "relatório de janeiro a junho"),
+    ("relatorio_periodo", "dados do semestre"),
+    ("relatorio_periodo", "relatório mensal"),
+    ("relatorio_periodo", "dados do período"),
+    ("relatorio_periodo", "exportar dados de um período"),
+    ("relatorio_periodo", "relatório do trimestre"),
+    ("relatorio_periodo", "relatório específico de um período"),
+
+    # ─── CONFIRMAR ──────────────────────────────────────────────────────────
+    ("confirmar", "sim"),
+    ("confirmar", "s"),
+    ("confirmar", "yes"),
+    ("confirmar", "confirmar"),
+    ("confirmar", "confirmo"),
+    ("confirmar", "ok"),
+    ("confirmar", "pode ser"),
+    ("confirmar", "certo"),
+    ("confirmar", "correto"),
+    ("confirmar", "isso mesmo"),
+    ("confirmar", "exato"),
+    ("confirmar", "com certeza"),
+    ("confirmar", "pode"),
+    ("confirmar", "claro"),
+    ("confirmar", "tá bom"),
+
+    # ─── CANCELAR ───────────────────────────────────────────────────────────
+    ("cancelar", "não"),
+    ("cancelar", "nao"),
+    ("cancelar", "n"),
+    ("cancelar", "no"),
+    ("cancelar", "cancelar"),
+    ("cancelar", "cancela"),
+    ("cancelar", "desistir"),
+    ("cancelar", "para"),
+    ("cancelar", "chega"),
+    ("cancelar", "voltar"),
+    ("cancelar", "esqueça"),
+    ("cancelar", "esqueça isso"),
+    ("cancelar", "não quero mais"),
+    ("cancelar", "para tudo"),
+
     # ─── DESPEDIDA ───────────────────────────────────────────────────────────
     ("despedida", "tchau"),
     ("despedida", "até logo"),
@@ -163,7 +275,7 @@ TRAINING_DATA = [
 # Separa labels e frases
 train_labels, train_texts = zip(*TRAINING_DATA)
 
-# Treina o TF-IDF (tf-idf com uni e bi-gramas)
+# Treina o TF-IDF (char_wb com uni e bi-gramas — robusto para português)
 vectorizer = TfidfVectorizer(
     ngram_range=(1, 2),
     min_df=1,
@@ -173,15 +285,12 @@ vectorizer = TfidfVectorizer(
 X_train = vectorizer.fit_transform(train_texts)
 
 # Treina o SVM
-svm_model = SVC(
-    kernel='linear',
-    C=1.0,
-    probability=True
-)
+svm_model = SVC(kernel='linear', C=1.0, probability=True)
 svm_model.fit(X_train, train_labels)
 
-print("[OK] Modelo TF-IDF + SVM treinado com sucesso!")
+print("[OK] Modelo TF-IDF + SVM v2.0 treinado com sucesso!")
 print(f"   Classes: {list(svm_model.classes_)}")
+print(f"   Total de exemplos: {len(TRAINING_DATA)}")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. SCHEMAS (Pydantic)
@@ -189,15 +298,16 @@ print(f"   Classes: {list(svm_model.classes_)}")
 
 class ChatRequest(BaseModel):
     message: str
-    markers: Optional[List[Dict[str, Any]]] = []     # Biodigestores do usuário
-    indicators: Optional[List[Dict[str, Any]]] = []  # Métricas do usuário
+    markers: Optional[List[Dict[str, Any]]] = []
+    indicators: Optional[List[Dict[str, Any]]] = []
 
 
 class ChatResponse(BaseModel):
     intent: str
     response: str
     confidence: float
-    action: Optional[str] = None  # "export_pdf", "export_csv", "export_excel"
+    action: Optional[str] = None
+    entities: Optional[Dict[str, Any]] = {}  # Entidades extraídas (datas, números, prioridade)
 
 
 class SemanticSearchRequest(BaseModel):
@@ -229,16 +339,98 @@ def normalize_text(text: str) -> str:
     return text
 
 
+def extract_entities(text: str) -> Dict[str, Any]:
+    """
+    Extrai entidades do texto em linguagem natural:
+    - Meses (por nome ou número)
+    - Ano (4 dígitos)
+    - Dia
+    - Prioridade (alta/média/baixa)
+    - Métricas numéricas (kg, kWh, R$)
+    - Formato de exportação (pdf/csv/excel)
+    """
+    entities: Dict[str, Any] = {}
+    normalized = normalize_text(text)
+
+    # ─── Meses ───────────────────────────────────────────────────────────────
+    month_map = {
+        'janeiro': 0, 'fevereiro': 1, 'marco': 2, 'abril': 3,
+        'maio': 4, 'junho': 5, 'julho': 6, 'agosto': 7,
+        'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11,
+    }
+    for name, idx in month_map.items():
+        if name in normalized:
+            entities['month'] = idx
+            break
+
+    # ─── Ano (4 dígitos) ─────────────────────────────────────────────────────
+    year_match = re.search(r'\b(20\d{2})\b', text)
+    if year_match:
+        entities['year'] = int(year_match.group(1))
+
+    # ─── Data no formato dd/mm ou dd/mm/aaaa ─────────────────────────────────
+    date_match = re.search(r'(\d{1,2})[/\-](\d{1,2})(?:[/\-](\d{2,4}))?', text)
+    if date_match:
+        entities['day'] = int(date_match.group(1))
+        entities['month'] = int(date_match.group(2)) - 1  # 0-indexed
+        if date_match.group(3):
+            yr = int(date_match.group(3))
+            entities['year'] = yr if yr > 100 else 2000 + yr
+
+    # ─── Dia isolado ─────────────────────────────────────────────────────────
+    if 'day' not in entities:
+        day_match = re.search(r'\bdia\s+(\d{1,2})\b|\b(\d{1,2})\s+de\b', normalized)
+        if day_match:
+            d = int(day_match.group(1) or day_match.group(2))
+            if 1 <= d <= 31:
+                entities['day'] = d
+
+    # ─── Prioridade ──────────────────────────────────────────────────────────
+    if any(w in normalized for w in ['alta', 'urgente', 'critica', 'critico', 'importante']):
+        entities['priority'] = 'high'
+    elif any(w in normalized for w in ['media', 'moderada', 'normal']):
+        entities['priority'] = 'medium'
+    elif any(w in normalized for w in ['baixa', 'leve', 'pequena']):
+        entities['priority'] = 'low'
+
+    # ─── Resíduos (kg) ───────────────────────────────────────────────────────
+    waste_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:kg|quilos?)', normalized)
+    if waste_match:
+        entities['waste_processed'] = float(waste_match.group(1).replace(',', '.'))
+
+    # ─── Energia (kWh) ───────────────────────────────────────────────────────
+    energy_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:kwh|kw/h|kilowatt)', normalized)
+    if energy_match:
+        entities['energy_generated'] = float(energy_match.group(1).replace(',', '.'))
+
+    # ─── Valor monetário (R$) ────────────────────────────────────────────────
+    money_match = re.search(
+        r'(?:r\$|reais?|brl)\s*(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*(?:reais?)',
+        normalized
+    )
+    if money_match:
+        val = money_match.group(1) or money_match.group(2)
+        entities['tax_savings'] = float(val.replace(',', '.'))
+
+    # ─── Formato de exportação ───────────────────────────────────────────────
+    if 'pdf' in normalized:
+        entities['format'] = 'pdf'
+    elif 'excel' in normalized or 'xlsx' in normalized or 'planilha' in normalized:
+        entities['format'] = 'excel'
+    elif 'csv' in normalized:
+        entities['format'] = 'csv'
+
+    return entities
+
+
 def build_marker_text(marker: Dict[str, Any]) -> str:
     """Cria uma string de texto searchable para um marcador."""
     parts = [marker.get("title", "")]
     addr = marker.get("address", {})
     if isinstance(addr, dict):
         parts.extend([
-            addr.get("street", ""),
-            addr.get("cep", ""),
-            addr.get("city", ""),
-            addr.get("complement", ""),
+            addr.get("street", ""), addr.get("cep", ""),
+            addr.get("city", ""), addr.get("complement", ""),
         ])
     elif isinstance(addr, str):
         parts.append(addr)
@@ -276,7 +468,7 @@ def format_marker_address(marker: Dict[str, Any]) -> str:
 def format_indicators(indicators: List[Dict[str, Any]]) -> str:
     """Formata as métricas mais recentes para exibição."""
     if not indicators:
-        return "Nenhuma métrica disponível. Adicione dados de indicadores no dashboard."
+        return "Nenhuma métrica disponível. Diga *'adicionar métricas'* para registrar dados pelo chat."
     latest = indicators[0]
     waste = latest.get("waste_processed", 0)
     energy = latest.get("energy_generated", 0)
@@ -295,7 +487,7 @@ def format_indicators(indicators: List[Dict[str, Any]]) -> str:
 
 @app.get("/")
 def root():
-    return {"service": "BioDash AI Service", "status": "running", "version": "1.0.0"}
+    return {"service": "BioDash AI Service", "status": "running", "version": "2.0.0"}
 
 
 @app.get("/health")
@@ -306,8 +498,8 @@ def health():
 @app.post("/chatbot", response_model=ChatResponse)
 def chatbot_endpoint(req: ChatRequest):
     """
-    Recebe uma mensagem do usuário, classifica a intenção com TF-IDF + SVM
-    e retorna a resposta contextualizada com os dados do usuário.
+    Classifica a intenção com TF-IDF + SVM, extrai entidades e retorna
+    resposta contextualizada. Suporta fluxos conversacionais multi-etapa.
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Mensagem não pode ser vazia.")
@@ -324,14 +516,24 @@ def chatbot_endpoint(req: ChatRequest):
     markers = req.markers or []
     indicators = req.indicators or []
     action = None
+    entities = extract_entities(req.message)
 
     # ─── Respostas por intenção ──────────────────────────────────────────────
+
     if intent == "saudacao":
-        response = "Olá! Em que posso ajudar você hoje? 😊"
+        response = (
+            "Olá! Em que posso ajudar você hoje? 😊\n\n"
+            "Posso:\n"
+            "• Responder sobre endereços e métricas\n"
+            "• Agendar manutenções\n"
+            "• Registrar ou editar métricas\n"
+            "• Cadastrar novos biodigestores\n"
+            "• Gerar relatórios por período"
+        )
 
     elif intent == "pedido_endereco":
         if not markers:
-            response = "Não encontrei nenhum biodigestor cadastrado. Adicione um marcador no mapa para ver o endereço."
+            response = "Não encontrei nenhum biodigestor cadastrado.\n\nDiga *'adicionar biodigestor'* para cadastrar um agora pelo chat."
         elif len(markers) == 1:
             response = format_marker_address(markers[0])
         else:
@@ -340,65 +542,120 @@ def chatbot_endpoint(req: ChatRequest):
 
     elif intent == "pedido_residuos":
         if not indicators:
-            response = "Nenhuma métrica de resíduos encontrada. Adicione dados no dashboard."
+            response = "Nenhuma métrica de resíduos encontrada.\n\nDiga *'adicionar métricas'* para registrar agora pelo chat."
         else:
             latest = indicators[0]
             waste = latest.get("waste_processed", 0)
-            response = f"♻️ *Resíduos Processados*\nÚltimo registro: *{waste:.2f} kg*\n\nPara o histórico completo, use a seção de Indicadores no dashboard."
+            response = f"♻️ *Resíduos Processados*\nÚltimo registro: *{waste:.2f} kg*"
 
     elif intent == "pedido_energia":
         if not indicators:
-            response = "Nenhuma métrica de energia encontrada. Adicione dados no dashboard."
+            response = "Nenhuma métrica de energia encontrada.\n\nDiga *'adicionar métricas'* para registrar agora pelo chat."
         else:
             latest = indicators[0]
             energy = latest.get("energy_generated", 0)
-            response = f"⚡ *Energia Gerada*\nÚltimo registro: *{energy:.2f} kWh*\n\nPara o histórico completo, use a seção de Indicadores no dashboard."
+            response = f"⚡ *Energia Gerada*\nÚltimo registro: *{energy:.2f} kWh*"
 
     elif intent == "pedido_metricas":
         response = format_indicators(indicators)
 
     elif intent == "pedido_exportar_pdf":
-        response = "📄 Vou gerar o relatório em *PDF* para você agora! Aguarde um instante..."
+        response = "📄 Vou gerar o relatório em *PDF* para você agora! Aguarde..."
         action = "export_pdf"
 
     elif intent == "pedido_exportar_csv":
-        response = "📊 Vou exportar os dados em *CSV* para você agora! Aguarde um instante..."
+        response = "📊 Vou exportar os dados em *CSV* para você agora! Aguarde..."
         action = "export_csv"
 
     elif intent == "pedido_exportar_excel":
-        response = "📋 Vou exportar os dados em *Excel* para você agora! Aguarde um instante..."
+        response = "📋 Vou exportar os dados em *Excel* para você agora! Aguarde..."
         action = "export_excel"
+
+    # ─── Fluxos conversacionais ──────────────────────────────────────────────
+
+    elif intent == "agendar_manutencao":
+        response = (
+            "📅 Certo! Vou agendar uma manutenção.\n\n"
+            "Qual o **nome** da manutenção?\n"
+            "(ex: Troca de filtros, Limpeza do tanque, Inspeção geral)"
+        )
+        action = "start_flow_manutencao"
+
+    elif intent == "incluir_metrica":
+        response = (
+            "📊 Vou registrar novas métricas do biodigestor.\n\n"
+            "Qual a quantidade de **resíduos processados** em kg?"
+        )
+        action = "start_flow_metrica"
+
+    elif intent == "editar_metrica":
+        response = (
+            "✏️ Vou editar métricas existentes.\n\n"
+            "Qual **mês e ano** deseja atualizar?\n"
+            "(ex: outubro 2025 ou 10/2025)"
+        )
+        action = "start_flow_editar_metrica"
+
+    elif intent == "adicionar_endereco":
+        response = (
+            "📍 Vou cadastrar um novo biodigestor no mapa.\n\n"
+            "Qual o **nome** do biodigestor?\n"
+            "(ex: Biodigestor Norte, Planta 01)"
+        )
+        action = "start_flow_endereco"
+
+    elif intent == "relatorio_periodo":
+        response = (
+            "📅 Vou gerar um relatório por período específico.\n\n"
+            "Qual o **mês e ano inicial**?\n"
+            "(ex: janeiro 2025 ou 01/2025)"
+        )
+        action = "start_flow_relatorio"
+
+    elif intent == "confirmar":
+        response = "✅ Entendido!"
+        action = "flow_confirm"
+
+    elif intent == "cancelar":
+        response = "❌ Operação cancelada. Como mais posso ajudar?"
+        action = "cancel_flow"
 
     elif intent == "despedida":
         response = "Foi um prazer te ajudar! Até logo e continuo à disposição! 🌿"
 
     else:
-        response = "Desculpe, não entendi muito bem. Posso te ajudar com endereços dos biodigestores, métricas de energia e resíduos, ou exportação de relatórios!"
+        response = (
+            "Desculpe, não entendi muito bem. Posso te ajudar com:\n"
+            "• Endereços dos biodigestores\n"
+            "• Métricas de energia e resíduos\n"
+            "• Agendar manutenções\n"
+            "• Registrar ou editar métricas\n"
+            "• Cadastrar novos biodigestores\n"
+            "• Gerar relatórios por período"
+        )
 
     return ChatResponse(
         intent=intent,
         response=response,
         confidence=round(confidence, 4),
-        action=action
+        action=action,
+        entities=entities,
     )
 
 
 @app.post("/semantic-search", response_model=SemanticSearchResponse)
 def semantic_search(req: SemanticSearchRequest):
     """
-    Busca semântica entre o texto da query e os marcadores/biodigestores cadastrados.
-    Usa TF-IDF + similaridade de cosseno para encontrar os mais relevantes.
+    Busca semântica entre a query e os marcadores usando TF-IDF + cosseno.
     """
     if not req.markers:
         return SemanticSearchResponse(results=[])
     if not req.query or not req.query.strip():
         raise HTTPException(status_code=400, detail="Query não pode ser vazia.")
 
-    # Cria textos para todos os marcadores
     marker_texts = [build_marker_text(m) for m in req.markers]
     all_texts = [req.query] + marker_texts
 
-    # Vetoriza com TF-IDF
     search_vectorizer = TfidfVectorizer(ngram_range=(1, 2), analyzer='char_wb')
     try:
         tfidf_matrix = search_vectorizer.fit_transform(all_texts)
@@ -407,20 +664,13 @@ def semantic_search(req: SemanticSearchRequest):
 
     query_vec = tfidf_matrix[0]
     marker_vecs = tfidf_matrix[1:]
-
-    # Similaridade de cosseno entre query e cada marcador
     similarities = cosine_similarity(query_vec, marker_vecs)[0]
 
-    # Monta resultados ordenados por relevância
-    ranked = sorted(
-        enumerate(similarities),
-        key=lambda x: x[1],
-        reverse=True
-    )
+    ranked = sorted(enumerate(similarities), key=lambda x: x[1], reverse=True)
 
     results = []
     for idx, score in ranked:
-        if score > 0.01:  # Filtro mínimo de relevância
+        if score > 0.01:
             marker = req.markers[idx].copy()
             marker["similarity_score"] = round(float(score), 4)
             results.append(marker)

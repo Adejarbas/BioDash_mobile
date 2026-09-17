@@ -3,10 +3,14 @@
  * ─────────────────
  * Tela do Assistente Virtual do BioDash.
  * - Chat com interface de bolhas de mensagem
- * - Reconhecimento de voz nativo via expo-speech (síntese) + Speech Recognition API
+ * - Reconhecimento de voz NATIVO via expo-speech-recognition (iOS/Android)
+ * - Fallback para Web Speech API no browser
  * - Integração com microserviço Python (TF-IDF + SVM)
  * - Ações automáticas: exportar PDF, CSV ou Excel a partir do chat
  * - Busca Semântica nos biodigestores cadastrados
+ *
+ * ⚠️  expo-speech-recognition requer development build (não funciona no Expo Go).
+ *     Execute: npx expo run:android  ou  npx expo run:ios
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -28,10 +32,14 @@ import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '../context/ThemeContext'
 import { chatbotApi, semanticSearchApi } from '../lib/api'
-import { indicatorsApi, markersApi } from '../lib/api'
+import { indicatorsApi, markersApi, maintenanceApi } from '../lib/api'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
+import {
+    ExpoSpeechRecognitionModule,
+    useSpeechRecognitionEvent,
+} from 'expo-speech-recognition'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -47,8 +55,72 @@ interface ChatbotScreenProps {
     onBack?: () => void
 }
 
-// ─── Constantes ──────────────────────────────────────────────────────────────
-const TAB_BAR_HEIGHT = 62 // altura da barra de abas do App.tsx
+// ─── Flow State Machine ───────────────────────────────────────────────────────
+type FlowType = 'agendar_manutencao' | 'incluir_metrica' | 'editar_metrica' | 'adicionar_endereco' | 'relatorio_periodo'
+
+interface FlowState {
+    type: FlowType
+    step: string
+    data: Record<string, any>
+}
+
+// ─── Constantes e Helpers de Parsing ─────────────────────────────────────────
+const TAB_BAR_HEIGHT = 62
+
+const MONTH_NAMES = [
+    'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+    'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro',
+]
+
+const PRIORITY_LABELS: Record<string, string> = {
+    high: '🔴 Alta', medium: '🟡 Média', low: '🟢 Baixa',
+}
+
+const normalizeStr = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+const parseMonth = (text: string): number | null => {
+    const n = normalizeStr(text)
+    const names = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']
+    for (let i = 0; i < names.length; i++) if (n.includes(names[i])) return i
+    const m = text.match(/\b(\d{1,2})\b/)
+    if (m) { const v = parseInt(m[1]); if (v >= 1 && v <= 12) return v - 1 }
+    return null
+}
+
+const parseYear = (text: string): number | null => {
+    const m = text.match(/\b(20\d{2})\b/)
+    if (m) return parseInt(m[1])
+    const m2 = text.match(/\b(\d{2})\b/)
+    if (m2) return 2000 + parseInt(m2[1])
+    return null
+}
+
+const parseNumber = (text: string): number | null => {
+    const norm = text.replace(',', '.')
+    const m = norm.match(/\d+(?:\.\d+)?/)
+    return m ? parseFloat(m[0]) : null
+}
+
+const parsePriority = (text: string): string | null => {
+    const n = normalizeStr(text)
+    if (['alta','urgente','critica','importante'].some(w => n.includes(w))) return 'high'
+    if (['media','moderada','normal'].some(w => n.includes(w))) return 'medium'
+    if (['baixa','leve','pequena'].some(w => n.includes(w))) return 'low'
+    return null
+}
+
+const isConfirm = (text: string): boolean => {
+    const n = normalizeStr(text).trim()
+    return ['sim','s','yes','confirmar','confirmo','ok','pode','certo','correto','isso','exato','claro','ta bom'].some(w => n === w || n.startsWith(w + ' '))
+}
+
+const isCancel = (text: string): boolean => {
+    const n = normalizeStr(text).trim()
+    return ['nao','n','no','cancelar','cancela','desistir','para','chega','voltar','esqueca','nao quero'].some(w => n === w || n.startsWith(w + ' '))
+}
+
+const padDate = (n: number) => String(n).padStart(2, '0')
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
@@ -72,6 +144,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const [searchResults, setSearchResults] = useState<any[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const [showSearch, setShowSearch] = useState(false)
+    const [activeFlow, setActiveFlow] = useState<FlowState | null>(null)
 
     // Dados em cache para evitar múltiplas requisições
     const cachedMarkers = useRef<any[]>([])
@@ -120,6 +193,50 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
     }, [isListening, micPulse])
 
+    // ─── Cleanup do reconhecimento de voz ao desmontar ───────────────────────
+    useEffect(() => {
+        return () => {
+            if (Platform.OS !== 'web') {
+                ExpoSpeechRecognitionModule.abort()
+            }
+        }
+    }, [])
+
+    // ─── Handlers nativos do expo-speech-recognition ─────────────────────────
+
+    // Resultados parciais (transcrição em tempo real enquanto fala)
+    useSpeechRecognitionEvent('speechstart', () => {
+        setInputText('')
+    })
+
+    useSpeechRecognitionEvent('result', (event) => {
+        const transcript = event.results?.[0]?.transcript ?? ''
+        setInputText(transcript)
+        // Se for resultado final (não parcial), envia automaticamente
+        if (!event.isFinal) return
+        setIsListening(false)
+        if (transcript.trim()) {
+            sendMessage(transcript.trim())
+        }
+    })
+
+    useSpeechRecognitionEvent('error', (event) => {
+        setIsListening(false)
+        const errorMessages: Record<string, string> = {
+            'not-allowed': 'Permissão de microfone negada. Vá em Configurações → Aplicativos → BioDash → Permissões → Microfone → Permitir.',
+            'no-speech': 'Nenhuma fala detectada. Tente novamente mais perto do microfone.',
+            'network': 'Erro de rede no reconhecimento de voz.',
+            'audio-capture': 'Microfone não encontrado.',
+            'aborted': '',
+        }
+        const msg = errorMessages[event.error as string] ?? `Erro: ${event.error}`
+        if (msg) Alert.alert('Microfone', msg)
+    })
+
+    useSpeechRecognitionEvent('end', () => {
+        setIsListening(false)
+    })
+
     // ─── Scroll automático ───────────────────────────────────────────────────
     const scrollToBottom = () => {
         setTimeout(() => {
@@ -127,89 +244,108 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }, 100)
     }
 
-    // ─── Reconhecimento de Voz nativo via Web Speech API ─────────────────────
-    const startVoiceRecognition = () => {
-        if (isListening) {
-            // Se já está ouvindo, cancela
-            setIsListening(false)
+    // ─── Reconhecimento de Voz ────────────────────────────────────────────────
+    // No mobile: usa expo-speech-recognition (nativo iOS/Android)
+    // No web: usa Web Speech API (browser)
+    const startVoiceRecognition = async () => {
+        // ── Web fallback ───────────────────────────────────────────────────
+        if (Platform.OS === 'web') {
+            if (isListening) {
+                setIsListening(false)
+                setInputText('')
+                return
+            }
+            const SpeechRecognitionAPI =
+                (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+            if (!SpeechRecognitionAPI) {
+                Alert.alert(
+                    'Não suportado',
+                    'Reconhecimento de voz não está disponível neste browser. Use Google Chrome ou Microsoft Edge.'
+                )
+                return
+            }
+            setIsListening(true)
             setInputText('')
+            const recognition = new SpeechRecognitionAPI()
+            recognition.lang = 'pt-BR'
+            recognition.interimResults = true
+            recognition.maxAlternatives = 1
+            recognition.continuous = false
+            recognition.onresult = (event: any) => {
+                try {
+                    const transcript = event.results[0][0].transcript
+                    setInputText(transcript)
+                    if (event.results[0].isFinal) {
+                        setIsListening(false)
+                        sendMessage(transcript)
+                    }
+                } catch (e) {
+                    setIsListening(false)
+                }
+            }
+            recognition.onerror = (event: any) => {
+                setIsListening(false)
+                const msgs: Record<string, string> = {
+                    'not-allowed': 'Permissão de microfone negada.',
+                    'no-speech': 'Nenhuma fala detectada.',
+                    'audio-capture': 'Microfone não encontrado.',
+                    'aborted': '',
+                }
+                const msg = msgs[event.error]
+                if (msg) Alert.alert('Microfone', msg)
+            }
+            recognition.onend = () => setIsListening(false)
+            try { recognition.start() } catch (e: any) {
+                setIsListening(false)
+                Alert.alert('Erro ao iniciar microfone', e?.message || String(e))
+            }
             return
         }
 
-        // Verifica se está rodando no browser (web)
-        const isWeb = typeof window !== 'undefined' && Platform.OS === 'web'
+        // ── Nativo (iOS / Android) via expo-speech-recognition ─────────────
+        if (isListening) {
+            // Para a gravação
+            ExpoSpeechRecognitionModule.stop()
+            setIsListening(false)
+            return
+        }
 
-        if (!isWeb) {
+        // Solicita permissão de microfone
+        const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
+        if (!result.granted) {
             Alert.alert(
-                'Ditado por Voz',
-                'Toque no campo de texto e use o microfone do teclado (ícone 🎙️) para ditar a mensagem.',
-                [{ text: 'OK', style: 'default' }]
+                'Permissão negada',
+                'O acesso ao microfone é necessário para o ditado por voz.\n\nVá em Configurações → Aplicativos → BioDash → Permissões → Microfone.'
             )
             return
         }
 
-        const SpeechRecognitionAPI =
-            (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-
-        if (!SpeechRecognitionAPI) {
-            Alert.alert(
-                'Não suportado',
-                'Reconhecimento de voz não está disponível neste browser. Use Google Chrome ou Microsoft Edge.'
-            )
-            return
-        }
-
-        // Atualiza estado ANTES de iniciar para feedback visual imediato
         setIsListening(true)
         setInputText('')
 
-        const recognition = new SpeechRecognitionAPI()
-        recognition.lang = 'pt-BR'
-        recognition.interimResults = false
-        recognition.maxAlternatives = 1
-        recognition.continuous = false
-
-        recognition.onresult = (event: any) => {
-            try {
-                const transcript = event.results[0][0].transcript
-                setIsListening(false)
-                sendMessage(transcript)
-            } catch (e) {
-                setIsListening(false)
-            }
-        }
-
-        recognition.onerror = (event: any) => {
-            setIsListening(false)
-            const errorMessages: Record<string, string> = {
-                'not-allowed': 'Permissão de microfone negada.\n\nClique no ícone de cadeado 🔒 na barra de endereço → Microfone → Permitir → Recarregue.',
-                'no-speech': 'Nenhuma fala detectada. Tente novamente mais perto do microfone.',
-                'network': 'Erro de rede no reconhecimento de voz.',
-                'audio-capture': 'Microfone não encontrado. Verifique se há um microfone conectado.',
-                'aborted': '',
-            }
-            const msg = errorMessages[event.error]
-            if (msg) Alert.alert('Microfone', msg)
-        }
-
-        recognition.onend = () => {
-            setIsListening(false)
-        }
-
-        try {
-            recognition.start()
-        } catch (e: any) {
-            setIsListening(false)
-            Alert.alert('Erro ao iniciar microfone', e?.message || String(e))
-        }
+        ExpoSpeechRecognitionModule.start({
+            lang: 'pt-BR',
+            interimResults: true,   // transcrição em tempo real
+            maxAlternatives: 1,
+            continuous: false,
+            volumeChangeEventOptions: { enabled: false },
+        })
     }
 
     // ─── Ações automáticas disparadas pelo chatbot ───────────────────────────
-    const handleChatAction = async (action: string | null | undefined) => {
+    const handleChatAction = async (action: string | null | undefined, indicatorsOverride?: any[]) => {
         if (!action) return
 
+        // Ações de início de fluxo conversacional
+        if (action === 'start_flow_manutencao') { setActiveFlow({ type: 'agendar_manutencao', step: 'nome', data: {} }); return }
+        if (action === 'start_flow_metrica') { setActiveFlow({ type: 'incluir_metrica', step: 'residuos', data: {} }); return }
+        if (action === 'start_flow_editar_metrica') { setActiveFlow({ type: 'editar_metrica', step: 'mes_ano', data: {} }); return }
+        if (action === 'start_flow_endereco') { setActiveFlow({ type: 'adicionar_endereco', step: 'nome', data: {} }); return }
+        if (action === 'start_flow_relatorio') { setActiveFlow({ type: 'relatorio_periodo', step: 'periodo_inicio', data: {} }); return }
+        if (action === 'cancel_flow') { setActiveFlow(null); return }
+
         try {
-            const indicators = cachedIndicators.current
+            const indicators = indicatorsOverride ?? cachedIndicators.current
             const months = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
             if (action === 'export_pdf') {
@@ -291,17 +427,227 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     }
 
     const buildCSVContent = (indicators: any[]) => {
-        let csv = '\uFEFFMétrica;Valor Total\n'
+        let csv = '\uFEFFMês;Resíduos Processados (kg);Energia Gerada (kWh);Benefícios Fiscais (R$)\n'
+        const sorted = [...indicators].sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime())
+        sorted.forEach((r: any) => {
+            const d = new Date(r.measured_at)
+            const period = `${MONTH_NAMES[d.getMonth()]}/${d.getFullYear()}`
+            csv += `${period};${Number(r.waste_processed||0).toFixed(2)};${Number(r.energy_generated||0).toFixed(2)};${Number(r.tax_savings||0).toFixed(2)}\n`
+        })
         const totals = indicators.reduce((acc, r) => ({
             waste: acc.waste + Number(r.waste_processed || 0),
             energy: acc.energy + Number(r.energy_generated || 0),
             tax: acc.tax + Number(r.tax_savings || 0),
         }), { waste: 0, energy: 0, tax: 0 })
-        csv += `Resíduos Processados (kg);${totals.waste.toFixed(2)}\n`
-        csv += `Energia Gerada (kWh);${totals.energy.toFixed(2)}\n`
-        csv += `Benefícios Fiscais (R$);${totals.tax.toFixed(2)}\n`
-        csv += `Total de Registros;${indicators.length}\n`
+        csv += `\nTOTAL;${totals.waste.toFixed(2)};${totals.energy.toFixed(2)};${totals.tax.toFixed(2)}\n`
+        csv += `Total de Registros;${indicators.length};;`
         return csv
+    }
+
+    // ─── Fluxos Conversacionais ──────────────────────────────────────────────
+
+    const processFlowStep = async (text: string) => {
+        if (!activeFlow) return
+        if (isCancel(text)) { setActiveFlow(null); addBotMessage('❌ Operação cancelada. Como posso ajudar?'); return }
+        switch (activeFlow.type) {
+            case 'agendar_manutencao': await processManutencaoStep(text); break
+            case 'incluir_metrica':    await processMetricaStep(text);    break
+            case 'editar_metrica':     await processEditarMetricaStep(text); break
+            case 'adicionar_endereco': await processEnderecoStep(text);   break
+            case 'relatorio_periodo':  await processRelatorioStep(text);  break
+        }
+    }
+
+    const processManutencaoStep = async (text: string) => {
+        const flow = activeFlow!; const data = { ...flow.data }
+        if (flow.step === 'nome') {
+            data.name = text.trim(); setActiveFlow({ ...flow, step: 'prioridade', data })
+            addBotMessage(`📋 Nome: *${data.name}*\n\nQual a **prioridade**?\n• alta (urgente)\n• média\n• baixa`); return
+        }
+        if (flow.step === 'prioridade') {
+            const p = parsePriority(text) || 'medium'; data.priority = p; setActiveFlow({ ...flow, step: 'data', data })
+            addBotMessage(`${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/2025 ou "25 de outubro de 2025")`); return
+        }
+        if (flow.step === 'data') {
+            let day = 1, month = new Date().getMonth(), year = new Date().getFullYear()
+            const dm = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
+            if (dm) {
+                day = parseInt(dm[1]); month = parseInt(dm[2]) - 1
+                if (dm[3]) { year = parseInt(dm[3]); if (year < 100) year += 2000 }
+            } else {
+                const m = parseMonth(text); const y = parseYear(text); const dayM = text.match(/\b(\d{1,2})\b/)
+                if (m !== null) month = m; if (y !== null) year = y
+                if (dayM) { const d = parseInt(dayM[1]); if (d >= 1 && d <= 31) day = d }
+            }
+            data.scheduledDate = new Date(year, month, day).toISOString()
+            data.dateLabel = `${padDate(day)}/${padDate(month+1)}/${year}`
+            setActiveFlow({ ...flow, step: 'confirmar', data })
+            addBotMessage(`✅ Pronto para confirmar:\n\n• Nome: *${data.name}*\n• Prioridade: *${PRIORITY_LABELS[data.priority]}*\n• Data: *${data.dateLabel}*\n\nResponda **sim** ou **não**.`); return
+        }
+        if (flow.step === 'confirmar') {
+            if (isConfirm(text)) {
+                try {
+                    await maintenanceApi.createSchedule({ name: data.name, priority: data.priority, scheduledDate: data.scheduledDate })
+                    setActiveFlow(null); dataLoaded.current = false
+                    addBotMessage(`✅ Manutenção *"${data.name}"* agendada para *${data.dateLabel}*!\n\nVisível na aba Manutenção do Dashboard.`)
+                } catch { addBotMessage('❌ Erro ao agendar. Tente novamente.'); setActiveFlow(null) }
+            } else { setActiveFlow(null); addBotMessage('❌ Agendamento cancelado.') }
+        }
+    }
+
+    const processMetricaStep = async (text: string) => {
+        const flow = activeFlow!; const data = { ...flow.data }
+        if (flow.step === 'residuos') {
+            const v = parseNumber(text)
+            if (v === null) { addBotMessage('⚠️ Informe o valor em kg. (ex: 150 ou 150 kg)'); return }
+            data.wasteProcessed = v; setActiveFlow({ ...flow, step: 'energia', data })
+            addBotMessage(`♻️ Resíduos: *${v} kg*\n\nQual a **energia gerada** em kWh?`); return
+        }
+        if (flow.step === 'energia') {
+            const v = parseNumber(text)
+            if (v === null) { addBotMessage('⚠️ Informe o valor em kWh. (ex: 92.5)'); return }
+            data.energyGenerated = v; setActiveFlow({ ...flow, step: 'economia', data })
+            addBotMessage(`⚡ Energia: *${v} kWh*\n\nQual o valor de **benefícios fiscais** em R$?`); return
+        }
+        if (flow.step === 'economia') {
+            const v = parseNumber(text)
+            if (v === null) { addBotMessage('⚠️ Informe o valor em reais. (ex: 340)'); return }
+            data.taxSavings = v; setActiveFlow({ ...flow, step: 'mes', data })
+            addBotMessage(`💰 Benefícios: *R$ ${v}*\n\nA qual **mês** se referem? (ex: outubro ou 10)`); return
+        }
+        if (flow.step === 'mes') {
+            const m = parseMonth(text)
+            if (m === null) { addBotMessage('⚠️ Informe o mês por nome ou número. (ex: outubro ou 10)'); return }
+            data.month = m; setActiveFlow({ ...flow, step: 'ano', data })
+            addBotMessage(`📅 Mês: *${MONTH_NAMES[m]}*\n\nE o **ano**? (ex: 2025)`); return
+        }
+        if (flow.step === 'ano') {
+            const y = parseYear(text) ?? new Date().getFullYear(); data.year = y
+            setActiveFlow({ ...flow, step: 'confirmar', data })
+            addBotMessage(`Confirmar registro?\n\n• Resíduos: *${data.wasteProcessed} kg*\n• Energia: *${data.energyGenerated} kWh*\n• Benefícios: *R$ ${data.taxSavings}*\n• Período: *${MONTH_NAMES[data.month]} / ${data.year}*\n\nResponda **sim** ou **não**.`); return
+        }
+        if (flow.step === 'confirmar') {
+            if (isConfirm(text)) {
+                try {
+                    await indicatorsApi.save({ wasteProcessed: data.wasteProcessed, energyGenerated: data.energyGenerated, taxSavings: data.taxSavings, month: String(data.month), year: String(data.year) })
+                    dataLoaded.current = false; await loadUserData(); setActiveFlow(null)
+                    addBotMessage(`✅ Métricas de *${MONTH_NAMES[data.month]}/${data.year}* registradas com sucesso!`)
+                } catch { addBotMessage('❌ Erro ao salvar. Tente novamente.'); setActiveFlow(null) }
+            } else { setActiveFlow(null); addBotMessage('❌ Registro cancelado.') }
+        }
+    }
+
+    const processEditarMetricaStep = async (text: string) => {
+        const flow = activeFlow!; const data = { ...flow.data }
+        if (flow.step === 'mes_ano') {
+            const m = parseMonth(text); const y = parseYear(text) ?? new Date().getFullYear()
+            if (m === null) { addBotMessage('⚠️ Informe mês e ano. (ex: outubro 2025)'); return }
+            data.month = m; data.year = y
+            const ex = cachedIndicators.current.find((ind: any) => { const d = new Date(ind.measured_at); return d.getMonth() === m && d.getFullYear() === y })
+            if (ex) { data.wasteProcessed = ex.waste_processed || 0; data.energyGenerated = ex.energy_generated || 0; data.taxSavings = ex.tax_savings || 0 }
+            setActiveFlow({ ...flow, step: 'residuos', data })
+            const note = ex ? `\n\nAtual: *${data.wasteProcessed} kg* — informe o novo valor` : ''
+            addBotMessage(`✏️ Editando *${MONTH_NAMES[m]} ${y}*${note}\n\nNovo valor de **resíduos processados** em kg?`); return
+        }
+        if (flow.step === 'residuos') {
+            const v = parseNumber(text); if (v === null) { addBotMessage('⚠️ Informe em kg.'); return }
+            data.wasteProcessed = v; setActiveFlow({ ...flow, step: 'energia', data })
+            addBotMessage(`♻️ *${v} kg*\n\nNovo valor de **energia gerada** em kWh?`); return
+        }
+        if (flow.step === 'energia') {
+            const v = parseNumber(text); if (v === null) { addBotMessage('⚠️ Informe em kWh.'); return }
+            data.energyGenerated = v; setActiveFlow({ ...flow, step: 'economia', data })
+            addBotMessage(`⚡ *${v} kWh*\n\nNovo valor de **benefícios fiscais** em R$?`); return
+        }
+        if (flow.step === 'economia') {
+            const v = parseNumber(text); if (v === null) { addBotMessage('⚠️ Informe em reais.'); return }
+            data.taxSavings = v; setActiveFlow({ ...flow, step: 'confirmar', data })
+            addBotMessage(`Confirmar edição de *${MONTH_NAMES[data.month]}/${data.year}*?\n\n• Resíduos: *${data.wasteProcessed} kg*\n• Energia: *${data.energyGenerated} kWh*\n• Benefícios: *R$ ${data.taxSavings}*\n\nResponda **sim** ou **não**.`); return
+        }
+        if (flow.step === 'confirmar') {
+            if (isConfirm(text)) {
+                try {
+                    await indicatorsApi.save({ wasteProcessed: data.wasteProcessed, energyGenerated: data.energyGenerated, taxSavings: data.taxSavings, month: String(data.month), year: String(data.year) })
+                    dataLoaded.current = false; await loadUserData(); setActiveFlow(null)
+                    addBotMessage(`✅ Métricas de *${MONTH_NAMES[data.month]}/${data.year}* atualizadas!`)
+                } catch { addBotMessage('❌ Erro ao atualizar.'); setActiveFlow(null) }
+            } else { setActiveFlow(null); addBotMessage('❌ Edição cancelada.') }
+        }
+    }
+
+    const processEnderecoStep = async (text: string) => {
+        const flow = activeFlow!; const data = { ...flow.data }
+        if (flow.step === 'nome') {
+            data.title = text.trim(); setActiveFlow({ ...flow, step: 'cep', data })
+            addBotMessage(`📍 Nome: *${data.title}*\n\nQual o **CEP**? (ex: 01310-100 ou 01310100)`); return
+        }
+        if (flow.step === 'cep') {
+            const cep = text.replace(/\D/g, '')
+            if (cep.length !== 8) { addBotMessage('⚠️ CEP inválido. Informe 8 dígitos. (ex: 01310100)'); return }
+            addBotMessage('🔍 Buscando endereço pelo CEP...')
+            try {
+                const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`)
+                const addr = await res.json()
+                if (addr.erro) { addBotMessage('⚠️ CEP não encontrado. Verifique e tente novamente.'); return }
+                data.cep = cep; data.street = addr.logradouro || ''; data.city = addr.localidade || ''; data.state = addr.uf || ''; data.complement = addr.complemento || ''
+                setActiveFlow({ ...flow, step: 'numero', data })
+                addBotMessage(`✅ Endereço:\n• Rua: *${data.street || 'Não informado'}*\n• Cidade: *${data.city} - ${data.state}*\n\nQual o **número**? (ex: 123 ou S/N)`)
+            } catch { addBotMessage('❌ Erro ao buscar o CEP. Verifique sua conexão.') }
+            return
+        }
+        if (flow.step === 'numero') {
+            data.number = text.trim(); setActiveFlow({ ...flow, step: 'confirmar', data })
+            addBotMessage(`Confirmar cadastro?\n\n• Nome: *${data.title}*\n• Endereço: *${data.street}, ${data.number}*\n• CEP: *${data.cep}*\n• Cidade: *${data.city} - ${data.state}*\n\n⚠️ A posição no mapa será geolocalizada e pode ser ajustada depois.\n\nResponda **sim** ou **não**.`); return
+        }
+        if (flow.step === 'confirmar') {
+            if (isConfirm(text)) {
+                try {
+                    let lat = -14.235, lng = -51.925
+                    try {
+                        const q = encodeURIComponent(`${data.street}, ${data.number}, ${data.city}, ${data.state}, Brasil`)
+                        const gr = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, { headers: { 'User-Agent': 'BioDashApp/1.0' } })
+                        const gd = await gr.json()
+                        if (gd.length > 0) { lat = parseFloat(gd[0].lat); lng = parseFloat(gd[0].lon) }
+                    } catch {}
+                    await markersApi.save({ title: data.title, latitude: lat, longitude: lng, description: `${data.street}, ${data.number} - ${data.city}/${data.state} - CEP: ${data.cep}`, address: { street: data.street, number: data.number, cep: data.cep, city: data.city, state: data.state, complement: data.complement } })
+                    dataLoaded.current = false; setActiveFlow(null)
+                    addBotMessage(`✅ Biodigestor *"${data.title}"* cadastrado! Ele aparecerá no mapa — ajuste o pin se necessário.`)
+                } catch { addBotMessage('❌ Erro ao cadastrar. Tente novamente.'); setActiveFlow(null) }
+            } else { setActiveFlow(null); addBotMessage('❌ Cadastro cancelado.') }
+        }
+    }
+
+    const processRelatorioStep = async (text: string) => {
+        const flow = activeFlow!; const data = { ...flow.data }
+        if (flow.step === 'periodo_inicio') {
+            const m = parseMonth(text); const y = parseYear(text) ?? new Date().getFullYear()
+            if (m === null) { addBotMessage('⚠️ Não entendi. Ex: "janeiro 2025" ou "01/2025"'); return }
+            data.startMonth = m; data.startYear = y; setActiveFlow({ ...flow, step: 'periodo_fim', data })
+            addBotMessage(`📅 Início: *${MONTH_NAMES[m]} ${y}*\n\nAgora o **mês e ano final**? (ex: junho 2025)`); return
+        }
+        if (flow.step === 'periodo_fim') {
+            const m = parseMonth(text); const y = parseYear(text) ?? new Date().getFullYear()
+            if (m === null) { addBotMessage('⚠️ Não entendi. Ex: "junho 2025"'); return }
+            data.endMonth = m; data.endYear = y; setActiveFlow({ ...flow, step: 'formato', data })
+            addBotMessage(`📅 Fim: *${MONTH_NAMES[m]} ${y}*\n\nQual o **formato**?\n• PDF\n• CSV\n• Excel`); return
+        }
+        if (flow.step === 'formato') {
+            const lower = text.toLowerCase()
+            let fmt = 'pdf'
+            if (lower.includes('csv')) fmt = 'csv'
+            else if (lower.includes('excel') || lower.includes('xlsx')) fmt = 'excel'
+            const filtered = cachedIndicators.current.filter((ind: any) => {
+                const d = new Date(ind.measured_at); const im = d.getMonth(); const iy = d.getFullYear()
+                return (iy > data.startYear || (iy === data.startYear && im >= data.startMonth)) &&
+                       (iy < data.endYear   || (iy === data.endYear   && im <= data.endMonth))
+            })
+            setActiveFlow(null)
+            if (filtered.length === 0) {
+                addBotMessage(`⚠️ Nenhum dado para *${MONTH_NAMES[data.startMonth]}/${data.startYear}* a *${MONTH_NAMES[data.endMonth]}/${data.endYear}*.`); return
+            }
+            addBotMessage(`📊 Gerando *${fmt.toUpperCase()}* de *${MONTH_NAMES[data.startMonth]}/${data.startYear}* a *${MONTH_NAMES[data.endMonth]}/${data.endYear}* (${filtered.length} registro(s))...`)
+            await handleChatAction(`export_${fmt}`, filtered)
+        }
     }
 
     // ─── Enviar mensagem para o chatbot ─────────────────────────────────────
@@ -309,6 +655,18 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         const messageText = (text || inputText).trim()
         if (!messageText) return
         Keyboard.dismiss()
+
+        // Se há um fluxo ativo, a mensagem alimenta o wizard (não vai ao chatbot)
+        if (activeFlow) {
+            const userMsg: Message = { id: Date.now().toString(), role: 'user', text: messageText, timestamp: new Date() }
+            setMessages(prev => [...prev, userMsg])
+            setInputText('')
+            setIsLoading(true)
+            scrollToBottom()
+            await processFlowStep(messageText)
+            setIsLoading(false)
+            return
+        }
 
         const userMsg: Message = {
             id: Date.now().toString(),
@@ -446,6 +804,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         { label: '⚡ Energia', text: 'Quanta energia foi gerada?' },
         { label: '♻️ Resíduos', text: 'Quantos resíduos foram processados?' },
         { label: '📊 Métricas', text: 'Quais são as métricas do biodigestor?' },
+        { label: '🔧 Manutenção', text: 'Agendar manutenção' },
+        { label: '📈 Registrar', text: 'Adicionar métricas' },
+        { label: '📍 Novo BD', text: 'Adicionar biodigestor' },
+        { label: '📅 Por Período', text: 'Relatório por período' },
         { label: '📄 PDF', text: 'Gera um relatório em PDF' },
         { label: '📋 Excel', text: 'Exportar Excel' },
     ]
@@ -599,7 +961,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         multiline
                         maxLength={500}
                         onSubmitEditing={() => sendMessage()}
-                        editable={!isListening}
+                        editable={true}
                         id="chatbot-message-input"
                     />
 
