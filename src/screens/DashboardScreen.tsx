@@ -389,6 +389,10 @@ export default function DashboardScreen() {
     const [monthPickerVisible, setMonthPickerVisible] = useState(false)
     const [yearPickerVisible, setYearPickerVisible] = useState(false)
     const [referenceDate, setReferenceDate] = useState<string>('')
+    // Seleção manual do mês exibido nos cards. null = mês mais recente.
+    const [showMonthPicker, setShowMonthPicker] = useState(false)
+    const [selectedMonth, setSelectedMonth] = useState<{ month: number; year: number } | null>(null)
+    const [availableMonths, setAvailableMonths] = useState<{ month: number; year: number; label: string }[]>([])
     const [selectedChartIndex, setSelectedChartIndex] = useState<number | null>(null)
     const [alertsEnabled, setAlertsEnabled] = useState(true)
 
@@ -575,6 +579,16 @@ export default function DashboardScreen() {
         return () => clearInterval(interval)
     }, [])
 
+    // Recarrega os cards quando o usuário troca o mês no seletor.
+    const isFirstMonthRender = useRef(true)
+    useEffect(() => {
+        if (isFirstMonthRender.current) {
+            isFirstMonthRender.current = false
+            return
+        }
+        loadDashboardData()
+    }, [selectedMonth])
+
     const loadPreferences = async () => {
         try {
             const saved = await AsyncStorage.getItem('@biodash_alerts_enabled');
@@ -681,8 +695,32 @@ export default function DashboardScreen() {
             const lastEditedStr = await AsyncStorage.getItem('@biodash_last_edited');
             let lastEdited = lastEditedStr ? JSON.parse(lastEditedStr) : null;
 
+            // Lista de meses disponíveis para o seletor (ordem decrescente).
+            const monthOpts = allRows
+                .map((r: any) => new Date(r.measured_at))
+                .filter((d: Date) => !isNaN(d.getTime()))
+                .map((d: Date) => ({
+                    month: d.getMonth(),
+                    year: d.getFullYear(),
+                    label: `${months[d.getMonth()].label} de ${d.getFullYear()}`,
+                }));
+            const seen = new Set<string>();
+            setAvailableMonths(monthOpts.filter((o) => {
+                const k = `${o.year}-${o.month}`;
+                if (seen.has(k)) return false;
+                seen.add(k);
+                return true;
+            }));
+
             let current: any = undefined;
-            if (lastEdited && allRows.length > 0) {
+            // A escolha manual do usuário tem prioridade sobre o último mês editado.
+            if (selectedMonth && allRows.length > 0) {
+                current = allRows.find((r: any) => {
+                    const d = new Date(r.measured_at);
+                    return d.getMonth() === selectedMonth.month && d.getFullYear() === selectedMonth.year;
+                });
+            }
+            if (!current && lastEdited && allRows.length > 0) {
                 current = allRows.find((r: any) => {
                     const d = new Date(r.measured_at);
                     return d.getMonth() === lastEdited.month && d.getFullYear() === lastEdited.year;
@@ -832,6 +870,33 @@ export default function DashboardScreen() {
         }
     };
 
+    // Série histórica mês a mês para os relatórios exportados.
+    // Mantém a evolução dos indicadores, que o resumo totalizado não mostra.
+    const processExportHistory = (data: any[]) => {
+        if (data.length === 0) return [];
+
+        const byMonth = new Map<string, { date: Date; w: number; e: number; t: number }>();
+        for (const r of data) {
+            const d = new Date(r.measured_at ?? r.created_at);
+            if (isNaN(d.getTime())) continue;
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const acc = byMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), w: 0, e: 0, t: 0 };
+            acc.w += Number(r.waste_processed ?? 0);
+            acc.e += Number(r.energy_generated ?? 0);
+            acc.t += Number(r.tax_savings ?? 0);
+            byMonth.set(key, acc);
+        }
+
+        return Array.from(byMonth.values())
+            .sort((a, b) => a.date.getTime() - b.date.getTime())
+            .map((m) => ({
+                mes: m.date.toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric' }),
+                energia: m.e.toFixed(2),
+                residuos: m.w.toFixed(2),
+                economia: m.t.toFixed(2),
+            }));
+    };
+
     const processExportMetrics = (data: any[]) => {
         if (data.length === 0) {
             return [
@@ -888,19 +953,53 @@ export default function DashboardScreen() {
                 </tr>
             `).join('');
 
+            const history = processExportHistory(data);
+            const historyHTML = history.length === 0 ? '' : `
+                <div class="section" style="break-before:page;page-break-before:always;padding-top:8px;">
+                <h2 style="color:#1f2937;margin-bottom:8px;">Evolução Mensal dos Indicadores</h2>
+                <p style="margin:0 0 16px;color:#64748b;font-size:12px;">Série histórica que permite acompanhar a tendência ao longo do período.</p>
+                <table style="width:100%;border-collapse:collapse;margin-bottom:40px;">
+                    <thead><tr style="background-color:#f0fdf4;">
+                        <th style="padding:12px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Mês</th>
+                        <th style="padding:12px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Energia (kWh)</th>
+                        <th style="padding:12px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Resíduos (kg)</th>
+                        <th style="padding:12px;text-align:center;color:#16a34a;border-bottom:2px solid #16a34a;">Benefícios (R$)</th>
+                    </tr></thead>
+                    <tbody>${history.map(h => `
+                        <tr style="text-align:center;border-bottom:1px solid #ddd;">
+                            <td style="padding:10px;font-weight:bold;color:#1f2937;">${h.mes}</td>
+                            <td style="padding:10px;color:#eab308;">${h.energia}</td>
+                            <td style="padding:10px;color:#16a34a;">${h.residuos}</td>
+                            <td style="padding:10px;color:#3b82f6;">${h.economia}</td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>
+                </div>`;
+
             const html = `
             <!DOCTYPE html>
             <html>
                 <head><meta charset="utf-8"><title>BioDash - Relatório</title>
-                <style>body{font-family:Arial,sans-serif;margin:0;padding:0;color:#333;}
-                @media print{.no-print{display:none}}</style></head>
+                <style>
+                body{font-family:Arial,sans-serif;margin:0;padding:0;color:#333;}
+                /* Preserva as cores de fundo na impressão (senão o cabeçalho sai branco). */
+                *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+                /* Mantém cada seção inteira na mesma página. */
+                .section{break-inside:avoid;page-break-inside:avoid;}
+                table{break-inside:auto;}
+                tr{break-inside:avoid;page-break-inside:avoid;}
+                thead{display:table-header-group;}
+                h2{break-after:avoid;page-break-after:avoid;}
+                @media print{.no-print{display:none}}
+                </style></head>
                 <body>
-                    <div style="background-color:#16a34a;padding:40px 30px;color:white;">
-                        <h1 style="margin:0;font-size:28px;">BioDash - Relatório Analítico</h1>
-                        <p style="margin-top:8px;opacity:0.9;">Período: ${periodLabel}</p>
-                        <p style="margin-top:4px;opacity:0.8;font-size:12px;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+                    <div style="background:#16a34a;padding:36px 30px;color:#ffffff;">
+                        <h1 style="margin:0;font-size:26px;color:#ffffff;font-weight:bold;">BioDash - Relatório Analítico</h1>
+                        <p style="margin:10px 0 0;color:#ffffff;font-size:14px;">Período: ${periodLabel}</p>
+                        <p style="margin:4px 0 0;color:#e8f5e9;font-size:12px;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
                     </div>
                     <div style="padding:30px;">
+                        <div class="section">
                         <h2 style="color:#1f2937;margin-bottom:20px;">Resumo de Desempenho</h2>
                         <table style="width:100%;border-collapse:collapse;margin-bottom:40px;">
                             <thead><tr style="background-color:#f0fdf4;">
@@ -910,7 +1009,9 @@ export default function DashboardScreen() {
                             </tr></thead>
                             <tbody>${rowsHTML}</tbody>
                         </table>
-                        ${chartImageURI ? `<h2>Tendências do Período</h2><img src="${chartImageURI.startsWith('data:') ? chartImageURI : 'data:image/png;base64,' + chartImageURI}" style="width:100%;max-width:600px;" />` : ''}
+                        </div>
+                        ${historyHTML}
+                        ${chartImageURI ? `<div class="section" style="margin-top:24px;"><h2 style="color:#1f2937;margin-bottom:12px;">Tendências do Período</h2><img src="${chartImageURI.startsWith('data:') ? chartImageURI : 'data:image/png;base64,' + chartImageURI}" style="width:100%;max-width:600px;" /></div>` : ''}
                         <p style="margin-top:60px;font-size:11px;color:#94a3b8;text-align:center;">BioDash Intelligence Systems © ${new Date().getFullYear()}</p>
                     </div>
                 </body>
@@ -960,6 +1061,16 @@ export default function DashboardScreen() {
                 csvContent += `${row[0]};${row[1].replace('R$ ', '').replace('kg', '').replace('kWh', '')}\n`;
             });
 
+            // Série histórica: uma linha por mês, para permitir análise de tendência.
+            const history = processExportHistory(data);
+            if (history.length > 0) {
+                csvContent += `\nEvolucao Mensal dos Indicadores\n`;
+                csvContent += "Mes;Energia (kWh);Residuos (kg);Beneficios (R$)\n";
+                history.forEach(h => {
+                    csvContent += `${h.mes};${h.energia};${h.residuos};${h.economia}\n`;
+                });
+            }
+
             const fileName = `biodash_${periodLabel.replace(/[\s\/]/g, '_')}.csv`;
 
             if (Platform.OS === 'web') {
@@ -992,6 +1103,16 @@ export default function DashboardScreen() {
             metrics.forEach(row => {
                 csvContent += `${row[0]};${row[1].replace('R$ ', '').replace('kg', '').replace('kWh', '')};${row[2]}\n`;
             });
+
+            // S\u00E9rie hist\u00F3rica: uma linha por m\u00EAs, para permitir an\u00E1lise de tend\u00EAncia.
+            const history = processExportHistory(data);
+            if (history.length > 0) {
+                csvContent += `\nEvolucao Mensal dos Indicadores\n`;
+                csvContent += "Mes;Energia (kWh);Residuos (kg);Beneficios (R$)\n";
+                history.forEach(h => {
+                    csvContent += `${h.mes};${h.energia};${h.residuos};${h.economia}\n`;
+                });
+            }
 
             const fileName = `biodash_raw_${periodLabel.replace(/[\s\/]/g, '_')}.csv`;
 
@@ -1077,12 +1198,21 @@ export default function DashboardScreen() {
                     </View>
 
                     {referenceDate ? (
-                        <View style={{ marginBottom: 12, paddingHorizontal: 4 }}>
-                            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13, flexDirection: 'row', alignItems: 'center' }}>
-                                <MaterialCommunityIcons name="calendar-month" size={14} color={colors.primary} style={{ marginRight: 4 }} />
+                        <TouchableOpacity
+                            onPress={() => setShowMonthPicker(true)}
+                            activeOpacity={0.7}
+                            style={{
+                                marginBottom: 12, paddingHorizontal: 10, paddingVertical: 8,
+                                flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
+                                borderRadius: 8, borderWidth: 1, borderColor: colors.primary,
+                            }}
+                        >
+                            <MaterialCommunityIcons name="calendar-month" size={14} color={colors.primary} />
+                            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13, marginLeft: 6 }}>
                                 Dados referentes a {referenceDate}
                             </Text>
-                        </View>
+                            <MaterialCommunityIcons name="chevron-down" size={18} color={colors.primary} style={{ marginLeft: 4 }} />
+                        </TouchableOpacity>
                     ) : null}
 
                     <View style={styles.grid}>
@@ -2215,6 +2345,68 @@ export default function DashboardScreen() {
             </Modal >
 
             {/* Action Menu (Long Press) */}
+            {/* Seleção do mês exibido nos cards do dashboard */}
+            <Modal
+                visible={showMonthPicker}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => setShowMonthPicker(false)}
+            >
+                <TouchableOpacity
+                    style={[styles.modalOverlay, { justifyContent: 'center' }]}
+                    activeOpacity={1}
+                    onPress={() => setShowMonthPicker(false)}
+                >
+                    <View
+                        style={{ backgroundColor: colors.cardBackground, width: '85%', maxHeight: '70%', borderRadius: 16, overflow: 'hidden', alignSelf: 'center' }}
+                        onStartShouldSetResponder={() => true}
+                    >
+                        <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}>
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }}>Selecionar Período</Text>
+                            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>Escolha o mês exibido nos indicadores</Text>
+                        </View>
+
+                        <ScrollView>
+                            <TouchableOpacity
+                                style={{ paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
+                                onPress={() => { setSelectedMonth(null); setShowMonthPicker(false); }}
+                            >
+                                <MaterialCommunityIcons
+                                    name={selectedMonth === null ? 'radiobox-marked' : 'radiobox-blank'}
+                                    size={20}
+                                    color={selectedMonth === null ? colors.primary : colors.textMuted}
+                                    style={{ marginRight: 12 }}
+                                />
+                                <Text style={{ fontSize: 15, color: selectedMonth === null ? colors.primary : colors.text, fontWeight: selectedMonth === null ? 'bold' : 'normal' }}>
+                                    Mês mais recente
+                                </Text>
+                            </TouchableOpacity>
+
+                            {availableMonths.map((opt) => {
+                                const isSel = selectedMonth?.month === opt.month && selectedMonth?.year === opt.year;
+                                return (
+                                    <TouchableOpacity
+                                        key={`${opt.year}-${opt.month}`}
+                                        style={{ paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
+                                        onPress={() => { setSelectedMonth({ month: opt.month, year: opt.year }); setShowMonthPicker(false); }}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name={isSel ? 'radiobox-marked' : 'radiobox-blank'}
+                                            size={20}
+                                            color={isSel ? colors.primary : colors.textMuted}
+                                            style={{ marginRight: 12 }}
+                                        />
+                                        <Text style={{ fontSize: 15, color: isSel ? colors.primary : colors.text, fontWeight: isSel ? 'bold' : 'normal' }}>
+                                            {opt.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
             <Modal
                 visible={actionModalVisible}
                 animationType="fade"
