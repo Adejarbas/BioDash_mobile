@@ -202,3 +202,14 @@ export const semanticSearchApi = {
       body: JSON.stringify(data),
     }),
 };
+
+// ==========================================
+// biodigestoresApi — Busca diretamente do Supabase via AI Service
+// Permite ao chatbot consultar endereços sem depender do payload do frontend
+// ==========================================
+export const biodigestoresApi = {
+  fetch: (userId: string) =>
+    apiRequest(`${AI_SERVICE_URL}/biodigestores?user_id=${encodeURIComponent(userId)}`, {
+      method: "GET",
+    }),
+};

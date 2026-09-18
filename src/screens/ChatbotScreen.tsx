@@ -31,8 +31,9 @@ import {
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '../context/ThemeContext'
-import { chatbotApi, semanticSearchApi } from '../lib/api'
+import { chatbotApi, semanticSearchApi, biodigestoresApi } from '../lib/api'
 import { indicatorsApi, markersApi, maintenanceApi } from '../lib/api'
+import { authLib } from '../lib/auth'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
@@ -158,16 +159,19 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const loadUserData = useCallback(async () => {
         if (dataLoaded.current) return
         try {
-            const [markersRes, indicatorsRes] = await Promise.all([
-                markersApi.fetch(),
+            const [indicatorsRes] = await Promise.all([
                 indicatorsApi.fetch(),
             ])
-            if (markersRes.success && markersRes.data) {
-                cachedMarkers.current = markersRes.data
-            }
             if (indicatorsRes.success && indicatorsRes.data) {
                 cachedIndicators.current = indicatorsRes.data
             }
+
+            // Busca biodigestores via backend Express (agora usa o Postgres diretamente sem restrições do Supabase)
+            const markersRes = await markersApi.fetch()
+            if (markersRes.success && markersRes.data) {
+                cachedMarkers.current = markersRes.data
+            }
+
             dataLoaded.current = true
         } catch (e) {
             console.warn('Erro ao carregar dados do chatbot:', e)
