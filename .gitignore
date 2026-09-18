@@ -39,3 +39,7 @@ yarn-error.*
 
 # Ignore temporary web references for AI
 _referencias_web/
+
+# Backups locais de env (contem credenciais) e dumps temporarios
+*.bak
+git_status.txt
