@@ -39,3 +39,9 @@ yarn-error.*
 
 # Ignore temporary web references for AI
 _referencias_web/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
