@@ -168,8 +168,30 @@ TRAINING_DATA = [
     ("duvida_operacional", "qual a temperatura ideal de operação do biodigestor"),
     ("duvida_operacional", "temperatura de operação da biomassa"),
     ("duvida_operacional", "temperatura recomendada"),
+    ("duvida_operacional", "e se esfriar demais"),
+    ("duvida_operacional", "e se a temperatura cair"),
+    ("duvida_operacional", "o que acontece se esfriar"),
+    ("duvida_operacional", "e se esfriar o biodigestor"),
+    ("duvida_operacional", "biodigestor esfriou"),
+    ("duvida_operacional", "queda de temperatura na biomassa"),
+    ("duvida_operacional", "e se esquentar muito"),
+    ("duvida_operacional", "e se a temperatura subir"),
+    ("duvida_operacional", "e se passar de 40 graus"),
+    ("duvida_operacional", "superaquecimento no biodigestor"),
+    ("duvida_operacional", "choque térmico no biodigestor"),
+    ("duvida_operacional", "e se o ph cair"),
+    ("duvida_operacional", "e se o ph subir"),
+    ("duvida_operacional", "e se acidificar o biodigestor"),
+    ("duvida_operacional", "o que fazer se o ph baixar"),
+    ("duvida_operacional", "e se a pressão subir"),
+    ("duvida_operacional", "e se a pressão cair"),
+    ("duvida_operacional", "e se a pressão passar do limite"),
     ("duvida_operacional", "o biodigestor está com cheiro forte"),
     ("duvida_operacional", "vazamento de biogás"),
+    ("duvida_operacional", "e se o h2s subir"),
+    ("duvida_operacional", "e se o filtro de gas saturar"),
+    ("duvida_operacional", "e se passar do limite"),
+    ("duvida_operacional", "e se sair da faixa ideal"),
     ("duvida_operacional", "como alimentar a biomassa"),
     ("duvida_operacional", "como alimentar a biomassa no biodigestor"),
     ("duvida_operacional", "alimentação de resíduos no biodigestor"),
@@ -422,6 +444,7 @@ class ChatMessage(BaseModel):
 class ContextState(BaseModel):
     last_intent: Optional[str] = None
     last_topic: Optional[str] = None  # "energia" | "residuos" | "operacao" | "manutencao" | "endereco"
+    last_operational_topic: Optional[str] = None  # "temperatura" | "ph" | "h2s" | "pressao" | "alimentacao" | "seguranca"
     last_question_type: Optional[QuestionType] = None
     selected_biodigestor: Optional[str] = None
     period: Optional[str] = None
@@ -497,14 +520,19 @@ def extract_entities(text: str) -> Dict[str, Any]:
 
     # ─── Tópicos Operacionais ────────────────────────────────────────────────
     if any(w in normalized for w in ['h2s', 'sulfidrico', 'gas sulfidrico']):
+    if any(w in normalized for w in ['h2s', 'sulfidrico', 'gas sulfidrico', 'dessulfurizacao', 'cheiro de ovo']):
         entities['operational_topic'] = 'h2s'
     elif any(w in normalized for w in ['pressao', 'sobrepressao', 'valvula']):
+    elif any(w in normalized for w in ['pressao', 'sobrepressao', 'valvula', 'despressurizacao', 'gasometro', 'estufar', 'alivio']):
         entities['operational_topic'] = 'pressao'
     elif any(w in normalized for w in ['temperatura', 'calor', 'graus', 'termica']):
+    elif any(w in normalized for w in ['temperatura', 'calor', 'graus', 'termica', 'termico', 'esfriar', 'esfria', 'esfriou', 'esfriamento', 'esquentar', 'esquenta', 'aquecer', 'aquecimento', 'congelar', 'resfriar', 'resfriamento', 'choque termico']):
         entities['operational_topic'] = 'temperatura'
     elif any(w in normalized for w in ['ph', 'acidez', 'acidificacao', 'alcalinidade']):
+    elif any(w in normalized for w in ['ph', 'acidez', 'acidificacao', 'alcalinidade', 'acido', 'acidificar', 'acidose', 'alcalino', 'alcalinizacao', 'amonia']):
         entities['operational_topic'] = 'ph'
     elif any(w in normalized for w in ['alimentacao', 'biomassa', 'carga organica']):
+    elif any(w in normalized for w in ['alimentacao', 'biomassa', 'carga organica', 'alimentar', 'sobrecarga', 'substrato', 'esterco', 'dejeto']):
         entities['operational_topic'] = 'alimentacao'
     elif any(w in normalized for w in ['seguranca', 'vazamento', 'cheiro', 'odor', 'emergencia']):
         entities['operational_topic'] = 'seguranca'
@@ -772,10 +800,39 @@ def chatbot_endpoint(req: ChatRequest):
     # ─── Análise de Contexto Multi-Turn (perguntas elípticas ou de continuidade) ───
     # Ex: "e os resíduos?", "e a energia?", "e no mês passado?", "como resolvo isso?"
     is_elliptical = bool(re.search(r'\b(e\s+os?|e\s+as?|e\s+quanto|e\s+no|e\s+na|como\s+resolvo|como\s+proceder|o\s+que\s+faco|disso|dele)\b', normalized))
+    # Ex: "e os resíduos?", "e a energia?", "e no mês passado?", "como resolvo isso?", "e se esfriar demais?"
+    is_elliptical = bool(re.search(
+        r'\b(e\s+se|e\s+os?|e\s+as?|e\s+quanto|e\s+no|e\s+na|como\s+resolvo|como\s+proceder|o\s+que\s+faco|o\s+que\s+acontece|o\s+que\s+ocorre|se\s+esfriar|se\s+esquentar|se\s+subir|se\s+cair|disso|dele|dela|nisso)\b',
+        normalized
+    ))
 
     if is_elliptical or confidence < CONFIDENCE_THRESHOLD:
+        is_op_context = (
+            context.last_intent == "duvida_operacional"
+            or context.last_topic == "operacao"
+            or bool(context.last_operational_topic)
+        )
+        op_followup_terms = [
+            'esfriar', 'esfria', 'esfriou', 'esfriamento', 'esquentar', 'esquenta', 'esquentou',
+            'aquecer', 'aquecimento', 'subir', 'sobe', 'cair', 'cai', 'descer', 'aumentar', 'diminuir',
+            'passar', 'limite', 'faixa', 'choque', 'travar', 'vazar', 'cheiro', 'acido',
+            'acidificar', 'alcalino', 'amonia', 'pressao', 'h2s', 'temperatura', 'ph',
+            'resolver', 'proceder', 'ajuda', 'fazer'
+        ]
+
+        # Se for dúvida/continuação operacional vinculada ao contexto anterior
+        if is_op_context and (is_elliptical or any(w in normalized for w in op_followup_terms)):
+            intent = "duvida_operacional"
+            confidence = max(confidence, 0.88)
+            if not entities.get('operational_topic'):
+                entities['operational_topic'] = (
+                    context.last_operational_topic
+                    or (context.last_topic if context.last_topic != "operacao" else "operacao_geral")
+                )
+
         # Se for pergunta sobre resíduos em continuidade
         if any(w in normalized for w in ['residuo', 'residuos', 'lixo', 'biomassa']):
+        elif any(w in normalized for w in ['residuo', 'residuos', 'lixo', 'biomassa']):
             if 'alimentacao' not in entities.get('operational_topic', ''):
                 intent = "pedido_residuos"
                 confidence = max(confidence, 0.85)
@@ -796,12 +853,16 @@ def chatbot_endpoint(req: ChatRequest):
             confidence = max(confidence, 0.85)
             if not entities.get('operational_topic') and context.last_topic:
                 entities['operational_topic'] = context.last_topic
+            if not entities.get('operational_topic'):
+                entities['operational_topic'] = context.last_operational_topic or context.last_topic or 'operacao_geral'
 
     # ─── Verificação de Escopo e Threshold para Solicitações Não Compreendidas ────────
     tokens = [tok for tok in re.findall(r'\b\w+\b', normalized) if tok not in STOPWORDS]
     matches = [tok for tok in tokens if tok in DOMAIN_VOCABULARY]
     is_short_intent = normalized in ['sim', 's', 'nao', 'n', 'ok', 'oi', 'ola', 'ei', 'tchau', 'obrigado', 'valeu']
     has_domain_keywords = len(matches) > 0 or is_short_intent
+    has_active_context = bool(context and (context.last_intent or context.last_topic or context.last_operational_topic))
+    has_domain_keywords = len(matches) > 0 or is_short_intent or (is_elliptical and has_active_context)
 
     # Se a mensagem não contiver palavras do domínio ou a confiança for insuficiente
     if not has_domain_keywords or confidence < CONFIDENCE_THRESHOLD:
@@ -809,7 +870,10 @@ def chatbot_endpoint(req: ChatRequest):
 
     # ─── Construção de Resposta Contextualizada ──────────────────────────────
     action = None
+    preserved_op_topic = entities.get('operational_topic')
     entities = extract_entities(req.message)
+    if preserved_op_topic and not entities.get('operational_topic'):
+        entities['operational_topic'] = preserved_op_topic
     suggestions: List[QuickSuggestion] = []
 
     # ─── Respostas por intenção ──────────────────────────────────────────────
@@ -915,7 +979,9 @@ def chatbot_endpoint(req: ChatRequest):
 
     # ─── DIRECIONAMENTO OPERACIONAL ──────────────────────────────────────────
     elif intent == "duvida_operacional":
+        op_topic = entities.get('operational_topic') or context.last_operational_topic or 'operacao_geral'
         context.last_topic = "operacao"
+        context.last_operational_topic = op_topic
         context.last_intent = "duvida_operacional"
         op_topic = entities.get('operational_topic', 'operacao_geral')
 
@@ -944,6 +1010,24 @@ def chatbot_endpoint(req: ChatRequest):
                 "3. **Purgadores de Condensado**: Cheque e drene a água condensada acumulada nas linhas.\n"
                 "4. **Alerta**: Pressão acima do limite operacional exige intervenção preventiva imediata."
             )
+            is_high_press = any(w in normalized for w in ['alta', 'alto', 'sobrepressao', 'subir', 'sobe', 'estufar', 'perigoso', 'perigo', 'limite', 'passar'])
+            if is_high_press:
+                response = (
+                    "🚨 **Alerta Crítico — Sobrepressão no Gasômetro / Linhas**\n\n"
+                    "Pressão acima do limite operacional seguro ameaça romper a manta ou conexões:\n"
+                    "1. **Válvula de Alívio**: Verifique e acione a válvula de alívio manual ou cheque o selo hidráulico imediatamente.\n"
+                    "2. **Flare / Queima de Emergência**: Ative o queimador (flare) para queimar o biogás excedente e despressurizar o sistema.\n"
+                    "3. **Purgador de Condensado**: Drene a água condensada nos pontos baixos da linha que possam estar obstruindo a vazão do gás."
+                )
+            else:
+                response = (
+                    "⚡ **Procedimento Operacional — Pressão do Biogás**\n\n"
+                    "Instruções para controle de pressão na tubulação e gasômetro:\n"
+                    "1. **Válvula de Alívio**: Verifique se a válvula de segurança/selo hidráulico está desobstruída.\n"
+                    "2. **Consumo de Gás**: Certifique-se de que o motogerador ou queimador (flare) está funcionando para queimar o excedente.\n"
+                    "3. **Purgadores de Condensado**: Cheque e drene a água condensada acumulada nas linhas.\n"
+                    "4. **Alerta**: Pressão acima do limite operacional exige intervenção preventiva imediata."
+                )
             action = "view_alerts"
             suggestions = [
                 QuickSuggestion(label="🚨 Ver Alertas no Painel", action_type="action", value="view_alerts"),
@@ -963,6 +1047,48 @@ def chatbot_endpoint(req: ChatRequest):
                 QuickSuggestion(label="📊 Ver Métricas", action_type="message", value="Quais são as métricas do biodigestor?"),
                 QuickSuggestion(label="⚙️ Outras Dúvidas", action_type="message", value="Como funciona a operação do biodigestor?"),
             ]
+            is_cooling = any(w in normalized for w in ['esfriar', 'esfria', 'frio', 'queda', 'cair', 'cai', 'baixa', 'descer', 'abaixo', 'congelar', 'resfriar', 'resfriamento', 'esfriou'])
+            is_overheating = any(w in normalized for w in ['esquentar', 'esquenta', 'calor', 'subir', 'sobe', 'alta', 'acima', 'passar', 'superaquecer', 'aumentar', 'esquentou', '40 graus', '42'])
+
+            if is_cooling:
+                response = (
+                    "❄️ **Queda de Temperatura / Resfriamento da Biomassa**\n\n"
+                    "Se a temperatura cair abaixo da faixa mesofílica (< 35°C, e especialmente < 30°C):\n"
+                    "• **Impacto Biológico**: A atividade metabólica das bactérias metanogênicas diminui drasticamente, reduzindo ou paralisando a produção de biogás (queda de 50% a 90%).\n"
+                    "• **Risco de Acidose**: As bactérias fermentativas continuam ativas produzindo ácidos no frio, acumulando AGVs e derrubando o pH.\n\n"
+                    "**Procedimentos de Ação Imediata**:\n"
+                    "1. **Aquecimento**: Acione ou aumente a recirculação do trocador de calor / serpentina de aquecimento.\n"
+                    "2. **Isolamento**: Verifique a integridade da cúpula térmica e proteções contra correntes de ar frio.\n"
+                    "3. **Alimentação**: Reduza temporariamente a carga de novos resíduos frios para não derrubar ainda mais a temperatura interna."
+                )
+                suggestions = [
+                    QuickSuggestion(label="📊 Ver Métricas", action_type="message", value="Quais são as métricas do biodigestor?"),
+                    QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
+                    QuickSuggestion(label="📞 Suporte Técnico", action_type="action", value="contact_support"),
+                ]
+            elif is_overheating:
+                response = (
+                    "🔥 **Superaquecimento da Biomassa (> 40°C - 42°C)**\n\n"
+                    "O aquecimento excessivo em digestores mesofílicos causa choque térmico severo:\n"
+                    "• **Impacto**: Mortalidade em massa dos microrganismos mesofílicos, cessando a geração de biogás.\n"
+                    "• **Ação Imediata**: Desligue o sistema de aquecimento imediatamente, aumente a recirculação sem calor para dispersar temperatura e monitore a massa de hora em hora."
+                )
+                suggestions = [
+                    QuickSuggestion(label="🚨 Ver Alertas no Painel", action_type="action", value="view_alerts"),
+                    QuickSuggestion(label="📞 Suporte Técnico", action_type="action", value="contact_support"),
+                ]
+            else:
+                response = (
+                    "🌡️ **Parâmetro Operacional — Temperatura da Biomassa**\n\n"
+                    "A temperatura é crucial para manter os microrganismos anaeróbicos ativos:\n"
+                    "• **Faixa Mesofílica Ideal**: 35°C a 40°C (ótimo: 37°C).\n"
+                    "• **Estabilidade**: Oscilações térmicas maiores que 2°C/dia prejudicam a produção metanogênica.\n"
+                    "• **Procedimento**: Verifique o isolamento térmico do digestor e o sistema de aquecimento/recirculação."
+                )
+                suggestions = [
+                    QuickSuggestion(label="📊 Ver Métricas", action_type="message", value="Quais são as métricas do biodigestor?"),
+                    QuickSuggestion(label="⚙️ Outras Dúvidas", action_type="message", value="Como funciona a operação do biodigestor?"),
+                ]
 
         elif op_topic == 'ph':
             response = (
@@ -972,6 +1098,33 @@ def chatbot_endpoint(req: ChatRequest):
                 "• **Acidificação (pH < 6.5)**: Indica sobrecarga orgânica por excesso de resíduos frescos. Reduza a alimentação imediatamente e adicione corretivo de alcalinidade (ex: bicarbonato ou cal).\n"
                 "• **Inibição por Amônia (pH > 8.0)**: Verifique se houve excesso de dejetos com alta concentração de nitrogênio."
             )
+            is_acidic = any(w in normalized for w in ['acido', 'acida', 'acidez', 'acidificar', 'acidificacao', 'acidose', 'cair', 'cai', 'queda', 'baixo', 'descer'])
+            is_alkaline = any(w in normalized for w in ['alcalino', 'alcalina', 'alcalinidade', 'amonia', 'subir', 'sobe', 'alto'])
+
+            if is_acidic:
+                response = (
+                    "⚠️ **Acidificação do Biodigestor (Acidose / pH < 6.5)**\n\n"
+                    "A queda brusca de pH é uma emergência microbiológica:\n"
+                    "• **Causa**: Sobrecarga de resíduos de fácil fermentação gerando excesso de AGVs.\n"
+                    "• **Ações Imediatas**:\n"
+                    "  1. **Suspender Alimentação**: Pare de alimentar o digestor com resíduos frescos.\n"
+                    "  2. **Adição de Alcalinizante**: Dose cal hidratada ou bicarbonato de sódio lentamente até o pH estabilizar.\n"
+                    "  3. **Acompanhamento**: Monitore o pH diariamente antes de reintroduzir nova biomassa."
+                )
+            elif is_alkaline:
+                response = (
+                    "⚠️ **Alcalinização Excessiva (pH > 8.0)**\n\n"
+                    "• **Causa**: Excesso de dejetos com alta concentração de nitrogênio gerando amônia livre inibitória.\n"
+                    "• **Ações**: Dilua com água limpa ou efluente estabilizado e ajuste o balanço C:N da alimentação."
+                )
+            else:
+                response = (
+                    "🧪 **Parâmetro Operacional — Faixa de pH**\n\n"
+                    "O equilíbrio de pH é indicador fundamental de saúde da digestão anaeróbica:\n"
+                    "• **Faixa Ideal**: pH entre **6.8 e 7.4**.\n"
+                    "• **Acidificação (pH < 6.5)**: Indica sobrecarga orgânica por excesso de resíduos frescos. Reduza a alimentação imediatamente e adicione corretivo de alcalinidade (ex: bicarbonato ou cal).\n"
+                    "• **Inibição por Amônia (pH > 8.0)**: Verifique se houve excesso de dejetos com alta concentração de nitrogênio."
+                )
             suggestions = [
                 QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
                 QuickSuggestion(label="📞 Suporte Técnico", action_type="action", value="contact_support"),

@@ -142,6 +142,22 @@ def test_item4_testar_diferentes_perguntas():
     assert res_ctx.question_type == QuestionType.CONTEXTUAL_FOLLOWUP
     assert res_ctx.intent == "pedido_residuos"
 
+    # Tipo 7.2: CONTEXTUAL_FOLLOWUP Operacional (continuidade de temperatura/parâmetros)
+    req_temp_contextual = ChatRequest(
+        message="E se esfriar demais?",
+        context=ContextState(
+            last_intent="duvida_operacional",
+            last_topic="operacao",
+            last_operational_topic="temperatura",
+            last_question_type=QuestionType.OPERACIONAL,
+        )
+    )
+    res_temp_ctx = chatbot_endpoint(req_temp_contextual)
+    print(f"Pergunta: '{'E se esfriar demais?':35}' -> Tipo: {res_temp_ctx.question_type.value:12} | Intent: {res_temp_ctx.intent:18} | Conf: {res_temp_ctx.confidence:.4f}")
+    assert res_temp_ctx.question_type == QuestionType.CONTEXTUAL_FOLLOWUP
+    assert res_temp_ctx.intent == "duvida_operacional"
+    assert "esfriar" in res_temp_ctx.response.lower() or "resfriamento" in res_temp_ctx.response.lower()
+
     print("[OK] Item 4 validado com sucesso!")
 
 

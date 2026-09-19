@@ -191,6 +191,8 @@ export interface ChatMessagePayload {
 export interface ChatContextPayload {
   last_intent?: string;
   last_topic?: string;
+  last_operational_topic?: string;
+  last_question_type?: string;
   selected_biodigestor?: string;
   period?: string;
 }
