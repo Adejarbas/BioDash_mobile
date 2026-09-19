@@ -7,6 +7,7 @@ Microserviço Python para PLN (Processamento de Linguagem Natural).
 - Direcionamento de Dúvidas Operacionais (H2S, pressão, pH, temperatura, alimentação, procedimentos)
 - Tratamento de Fallback com Threshold de Confiança para solicitações não compreendidas
 - Busca Semântica por biodigestores (similaridade de cosseno)
+- Extração de Entidades (datas, números, prioridade)
 - Extração de Entidades (datas, números, prioridade, tópicos operacionais)
 - Fluxos conversacionais: agendamento, métricas, endereços, relatórios por período
 
@@ -15,6 +16,7 @@ Run: uvicorn main:app --host 0.0.0.0 --port 5000 --reload
 
 import os
 import re
+from enum import Enum
 from typing import Optional, List, Any, Dict
 
 import httpx
@@ -34,7 +36,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Limiar mínimo de confiança do classificador SVM
-CONFIDENCE_THRESHOLD = 0.32
+CONFIDENCE_THRESHOLD = 0.25
 
 # ──────────────────────────────────────────────────────────────────────────────
 # APP SETUP
@@ -134,6 +136,7 @@ TRAINING_DATA = [
     ("pedido_metricas", "me informa as métricas"),
     ("pedido_metricas", "relatório do biodigestor"),
     ("pedido_metricas", "energia e resíduos"),
+    ("pedido_metricas", "como está funcionando o biodigestor"),
     ("pedido_metricas", "informações sobre o biodigestor"),
     ("pedido_metricas", "me mostra tudo sobre o biodigestor"),
 
@@ -363,6 +366,8 @@ X_train = vectorizer.fit_transform(train_texts)
 svm_model = SVC(kernel='linear', C=1.0, probability=True)
 svm_model.fit(X_train, train_labels)
 
+print("[OK] Modelo TF-IDF + SVM v2.0 treinado com sucesso!")
+print(f"   Classes: {list(svm_model.classes_)}")
 print("[OK] Modelo TF-IDF + SVM v2.1 treinado com sucesso!")
 print(f"   Classes ({len(svm_model.classes_)}): {list(svm_model.classes_)}")
 print(f"   Total de exemplos: {len(TRAINING_DATA)}")
@@ -396,8 +401,18 @@ for _text in train_texts:
             DOMAIN_VOCABULARY.add(_tok)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. SCHEMAS (Pydantic)
+# 2. DEFINIÇÃO DE TIPOS DE PERGUNTAS E CONTEXTO (Schemas)
 # ──────────────────────────────────────────────────────────────────────────────
+
+class QuestionType(str, Enum):
+    OPERACIONAL = "operacional"          # Parâmetros técnicos, segurança, H2S, pressão, pH, temperatura
+    METRICA = "metrica"                  # Resíduos, energia, indicadores consolidados
+    LOCALIZACAO = "localizacao"          # Endereços e plantas no mapa
+    TRANSACIONAL = "transacional"        # Ações, agendamentos, exportação de arquivos
+    CONTEXTUAL_FOLLOWUP = "contextual"   # Continuações de assunto ("e os resíduos?", "como resolvo?")
+    FORA_DE_ESCOPO = "fora_de_escopo"    # Perguntas ininteligíveis ou fora de domínio
+    SOCIAL = "social"                    # Saudações, despedidas, confirmações, cancelamentos
+
 
 class ChatMessage(BaseModel):
     role: str  # "user" | "bot"
@@ -407,6 +422,7 @@ class ChatMessage(BaseModel):
 class ContextState(BaseModel):
     last_intent: Optional[str] = None
     last_topic: Optional[str] = None  # "energia" | "residuos" | "operacao" | "manutencao" | "endereco"
+    last_question_type: Optional[QuestionType] = None
     selected_biodigestor: Optional[str] = None
     period: Optional[str] = None
 
@@ -427,6 +443,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     intent: str
+    question_type: QuestionType = QuestionType.OPERACIONAL
     response: str
     confidence: float
     action: Optional[str] = None
@@ -447,6 +464,21 @@ class SemanticSearchResponse(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. HELPERS
 # ──────────────────────────────────────────────────────────────────────────────
+
+def normalize_text(text: str) -> str:
+    """Normaliza texto: minúsculas, remove acentos básicos."""
+    text = text.lower().strip()
+    replacements = {
+        'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a',
+        'é': 'e', 'ê': 'e', 'è': 'e',
+        'í': 'i', 'î': 'i', 'ì': 'i',
+        'ó': 'o', 'ô': 'o', 'õ': 'o', 'ò': 'o',
+        'ú': 'u', 'û': 'u', 'ù': 'u',
+        'ç': 'c', 'ñ': 'n',
+    }
+    for accented, plain in replacements.items():
+        text = text.replace(accented, plain)
+    return text
 
 
 def extract_entities(text: str) -> Dict[str, Any]:
@@ -628,8 +660,11 @@ def build_default_fallback_response(confidence: float, entities: Dict[str, Any],
         QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
         QuickSuggestion(label="📞 Suporte Operacional", action_type="action", value="contact_support"),
     ]
+    if context:
+        context.last_question_type = QuestionType.FORA_DE_ESCOPO
     return ChatResponse(
         intent="nao_compreendido",
+        question_type=QuestionType.FORA_DE_ESCOPO,
         response=response,
         confidence=round(confidence, 4),
         action=None,
@@ -708,6 +743,8 @@ def get_biodigestores(user_id: str = Query(..., description="UUID do usuário au
 @app.post("/chatbot", response_model=ChatResponse)
 def chatbot_endpoint(req: ChatRequest):
     """
+    Classifica a intenção com TF-IDF + SVM, extrai entidades e retorna
+    resposta contextualizada. Suporta fluxos conversacionais multi-etapa.
     Classifica a solicitação com TF-IDF + SVM, analisa contexto histórico/multi-turn,
     direciona procedimentos operacionais e retorna respostas contextualizadas ou fallback estruturado.
     """
@@ -723,12 +760,15 @@ def chatbot_endpoint(req: ChatRequest):
 
     # ─── Classificação com TF-IDF + SVM ──────────────────────────────────────
     X_input = vectorizer.transform([normalized])
+
     probs = svm_model.predict_proba(X_input)[0]
     classes = svm_model.classes_
     best_idx = int(np.argmax(probs))
     intent = classes[best_idx]
     confidence = float(probs[best_idx])
 
+    markers = req.markers or []
+    indicators = req.indicators or []
     # ─── Análise de Contexto Multi-Turn (perguntas elípticas ou de continuidade) ───
     # Ex: "e os resíduos?", "e a energia?", "e no mês passado?", "como resolvo isso?"
     is_elliptical = bool(re.search(r'\b(e\s+os?|e\s+as?|e\s+quanto|e\s+no|e\s+na|como\s+resolvo|como\s+proceder|o\s+que\s+faco|disso|dele)\b', normalized))
@@ -764,17 +804,25 @@ def chatbot_endpoint(req: ChatRequest):
     has_domain_keywords = len(matches) > 0 or is_short_intent
 
     # Se a mensagem não contiver palavras do domínio ou a confiança for insuficiente
-    if not has_domain_keywords or confidence < 0.40:
+    if not has_domain_keywords or confidence < CONFIDENCE_THRESHOLD:
         return build_default_fallback_response(confidence, entities, context)
 
     # ─── Construção de Resposta Contextualizada ──────────────────────────────
     action = None
+    entities = extract_entities(req.message)
     suggestions: List[QuickSuggestion] = []
+
+    # ─── Respostas por intenção ──────────────────────────────────────────────
 
     if intent == "saudacao":
         response = (
             "Olá! Em que posso ajudar você hoje? 😊\n\n"
             "Posso:\n"
+            "• Responder sobre endereços e métricas\n"
+            "• Agendar manutenções\n"
+            "• Registrar ou editar métricas\n"
+            "• Cadastrar novos biodigestores\n"
+            "• Gerar relatórios por período"
             "• Esclarecer dúvidas operacionais (pH, H2S, pressão e temperatura)\n"
             "• Responder sobre endereços e métricas (energia e resíduos)\n"
             "• Agendar manutenções preventivas ou corretivas\n"
@@ -822,6 +870,7 @@ def chatbot_endpoint(req: ChatRequest):
         else:
             latest = indicators[0]
             waste = latest.get("waste_processed", 0)
+            response = f"♻️ *Resíduos Processados*\nÚltimo registro: *{waste:.2f} kg*"
             context_prefix = ""
             if context.selected_biodigestor:
                 context_prefix = f"Para a unidade *{context.selected_biodigestor}*:\n"
@@ -843,6 +892,7 @@ def chatbot_endpoint(req: ChatRequest):
         else:
             latest = indicators[0]
             energy = latest.get("energy_generated", 0)
+            response = f"⚡ *Energia Gerada*\nÚltimo registro: *{energy:.2f} kWh*"
             context_prefix = ""
             if context.selected_biodigestor:
                 context_prefix = f"Para a unidade *{context.selected_biodigestor}*:\n"
@@ -968,6 +1018,7 @@ def chatbot_endpoint(req: ChatRequest):
         action = "export_excel"
 
     # ─── Fluxos conversacionais ──────────────────────────────────────────────
+
     elif intent == "agendar_manutencao":
         response = (
             "📅 Certo! Vou agendar uma manutenção.\n\n"
@@ -1019,10 +1070,38 @@ def chatbot_endpoint(req: ChatRequest):
         response = "Foi um prazer te ajudar! Até logo e continuo à disposição! 🌿"
 
     else:
+        response = (
+            "Desculpe, não entendi muito bem. Posso te ajudar com:\n"
+            "• Endereços dos biodigestores\n"
+            "• Métricas de energia e resíduos\n"
+            "• Agendar manutenções\n"
+            "• Registrar ou editar métricas\n"
+            "• Cadastrar novos biodigestores\n"
+            "• Gerar relatórios por período"
+        )
         return build_default_fallback_response(confidence, entities, context)
+
+    if is_elliptical:
+        question_type = QuestionType.CONTEXTUAL_FOLLOWUP
+    elif intent == "duvida_operacional":
+        question_type = QuestionType.OPERACIONAL
+    elif intent in ["pedido_energia", "pedido_residuos", "pedido_metricas"]:
+        question_type = QuestionType.METRICA
+    elif intent == "pedido_endereco":
+        question_type = QuestionType.LOCALIZACAO
+    elif intent in ["agendar_manutencao", "incluir_metrica", "editar_metrica", "adicionar_endereco", "relatorio_periodo", "pedido_exportar_pdf", "pedido_exportar_csv", "pedido_exportar_excel"]:
+        question_type = QuestionType.TRANSACIONAL
+    elif intent in ["saudacao", "despedida", "confirmar", "cancelar"]:
+        question_type = QuestionType.SOCIAL
+    else:
+        question_type = QuestionType.FORA_DE_ESCOPO
+
+    if context:
+        context.last_question_type = question_type
 
     return ChatResponse(
         intent=intent,
+        question_type=question_type,
         response=response,
         confidence=round(confidence, 4),
         action=action,
