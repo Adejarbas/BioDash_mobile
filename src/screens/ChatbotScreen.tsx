@@ -27,12 +27,13 @@ import {
     Alert,
     Animated,
     Keyboard,
+    Linking,
     Image,
 } from 'react-native'
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '../context/ThemeContext'
-import { chatbotApi, semanticSearchApi } from '../lib/api'
+import { chatbotApi, semanticSearchApi, ChatMessagePayload, ChatContextPayload, QuickSuggestionPayload } from '../lib/api'
 import { indicatorsApi, markersApi, maintenanceApi } from '../lib/api'
 import { authLib } from '../lib/auth'
 import * as Print from 'expo-print'
@@ -51,6 +52,7 @@ interface Message {
     text: string
     timestamp: Date
     action?: string | null
+    suggestions?: QuickSuggestionPayload[]
 }
 
 interface ChatbotScreenProps {
@@ -196,10 +198,17 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         {
             id: '0',
             role: 'bot',
-            text: 'Olá! Em que posso ajudar você hoje? 😊\n\nPosso informar:\n• Endereço dos seus biodigestores\n• Métricas de resíduos e energia\n• Gerar relatórios (PDF, CSV ou Excel)',
+            text: 'Olá! Em que posso ajudar você hoje? 😊\n\nPosso orientar sobre:\n• ⚙️ Dúvidas operacionais (pH, H2S, pressão e temperatura)\n• 📊 Métricas de resíduos e energia\n• 📍 Endereços dos seus biodigestores\n• 🛠️ Agendamento de manutenções\n• 📄 Geração de relatórios (PDF, CSV ou Excel)',
             timestamp: new Date(),
+            suggestions: [
+                { label: '⚙️ Operação', action_type: 'message', value: 'Como funciona a operação do biodigestor?' },
+                { label: '⚡ Energia', action_type: 'message', value: 'Quanta energia foi gerada?' },
+                { label: '♻️ Resíduos', action_type: 'message', value: 'Quantos resíduos foram processados?' },
+                { label: '📍 Onde Fica?', action_type: 'message', value: 'Qual o endereço do biodigestor?' },
+            ],
         }
     ])
+    const [conversationContext, setConversationContext] = useState<ChatContextPayload>({})
     const [inputText, setInputText] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [isListening, setIsListening] = useState(false)
@@ -684,6 +693,20 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         if (action === 'start_flow_relatorio') { setActiveFlow({ type: 'relatorio_periodo', step: 'periodo_inicio', data: {} }); return }
         if (action === 'cancel_flow') { setActiveFlow(null); return }
 
+        // Ações de direcionamento operacional
+        if (action === 'view_alerts') {
+            Alert.alert(
+                '🚨 Alertas Operacionais',
+                'Consulte os sensores e alertas de H2S, temperatura e pressão em tempo real na aba Painel do aplicativo.',
+                [{ text: 'OK' }]
+            )
+            return
+        }
+        if (action === 'contact_support') {
+            Linking.openURL('mailto:suporte@biodash.com?subject=Suporte%20Operacional%20BioDash&body=Olá,%20preciso%20de%20apoio%20técnico%20com%20a%20operação%20do%20biodigestor.')
+            return
+        }
+
         try {
             const indicators = indicatorsOverride ?? cachedIndicators.current
             const months = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -1038,17 +1061,26 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
         try {
             await loadUserData()
+            const historyPayload: ChatMessagePayload[] = messages.slice(-5).map(m => ({
+                role: m.role,
+                text: m.text,
+            }))
+
             const res = await chatbotApi.send({
                 message: messageText,
+                history: historyPayload,
+                context: conversationContext,
             })
 
             // apiRequest retorna: { success, data, error }
-            // data pode ser o objeto inteiro { intent, response, confidence, action }
-            // ou pode estar aninhado, dependendo da versão do servidor
-            const responseText =
-                res.data?.response ||            // caso normal
-                (res.data as any)?.data?.response || // caso aninhado
-                (res.success ? null : res.error)    // caso de erro com mensagem
+            const responseData = res.data?.data || res.data
+            const responseText = responseData?.response || (res.success ? null : res.error)
+            const suggestions = responseData?.suggestions || []
+            const updatedContext = responseData?.context
+
+            if (updatedContext) {
+                setConversationContext(prev => ({ ...prev, ...updatedContext }))
+            }
 
             console.log('[Chatbot] API result:', JSON.stringify(res).slice(0, 300))
 
@@ -1061,7 +1093,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         ? `Erro: ${res.error}`
                         : 'Desculpe, não consegui processar sua mensagem. Verifique o serviço do assistente.',
                 timestamp: new Date(),
-                action: res.data?.action || (res.data as any)?.data?.action,
+                action: responseData?.action,
+                suggestions: suggestions,
             }
 
             setMessages(prev => [...prev, botMsg])
@@ -1213,42 +1246,66 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const renderMessage = ({ item }: { item: Message }) => {
         const isUser = item.role === 'user'
         return (
-            <View style={[
-                styles.messageBubbleWrapper,
-                isUser ? styles.userWrapper : styles.botWrapper
-            ]}>
-                {!isUser && (
-                    <View style={styles.botAvatar}>
-                        <Image
+            <View style={{ marginBottom: 12 }}>
+                <View style={[
+                    styles.messageBubbleWrapper,
+                    isUser ? styles.userWrapper : styles.botWrapper
+                ]}>
+                    {!isUser && (
+                        <View style={styles.botAvatar}>
+                            <Image
                             source={require('../../assets/biodash-assistent.png')}
                             style={styles.botAvatarImage}
                             resizeMode="cover"
                         />
+                        </View>
+                    )}
+                    <View style={[
+                        styles.bubble,
+                        isUser
+                            ? [styles.userBubble, { backgroundColor: colors.primary }]
+                            : [styles.botBubble, { backgroundColor: colors.cardBackground, borderColor: colors.border }]
+                    ]}>
+                        <Text style={[
+                            styles.bubbleText,
+                            { color: isUser ? '#fff' : colors.text }
+                        ]}>{item.text}</Text>
+                        <Text style={[
+                            styles.bubbleTime,
+                            { color: isUser ? 'rgba(255,255,255,0.6)' : colors.textMuted }
+                        ]}>
+                            {item.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Sugestões interativas logo abaixo da resposta do bot */}
+                {!isUser && item.suggestions && item.suggestions.length > 0 && (
+                    <View style={styles.inlineSuggestionsContainer}>
+                        {item.suggestions.map((sug, idx) => (
+                            <TouchableOpacity
+                                key={idx}
+                                style={[styles.inlineSuggestionBtn, { borderColor: colors.primary, backgroundColor: colors.cardBackground }]}
+                                onPress={() => {
+                                    if (sug.action_type === 'action') {
+                                        handleChatAction(sug.value)
+                                    } else {
+                                        sendMessage(sug.value)
+                                    }
+                                }}
+                            >
+                                <Text style={[styles.inlineSuggestionText, { color: colors.primary }]}>{sug.label}</Text>
+                            </TouchableOpacity>
+                        ))}
                     </View>
                 )}
-                <View style={[
-                    styles.bubble,
-                    isUser
-                        ? [styles.userBubble, { backgroundColor: colors.primary }]
-                        : [styles.botBubble, { backgroundColor: colors.cardBackground, borderColor: colors.border }]
-                ]}>
-                    <Text style={[
-                        styles.bubbleText,
-                        { color: isUser ? '#fff' : colors.text }
-                    ]}>{item.text}</Text>
-                    <Text style={[
-                        styles.bubbleTime,
-                        { color: isUser ? 'rgba(255,255,255,0.6)' : colors.textMuted }
-                    ]}>
-                        {item.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                </View>
             </View>
         )
     }
 
     // ─── Atalhos rápidos ─────────────────────────────────────────────────────
     const quickReplies = [
+        { label: '⚙️ Operação', text: 'Como funciona a operação do biodigestor?' },
         { label: '📍 Endereço', text: 'Qual o endereço do biodigestor?' },
         { label: '⚡ Energia', text: 'Quanta energia foi gerada?' },
         { label: '♻️ Resíduos', text: 'Quantos resíduos foram processados?' },
@@ -1745,5 +1802,23 @@ const styles = StyleSheet.create({
         borderRadius: 19,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    inlineSuggestionsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginTop: 6,
+        marginLeft: 40,
+        marginRight: 16,
+    },
+    inlineSuggestionBtn: {
+        borderWidth: 1,
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    inlineSuggestionText: {
+        fontSize: 12,
+        fontWeight: '600',
     },
 })
