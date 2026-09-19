@@ -66,7 +66,7 @@ interface FlowState {
 }
 
 // ─── Constantes e Helpers de Parsing ─────────────────────────────────────────
-const TAB_BAR_HEIGHT = 62
+const TAB_BAR_HEIGHT = 86
 
 const MONTH_NAMES = [
     'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
@@ -122,6 +122,58 @@ const isCancel = (text: string): boolean => {
 }
 
 const padDate = (n: number) => String(n).padStart(2, '0')
+
+// ─── Componente de Animação de Digitação (Typing Dots) ─────────────────────
+function TypingDots({ color }: { color: string }) {
+    const dot1 = useRef(new Animated.Value(0)).current
+    const dot2 = useRef(new Animated.Value(0)).current
+    const dot3 = useRef(new Animated.Value(0)).current
+
+    useEffect(() => {
+        const createBounce = (anim: Animated.Value, delay: number) => {
+            return Animated.sequence([
+                Animated.delay(delay),
+                Animated.loop(
+                    Animated.sequence([
+                        Animated.timing(anim, {
+                            toValue: -4,
+                            duration: 320,
+                            useNativeDriver: true,
+                        }),
+                        Animated.timing(anim, {
+                            toValue: 0,
+                            duration: 320,
+                            useNativeDriver: true,
+                        }),
+                        Animated.delay(260),
+                    ])
+                ),
+            ])
+        }
+
+        const a1 = createBounce(dot1, 0)
+        const a2 = createBounce(dot2, 160)
+        const a3 = createBounce(dot3, 320)
+
+        a1.start()
+        a2.start()
+        a3.start()
+
+        return () => {
+            a1.stop()
+            a2.stop()
+            a3.stop()
+        }
+    }, [dot1, dot2, dot3])
+
+    return (
+        <View style={styles.typingDotsRow}>
+            <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot1 }] }]} />
+            <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot2 }] }]} />
+            <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot3 }] }]} />
+        </View>
+    )
+}
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
@@ -654,10 +706,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
     }
 
+    const isSendingRef = useRef(false)
+
     // ─── Enviar mensagem para o chatbot ─────────────────────────────────────
     const sendMessage = async (text?: string) => {
         const messageText = (text || inputText).trim()
-        if (!messageText) return
+        if (!messageText || isSendingRef.current) return
+        isSendingRef.current = true
         Keyboard.dismiss()
 
         // Se há um fluxo ativo, a mensagem alimenta o wizard (não vai ao chatbot)
@@ -669,6 +724,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             scrollToBottom()
             await processFlowStep(messageText)
             setIsLoading(false)
+            isSendingRef.current = false
             return
         }
 
@@ -732,6 +788,97 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         } finally {
             setIsLoading(false)
             scrollToBottom()
+            isSendingRef.current = false
+        }
+    }
+
+    // ─── Animação de Typing no Placeholder ──────────────────────────────────
+    const TYPING_PLACEHOLDERS = [
+        'Digite sua mensagem...',
+        'Pergunte: qual a faixa ideal de pH?',
+        'Pergunte: o que fazer se a pressão subir?',
+        'Consulte: qual a temperatura ideal?',
+        'Dúvidas sobre H2S e purga de biogás...',
+    ]
+    const [placeholderIndex, setPlaceholderIndex] = useState(0)
+    const [animatedPlaceholder, setAnimatedPlaceholder] = useState(TYPING_PLACEHOLDERS[0])
+    const [isDeletingPlaceholder, setIsDeletingPlaceholder] = useState(false)
+    const [isInputFocused, setIsInputFocused] = useState(false)
+
+    useEffect(() => {
+        if (inputText || isListening || isInputFocused) return
+
+        const currentWord = TYPING_PLACEHOLDERS[placeholderIndex]
+        let timer: ReturnType<typeof setTimeout>
+
+        if (!isDeletingPlaceholder) {
+            if (animatedPlaceholder.length < currentWord.length) {
+                timer = setTimeout(() => {
+                    setAnimatedPlaceholder(currentWord.slice(0, animatedPlaceholder.length + 1))
+                }, 60)
+            } else {
+                timer = setTimeout(() => {
+                    setIsDeletingPlaceholder(true)
+                }, 2200)
+            }
+        } else {
+            if (animatedPlaceholder.length > 0) {
+                timer = setTimeout(() => {
+                    setAnimatedPlaceholder(currentWord.slice(0, animatedPlaceholder.length - 1))
+                }, 30)
+            } else {
+                setIsDeletingPlaceholder(false)
+                setPlaceholderIndex((prev) => (prev + 1) % TYPING_PLACEHOLDERS.length)
+            }
+        }
+
+        return () => clearTimeout(timer)
+    }, [animatedPlaceholder, isDeletingPlaceholder, placeholderIndex, inputText, isListening, isInputFocused])
+
+    const getPlaceholder = () => {
+        if (isListening) return '🔴 Ouvindo... fale agora'
+        if (isInputFocused) return 'Digite sua mensagem...'
+        return animatedPlaceholder || 'Digite sua mensagem...'
+    }
+
+    // ─── Animação de Borda Ativa no Input ───────────────────────────────────
+    const inputBorderAnim = useRef(new Animated.Value(0)).current
+
+    useEffect(() => {
+        Animated.timing(inputBorderAnim, {
+            toValue: isInputFocused || inputText.length > 0 ? 1 : 0,
+            duration: 200,
+            useNativeDriver: false,
+        }).start()
+    }, [isInputFocused, inputText, inputBorderAnim])
+
+    const animatedBorderColor = inputBorderAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [colors.border, colors.primary],
+    })
+
+    // ─── Handler de Teclado (Enter para enviar, Ctrl+Enter pula linha) ───────
+    const handleKeyPress = (e: any) => {
+        const key = e.nativeEvent?.key || e.key
+        if (key === 'Enter') {
+            const hasModifier =
+                e.nativeEvent?.ctrlKey ||
+                e.nativeEvent?.shiftKey ||
+                e.nativeEvent?.metaKey ||
+                e.ctrlKey ||
+                e.shiftKey ||
+                e.metaKey
+
+            if (hasModifier) {
+                return
+            }
+
+            if (e.preventDefault) e.preventDefault()
+            if (e.nativeEvent?.preventDefault) e.nativeEvent.preventDefault()
+
+            if (inputText.trim() && !isLoading) {
+                sendMessage()
+            }
         }
     }
 
@@ -921,7 +1068,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             {/* Indicador de digitando */}
             {isLoading && (
                 <View style={[styles.typingIndicator, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <ActivityIndicator size="small" color={colors.primary} />
+                    <TypingDots color={colors.primary} />
                     <Text style={[styles.typingText, { color: colors.textMuted }]}>Assistente digitando...</Text>
                 </View>
             )}
@@ -951,20 +1098,24 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 backgroundColor: colors.cardBackground,
                 borderTopColor: colors.border,
             }]}>
-                <View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                <Animated.View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: animatedBorderColor }]}>
                     <TextInput
                         style={[
                             styles.textInput,
                             { color: colors.text },
                             isListening && { color: '#ef4444' }
                         ]}
-                        placeholder={isListening ? '🔴 Ouvindo... fale agora' : 'Digite sua mensagem...'}
+                        placeholder={getPlaceholder()}
                         placeholderTextColor={isListening ? '#ef4444' : colors.textMuted}
                         value={inputText}
                         onChangeText={setInputText}
+                        onFocus={() => setIsInputFocused(true)}
+                        onBlur={() => setIsInputFocused(false)}
+                        onKeyPress={handleKeyPress}
+                        {...(Platform.OS === 'web' ? { onKeyDown: handleKeyPress } : {})}
                         multiline
+                        blurOnSubmit={false}
                         maxLength={500}
-                        onSubmitEditing={() => sendMessage()}
                         editable={true}
                         id="chatbot-message-input"
                     />
@@ -996,7 +1147,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     >
                         <MaterialIcons name="send" size={18} color="#fff" />
                     </TouchableOpacity>
-                </View>
+                </Animated.View>
             </View>
         </KeyboardAvoidingView>
         </View>
@@ -1159,6 +1310,17 @@ const styles = StyleSheet.create({
         marginTop: 4,
         alignSelf: 'flex-end',
     },
+    typingDotsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 2,
+    },
+    typingDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
     typingIndicator: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1166,13 +1328,14 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         paddingHorizontal: 14,
         paddingVertical: 10,
-        borderRadius: 12,
+        borderRadius: 16,
         borderWidth: 1,
-        gap: 8,
+        gap: 10,
         alignSelf: 'flex-start',
     },
     typingText: {
         fontSize: 12,
+        fontWeight: '500',
     },
     quickRepliesContainer: {
         paddingVertical: 8,
@@ -1189,38 +1352,41 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     inputContainer: {
-        paddingHorizontal: 12,
+        paddingHorizontal: 16,
         paddingTop: 10,
-        paddingBottom: 10,
+        paddingBottom: Platform.OS === 'ios' ? 24 : 12,
         borderTopWidth: 1,
     },
     inputRow: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        borderWidth: 1,
-        borderRadius: 24,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        alignItems: 'center',
+        borderWidth: 1.5,
+        borderRadius: 26,
+        paddingHorizontal: 14,
+        paddingVertical: Platform.OS === 'web' ? 6 : (Platform.OS === 'ios' ? 8 : 4),
+        minHeight: 52,
         gap: 8,
     },
     textInput: {
         flex: 1,
-        fontSize: 14,
-        maxHeight: 100,
-        paddingTop: 4,
-        paddingBottom: 4,
+        fontSize: 15,
+        lineHeight: 20,
+        maxHeight: 120,
+        paddingHorizontal: 10,
+        paddingVertical: Platform.OS === 'web' ? 8 : 6,
+        ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
     },
     micBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         alignItems: 'center',
         justifyContent: 'center',
     },
     sendBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         alignItems: 'center',
         justifyContent: 'center',
     },
