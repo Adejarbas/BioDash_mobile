@@ -3,8 +3,11 @@ BioDash AI Service
 ==================
 Microserviço Python para PLN (Processamento de Linguagem Natural).
 - Chatbot com TF-IDF + SVM (scikit-learn)
+- Interpretação de Contexto e Histórico Multi-turn
+- Direcionamento de Dúvidas Operacionais (H2S, pressão, pH, temperatura, alimentação, procedimentos)
+- Tratamento de Fallback com Threshold de Confiança para solicitações não compreendidas
 - Busca Semântica por biodigestores (similaridade de cosseno)
-- Extração de Entidades (datas, números, prioridade)
+- Extração de Entidades (datas, números, prioridade, tópicos operacionais)
 - Fluxos conversacionais: agendamento, métricas, endereços, relatórios por período
 
 Run: uvicorn main:app --host 0.0.0.0 --port 5000 --reload
@@ -30,14 +33,17 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
+# Limiar mínimo de confiança do classificador SVM
+CONFIDENCE_THRESHOLD = 0.32
+
 # ──────────────────────────────────────────────────────────────────────────────
 # APP SETUP
 # ──────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="BioDash AI Service",
-    description="Chatbot (TF-IDF + SVM), Busca Semântica e Fluxos Conversacionais para o BioDash",
-    version="2.0.0"
+    description="Chatbot (TF-IDF + SVM), Interpretação de Contexto, Operação e Busca Semântica",
+    version="2.1.0"
 )
 
 app.add_middleware(
@@ -84,6 +90,8 @@ TRAINING_DATA = [
     ("pedido_endereco", "me informa o endereço do biodigestor"),
     ("pedido_endereco", "onde fica"),
     ("pedido_endereco", "localização"),
+    ("pedido_endereco", "onde fica ele"),
+    ("pedido_endereco", "qual o endereço dele"),
 
     # ─── PEDIDO: Métricas (Resíduos) ────────────────────────────────────────
     ("pedido_residuos", "quantos resíduos foram processados"),
@@ -96,6 +104,10 @@ TRAINING_DATA = [
     ("pedido_residuos", "quantos kg de resíduos"),
     ("pedido_residuos", "processamento de resíduos"),
     ("pedido_residuos", "dados de resíduos"),
+    ("pedido_residuos", "e os resíduos"),
+    ("pedido_residuos", "e de resíduos"),
+    ("pedido_residuos", "e quanto a resíduos"),
+    ("pedido_residuos", "quanto de lixo orgânico"),
 
     # ─── PEDIDO: Métricas (Energia) ─────────────────────────────────────────
     ("pedido_energia", "quanta energia foi gerada"),
@@ -108,6 +120,9 @@ TRAINING_DATA = [
     ("pedido_energia", "quantos kwh"),
     ("pedido_energia", "energia em kwh"),
     ("pedido_energia", "dados de energia"),
+    ("pedido_energia", "e a energia"),
+    ("pedido_energia", "e quanto de energia"),
+    ("pedido_energia", "e a geração"),
 
     # ─── PEDIDO: Métricas (Ambos) ────────────────────────────────────────────
     ("pedido_metricas", "quais são as métricas do biodigestor"),
@@ -119,9 +134,59 @@ TRAINING_DATA = [
     ("pedido_metricas", "me informa as métricas"),
     ("pedido_metricas", "relatório do biodigestor"),
     ("pedido_metricas", "energia e resíduos"),
-    ("pedido_metricas", "como está funcionando o biodigestor"),
     ("pedido_metricas", "informações sobre o biodigestor"),
     ("pedido_metricas", "me mostra tudo sobre o biodigestor"),
+
+    # ─── DÚVIDAS E PROCEDIMENTOS OPERACIONAIS ─────────────────────────────
+    ("duvida_operacional", "como funciona a operação do biodigestor"),
+    ("duvida_operacional", "como operar o biodigestor"),
+    ("duvida_operacional", "procedimento operacional do biodigestor"),
+    ("duvida_operacional", "operação do biodigestor"),
+    ("duvida_operacional", "como funciona o biodigestor"),
+    ("duvida_operacional", "como funciona a digestão anaeróbica"),
+    ("duvida_operacional", "o que fazer com alerta de h2s"),
+    ("duvida_operacional", "alerta de h2s"),
+    ("duvida_operacional", "alerta de h2s no sistema"),
+    ("duvida_operacional", "como tratar gás sulfídrico"),
+    ("duvida_operacional", "filtro de h2s saturado"),
+    ("duvida_operacional", "filtro de gas sulfidrico saturado"),
+    ("duvida_operacional", "concentração de h2s muito alta"),
+    ("duvida_operacional", "o que fazer se a pressão estiver alta"),
+    ("duvida_operacional", "pressão alta no biodigestor"),
+    ("duvida_operacional", "sobrepressão no tanque"),
+    ("duvida_operacional", "válvula de alívio de pressão"),
+    ("duvida_operacional", "pressão de biogás elevada"),
+    ("duvida_operacional", "qual o ph ideal do biodigestor"),
+    ("duvida_operacional", "qual a faixa de ph ideal"),
+    ("duvida_operacional", "faixa de ph da digestão anaeróbica"),
+    ("duvida_operacional", "ph da biomassa"),
+    ("duvida_operacional", "temperatura ideal do biodigestor"),
+    ("duvida_operacional", "temperatura ideal de operação"),
+    ("duvida_operacional", "qual a temperatura ideal de operação do biodigestor"),
+    ("duvida_operacional", "temperatura de operação da biomassa"),
+    ("duvida_operacional", "temperatura recomendada"),
+    ("duvida_operacional", "o biodigestor está com cheiro forte"),
+    ("duvida_operacional", "vazamento de biogás"),
+    ("duvida_operacional", "como alimentar a biomassa"),
+    ("duvida_operacional", "como alimentar a biomassa no biodigestor"),
+    ("duvida_operacional", "alimentação de resíduos no biodigestor"),
+    ("duvida_operacional", "taxa de carga orgânica"),
+    ("duvida_operacional", "o biodigestor parou de produzir biogás"),
+    ("duvida_operacional", "queda na produção de gás"),
+    ("duvida_operacional", "acidificação do biodigestor"),
+    ("duvida_operacional", "espumamento no biodigestor"),
+    ("duvida_operacional", "como resolver incidente operacional"),
+    ("duvida_operacional", "problema operacional na planta"),
+    ("duvida_operacional", "procedimento de emergência do biodigestor"),
+    ("duvida_operacional", "dúvida sobre a operação"),
+    ("duvida_operacional", "como proceder com problema na operação"),
+    ("duvida_operacional", "preciso de suporte operacional"),
+    ("duvida_operacional", "contatar equipe de operações"),
+    ("duvida_operacional", "suporte operacional"),
+    ("duvida_operacional", "falar com suporte sobre o biodigestor"),
+    ("duvida_operacional", "procedimento de segurança do biogás"),
+    ("duvida_operacional", "como resolvo isso"),
+    ("duvida_operacional", "o que devo fazer"),
 
     # ─── PEDIDO: Exportar PDF ────────────────────────────────────────────────
     ("pedido_exportar_pdf", "gera um pdf"),
@@ -229,6 +294,8 @@ TRAINING_DATA = [
     ("relatorio_periodo", "exportar dados de um período"),
     ("relatorio_periodo", "relatório do trimestre"),
     ("relatorio_periodo", "relatório específico de um período"),
+    ("relatorio_periodo", "e no mês passado"),
+    ("relatorio_periodo", "e no mês anterior"),
 
     # ─── CONFIRMAR ──────────────────────────────────────────────────────────
     ("confirmar", "sim"),
@@ -296,40 +363,9 @@ X_train = vectorizer.fit_transform(train_texts)
 svm_model = SVC(kernel='linear', C=1.0, probability=True)
 svm_model.fit(X_train, train_labels)
 
-print("[OK] Modelo TF-IDF + SVM v2.0 treinado com sucesso!")
-print(f"   Classes: {list(svm_model.classes_)}")
+print("[OK] Modelo TF-IDF + SVM v2.1 treinado com sucesso!")
+print(f"   Classes ({len(svm_model.classes_)}): {list(svm_model.classes_)}")
 print(f"   Total de exemplos: {len(TRAINING_DATA)}")
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 2. SCHEMAS (Pydantic)
-# ──────────────────────────────────────────────────────────────────────────────
-
-class ChatRequest(BaseModel):
-    message: str
-    markers: Optional[List[Dict[str, Any]]] = []
-    indicators: Optional[List[Dict[str, Any]]] = []
-
-
-class ChatResponse(BaseModel):
-    intent: str
-    response: str
-    confidence: float
-    action: Optional[str] = None
-    entities: Optional[Dict[str, Any]] = {}  # Entidades extraídas (datas, números, prioridade)
-
-
-class SemanticSearchRequest(BaseModel):
-    query: str
-    markers: List[Dict[str, Any]]
-
-
-class SemanticSearchResponse(BaseModel):
-    results: List[Dict[str, Any]]
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 3. HELPERS
-# ──────────────────────────────────────────────────────────────────────────────
 
 def normalize_text(text: str) -> str:
     """Normaliza texto: minúsculas, remove acentos básicos."""
@@ -346,6 +382,72 @@ def normalize_text(text: str) -> str:
         text = text.replace(accented, plain)
     return text
 
+# ─── VOCABULÁRIO DE DOMÍNIO PARA VALIDAÇÃO DE ESCOPO ─────────────────────────
+STOPWORDS = {
+    'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'do', 'da', 'dos', 'das',
+    'em', 'no', 'na', 'nos', 'nas', 'por', 'para', 'com', 'e', 'ou', 'que', 'se', 'me',
+    'te', 'eu', 'voce', 'qual', 'quais', 'quero', 'gostaria', 'preciso', 'favor'
+}
+
+DOMAIN_VOCABULARY = set()
+for _text in train_texts:
+    for _tok in re.findall(r'\b\w+\b', normalize_text(_text)):
+        if _tok not in STOPWORDS and len(_tok) > 1:
+            DOMAIN_VOCABULARY.add(_tok)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. SCHEMAS (Pydantic)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str  # "user" | "bot"
+    text: str
+
+
+class ContextState(BaseModel):
+    last_intent: Optional[str] = None
+    last_topic: Optional[str] = None  # "energia" | "residuos" | "operacao" | "manutencao" | "endereco"
+    selected_biodigestor: Optional[str] = None
+    period: Optional[str] = None
+
+
+class QuickSuggestion(BaseModel):
+    label: str
+    action_type: str  # "message" | "action"
+    value: str        # texto da mensagem ou identificador da ação
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: Optional[List[ChatMessage]] = []
+    context: Optional[ContextState] = None
+    markers: Optional[List[Dict[str, Any]]] = []
+    indicators: Optional[List[Dict[str, Any]]] = []
+
+
+class ChatResponse(BaseModel):
+    intent: str
+    response: str
+    confidence: float
+    action: Optional[str] = None
+    entities: Optional[Dict[str, Any]] = {}
+    suggestions: Optional[List[QuickSuggestion]] = []
+    context: Optional[ContextState] = None
+
+
+class SemanticSearchRequest(BaseModel):
+    query: str
+    markers: List[Dict[str, Any]]
+
+
+class SemanticSearchResponse(BaseModel):
+    results: List[Dict[str, Any]]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. HELPERS
+# ──────────────────────────────────────────────────────────────────────────────
+
 
 def extract_entities(text: str) -> Dict[str, Any]:
     """
@@ -356,9 +458,26 @@ def extract_entities(text: str) -> Dict[str, Any]:
     - Prioridade (alta/média/baixa)
     - Métricas numéricas (kg, kWh, R$)
     - Formato de exportação (pdf/csv/excel)
+    - Tópicos operacionais (h2s, pressão, temperatura, ph, alimentação, segurança)
     """
     entities: Dict[str, Any] = {}
     normalized = normalize_text(text)
+
+    # ─── Tópicos Operacionais ────────────────────────────────────────────────
+    if any(w in normalized for w in ['h2s', 'sulfidrico', 'gas sulfidrico']):
+        entities['operational_topic'] = 'h2s'
+    elif any(w in normalized for w in ['pressao', 'sobrepressao', 'valvula']):
+        entities['operational_topic'] = 'pressao'
+    elif any(w in normalized for w in ['temperatura', 'calor', 'graus', 'termica']):
+        entities['operational_topic'] = 'temperatura'
+    elif any(w in normalized for w in ['ph', 'acidez', 'acidificacao', 'alcalinidade']):
+        entities['operational_topic'] = 'ph'
+    elif any(w in normalized for w in ['alimentacao', 'biomassa', 'carga organica']):
+        entities['operational_topic'] = 'alimentacao'
+    elif any(w in normalized for w in ['seguranca', 'vazamento', 'cheiro', 'odor', 'emergencia']):
+        entities['operational_topic'] = 'seguranca'
+    elif any(w in normalized for w in ['operacao', 'operar', 'funcionamento', 'procedimento', 'incidente']):
+        entities['operational_topic'] = 'operacao_geral'
 
     # ─── Meses ───────────────────────────────────────────────────────────────
     month_map = {
@@ -489,13 +608,44 @@ def format_indicators(indicators: List[Dict[str, Any]]) -> str:
     )
 
 
+def build_default_fallback_response(confidence: float, entities: Dict[str, Any], context: ContextState) -> ChatResponse:
+    """Gera uma resposta amigável e estruturada quando a solicitação não puder ser interpretada."""
+    response = (
+        "Não consegui compreender a sua solicitação com clareza. 🤔\n\n"
+        "Posso te orientar nos seguintes temas:\n"
+        "• ⚙️ **Operação**: dúvidas sobre biodigestores, H2S, pressão, pH e procedimentos\n"
+        "• 📊 **Métricas**: resíduos processados e energia gerada\n"
+        "• 📍 **Biodigestores**: endereços e localização das plantas\n"
+        "• 🛠️ **Manutenções**: agendamento e acompanhamento\n"
+        "• 📄 **Relatórios**: emissão em PDF, CSV ou Excel\n"
+        "• 📞 **Suporte**: contato com a equipe técnica operacional"
+    )
+    suggestions = [
+        QuickSuggestion(label="⚙️ Dúvidas de Operação", action_type="message", value="Como funciona a operação do biodigestor?"),
+        QuickSuggestion(label="⚡ Energia Gerada", action_type="message", value="Quanta energia foi gerada?"),
+        QuickSuggestion(label="♻️ Resíduos Processados", action_type="message", value="Quantos resíduos foram processados?"),
+        QuickSuggestion(label="📍 Onde fica?", action_type="message", value="Onde fica o biodigestor?"),
+        QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
+        QuickSuggestion(label="📞 Suporte Operacional", action_type="action", value="contact_support"),
+    ]
+    return ChatResponse(
+        intent="nao_compreendido",
+        response=response,
+        confidence=round(confidence, 4),
+        action=None,
+        entities=entities,
+        suggestions=suggestions,
+        context=context,
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 4. ENDPOINTS
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
-    return {"service": "BioDash AI Service", "status": "running", "version": "2.0.0"}
+    return {"service": "BioDash AI Service", "status": "running", "version": "2.1.0"}
 
 
 @app.get("/health")
@@ -558,66 +708,252 @@ def get_biodigestores(user_id: str = Query(..., description="UUID do usuário au
 @app.post("/chatbot", response_model=ChatResponse)
 def chatbot_endpoint(req: ChatRequest):
     """
-    Classifica a intenção com TF-IDF + SVM, extrai entidades e retorna
-    resposta contextualizada. Suporta fluxos conversacionais multi-etapa.
+    Classifica a solicitação com TF-IDF + SVM, analisa contexto histórico/multi-turn,
+    direciona procedimentos operacionais e retorna respostas contextualizadas ou fallback estruturado.
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Mensagem não pode ser vazia.")
 
     normalized = normalize_text(req.message)
-    X_input = vectorizer.transform([normalized])
+    context = req.context or ContextState()
+    history = req.history or []
+    entities = extract_entities(req.message)
+    markers = req.markers or []
+    indicators = req.indicators or []
 
+    # ─── Classificação com TF-IDF + SVM ──────────────────────────────────────
+    X_input = vectorizer.transform([normalized])
     probs = svm_model.predict_proba(X_input)[0]
     classes = svm_model.classes_
     best_idx = int(np.argmax(probs))
     intent = classes[best_idx]
     confidence = float(probs[best_idx])
 
-    markers = req.markers or []
-    indicators = req.indicators or []
-    action = None
-    entities = extract_entities(req.message)
+    # ─── Análise de Contexto Multi-Turn (perguntas elípticas ou de continuidade) ───
+    # Ex: "e os resíduos?", "e a energia?", "e no mês passado?", "como resolvo isso?"
+    is_elliptical = bool(re.search(r'\b(e\s+os?|e\s+as?|e\s+quanto|e\s+no|e\s+na|como\s+resolvo|como\s+proceder|o\s+que\s+faco|disso|dele)\b', normalized))
 
-    # ─── Respostas por intenção ──────────────────────────────────────────────
+    if is_elliptical or confidence < CONFIDENCE_THRESHOLD:
+        # Se for pergunta sobre resíduos em continuidade
+        if any(w in normalized for w in ['residuo', 'residuos', 'lixo', 'biomassa']):
+            if 'alimentacao' not in entities.get('operational_topic', ''):
+                intent = "pedido_residuos"
+                confidence = max(confidence, 0.85)
+
+        # Se for pergunta sobre energia em continuidade
+        elif any(w in normalized for w in ['energia', 'kwh', 'geracao']):
+            intent = "pedido_energia"
+            confidence = max(confidence, 0.85)
+
+        # Se for pergunta de período ("e no mês passado?")
+        elif any(w in normalized for w in ['mes passado', 'anterior', 'ultimo mes']):
+            intent = "relatorio_periodo"
+            confidence = max(confidence, 0.80)
+
+        # Se for pergunta de resolução/procedimento operacional
+        elif any(w in normalized for w in ['como resolvo', 'o que faco', 'como proceder', 'ajuda com isso']):
+            intent = "duvida_operacional"
+            confidence = max(confidence, 0.85)
+            if not entities.get('operational_topic') and context.last_topic:
+                entities['operational_topic'] = context.last_topic
+
+    # ─── Verificação de Escopo e Threshold para Solicitações Não Compreendidas ────────
+    tokens = [tok for tok in re.findall(r'\b\w+\b', normalized) if tok not in STOPWORDS]
+    matches = [tok for tok in tokens if tok in DOMAIN_VOCABULARY]
+    is_short_intent = normalized in ['sim', 's', 'nao', 'n', 'ok', 'oi', 'ola', 'ei', 'tchau', 'obrigado', 'valeu']
+    has_domain_keywords = len(matches) > 0 or is_short_intent
+
+    # Se a mensagem não contiver palavras do domínio ou a confiança for insuficiente
+    if not has_domain_keywords or confidence < 0.40:
+        return build_default_fallback_response(confidence, entities, context)
+
+    # ─── Construção de Resposta Contextualizada ──────────────────────────────
+    action = None
+    suggestions: List[QuickSuggestion] = []
 
     if intent == "saudacao":
         response = (
             "Olá! Em que posso ajudar você hoje? 😊\n\n"
             "Posso:\n"
-            "• Responder sobre endereços e métricas\n"
-            "• Agendar manutenções\n"
-            "• Registrar ou editar métricas\n"
-            "• Cadastrar novos biodigestores\n"
-            "• Gerar relatórios por período"
+            "• Esclarecer dúvidas operacionais (pH, H2S, pressão e temperatura)\n"
+            "• Responder sobre endereços e métricas (energia e resíduos)\n"
+            "• Agendar manutenções preventivas ou corretivas\n"
+            "• Registrar ou editar dados de produção\n"
+            "• Gerar relatórios em PDF, CSV ou Excel"
         )
+        suggestions = [
+            QuickSuggestion(label="⚙️ Dúvidas de Operação", action_type="message", value="Como funciona a operação do biodigestor?"),
+            QuickSuggestion(label="⚡ Energia Gerada", action_type="message", value="Quanta energia foi gerada?"),
+            QuickSuggestion(label="📍 Onde fica?", action_type="message", value="Onde fica o biodigestor?"),
+            QuickSuggestion(label="📄 Gerar Relatório", action_type="message", value="Gerar relatório PDF"),
+        ]
 
     elif intent == "pedido_endereco":
+        context.last_topic = "endereco"
+        context.last_intent = "pedido_endereco"
         if not markers:
             response = "Não encontrei nenhum biodigestor cadastrado.\n\nDiga *'adicionar biodigestor'* para cadastrar um agora pelo chat."
+            suggestions = [
+                QuickSuggestion(label="➕ Adicionar Biodigestor", action_type="message", value="Adicionar biodigestor"),
+            ]
         elif len(markers) == 1:
             response = format_marker_address(markers[0])
+            context.selected_biodigestor = markers[0].get("title")
+            suggestions = [
+                QuickSuggestion(label="📊 Ver Métricas", action_type="message", value="Quais são as métricas do biodigestor?"),
+                QuickSuggestion(label="⚙️ Operação da Planta", action_type="message", value="Como funciona a operação do biodigestor?"),
+            ]
         else:
             addresses = "\n\n".join([format_marker_address(m) for m in markers[:5]])
             response = f"Encontrei {len(markers)} biodigestores cadastrados:\n\n{addresses}"
+            suggestions = [
+                QuickSuggestion(label="📊 Ver Métricas", action_type="message", value="Quais são as métricas do biodigestor?"),
+                QuickSuggestion(label="🛠️ Manutenções", action_type="message", value="Agendar manutenção"),
+            ]
 
     elif intent == "pedido_residuos":
+        context.last_topic = "residuos"
+        context.last_intent = "pedido_residuos"
         if not indicators:
             response = "Nenhuma métrica de resíduos encontrada.\n\nDiga *'adicionar métricas'* para registrar agora pelo chat."
+            suggestions = [
+                QuickSuggestion(label="➕ Registrar Métricas", action_type="message", value="Adicionar métricas"),
+            ]
         else:
             latest = indicators[0]
             waste = latest.get("waste_processed", 0)
-            response = f"♻️ *Resíduos Processados*\nÚltimo registro: *{waste:.2f} kg*"
+            context_prefix = ""
+            if context.selected_biodigestor:
+                context_prefix = f"Para a unidade *{context.selected_biodigestor}*:\n"
+            response = f"{context_prefix}♻️ *Resíduos Processados*\nÚltimo registro: *{waste:.2f} kg*"
+            suggestions = [
+                QuickSuggestion(label="⚡ Ver Energia", action_type="message", value="E a energia gerada?"),
+                QuickSuggestion(label="📄 Gerar PDF", action_type="message", value="Gerar relatório PDF"),
+                QuickSuggestion(label="📊 Resumo Completo", action_type="message", value="Métricas do biodigestor"),
+            ]
 
     elif intent == "pedido_energia":
+        context.last_topic = "energia"
+        context.last_intent = "pedido_energia"
         if not indicators:
             response = "Nenhuma métrica de energia encontrada.\n\nDiga *'adicionar métricas'* para registrar agora pelo chat."
+            suggestions = [
+                QuickSuggestion(label="➕ Registrar Métricas", action_type="message", value="Adicionar métricas"),
+            ]
         else:
             latest = indicators[0]
             energy = latest.get("energy_generated", 0)
-            response = f"⚡ *Energia Gerada*\nÚltimo registro: *{energy:.2f} kWh*"
+            context_prefix = ""
+            if context.selected_biodigestor:
+                context_prefix = f"Para a unidade *{context.selected_biodigestor}*:\n"
+            response = f"{context_prefix}⚡ *Energia Gerada*\nÚltimo registro: *{energy:.2f} kWh*"
+            suggestions = [
+                QuickSuggestion(label="♻️ Ver Resíduos", action_type="message", value="E os resíduos?"),
+                QuickSuggestion(label="📄 Gerar PDF", action_type="message", value="Gerar relatório PDF"),
+                QuickSuggestion(label="📊 Resumo Completo", action_type="message", value="Métricas do biodigestor"),
+            ]
 
     elif intent == "pedido_metricas":
+        context.last_topic = "metricas"
+        context.last_intent = "pedido_metricas"
         response = format_indicators(indicators)
+        suggestions = [
+            QuickSuggestion(label="📄 Gerar Relatório PDF", action_type="message", value="Gerar relatório PDF"),
+            QuickSuggestion(label="📊 Exportar Planilha", action_type="message", value="Exportar Excel"),
+            QuickSuggestion(label="⚙️ Dúvida de Operação", action_type="message", value="Como funciona a operação?"),
+        ]
+
+    # ─── DIRECIONAMENTO OPERACIONAL ──────────────────────────────────────────
+    elif intent == "duvida_operacional":
+        context.last_topic = "operacao"
+        context.last_intent = "duvida_operacional"
+        op_topic = entities.get('operational_topic', 'operacao_geral')
+
+        if op_topic == 'h2s':
+            response = (
+                "⚠️ **Procedimento Operacional — Alerta de H2S (Gás Sulfídrico)**\n\n"
+                "O H2S é um gás tóxico e corrosivo presente no biogás. Ações operacionais recomendadas:\n"
+                "1. **Segurança**: Mantenha a área ventilada e utilize EPIs adequados para proteção respiratória.\n"
+                "2. **Filtro de Dessulfurização**: Verifique o filtro de carvão ativado ou esponja de ferro. Níveis altos indicam saturação do filtro.\n"
+                "3. **Monitoramento**: Acompanhe o sensor de alerta na aba Painel.\n"
+                "4. **Manutenção**: Caso persista elevado, agende a troca de filtro imediatamente."
+            )
+            action = "view_alerts"
+            suggestions = [
+                QuickSuggestion(label="🚨 Ver Alertas no Painel", action_type="action", value="view_alerts"),
+                QuickSuggestion(label="🛠️ Agendar Troca de Filtro", action_type="message", value="Agendar troca de filtro"),
+                QuickSuggestion(label="📞 Falar com Suporte", action_type="action", value="contact_support"),
+            ]
+
+        elif op_topic == 'pressao':
+            response = (
+                "⚡ **Procedimento Operacional — Pressão do Biogás**\n\n"
+                "Instruções para controle de pressão na tubulação e gasômetro:\n"
+                "1. **Válvula de Alívio**: Verifique se a válvula de segurança/selo hidráulico está desobstruída.\n"
+                "2. **Consumo de Gás**: Certifique-se de que o motogerador ou queimador (flare) está funcionando para queimar o excedente.\n"
+                "3. **Purgadores de Condensado**: Cheque e drene a água condensada acumulada nas linhas.\n"
+                "4. **Alerta**: Pressão acima do limite operacional exige intervenção preventiva imediata."
+            )
+            action = "view_alerts"
+            suggestions = [
+                QuickSuggestion(label="🚨 Ver Alertas no Painel", action_type="action", value="view_alerts"),
+                QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
+                QuickSuggestion(label="📞 Suporte Operacional", action_type="action", value="contact_support"),
+            ]
+
+        elif op_topic == 'temperatura':
+            response = (
+                "🌡️ **Parâmetro Operacional — Temperatura da Biomassa**\n\n"
+                "A temperatura é crucial para manter os microrganismos anaeróbicos ativos:\n"
+                "• **Faixa Mesofílica Ideal**: 35°C a 40°C (ótimo: 37°C).\n"
+                "• **Estabilidade**: Oscilações térmicas maiores que 2°C/dia prejudicam a produção metanogênica.\n"
+                "• **Procedimento**: Verifique o isolamento térmico do digestor e o sistema de aquecimento/recirculação."
+            )
+            suggestions = [
+                QuickSuggestion(label="📊 Ver Métricas", action_type="message", value="Quais são as métricas do biodigestor?"),
+                QuickSuggestion(label="⚙️ Outras Dúvidas", action_type="message", value="Como funciona a operação do biodigestor?"),
+            ]
+
+        elif op_topic == 'ph':
+            response = (
+                "🧪 **Parâmetro Operacional — Faixa de pH**\n\n"
+                "O equilíbrio de pH é indicador fundamental de saúde da digestão anaeróbica:\n"
+                "• **Faixa Ideal**: pH entre **6.8 e 7.4**.\n"
+                "• **Acidificação (pH < 6.5)**: Indica sobrecarga orgânica por excesso de resíduos frescos. Reduza a alimentação imediatamente e adicione corretivo de alcalinidade (ex: bicarbonato ou cal).\n"
+                "• **Inibição por Amônia (pH > 8.0)**: Verifique se houve excesso de dejetos com alta concentração de nitrogênio."
+            )
+            suggestions = [
+                QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
+                QuickSuggestion(label="📞 Suporte Técnico", action_type="action", value="contact_support"),
+            ]
+
+        elif op_topic == 'alimentacao':
+            response = (
+                "🌱 **Procedimento Operacional — Alimentação de Biomassa**\n\n"
+                "Boas práticas de carga orgânica do biodigestor:\n"
+                "1. **Uniformidade**: Alimente em bateladas regulares para evitar choques de carga orgânica.\n"
+                "2. **Teor de Sólidos**: Mantenha o teor de sólidos totais (TS) diluído adequadamente (tipicamente 8% a 10%).\n"
+                "3. **Inibidores**: Evite introduzir água sanitária, desinfetantes ou substâncias químicas bactericidas."
+            )
+            suggestions = [
+                QuickSuggestion(label="♻️ Resíduos Processados", action_type="message", value="Quantos resíduos foram processados?"),
+                QuickSuggestion(label="📊 Métricas Gerais", action_type="message", value="Métricas do biodigestor"),
+            ]
+
+        else:
+            response = (
+                "⚙️ **Diretrizes e Suporte Operacional — BioDash**\n\n"
+                "Acompanhamento da operação dos biodigestores:\n"
+                "• **Monitoramento Diário**: Verifique pressão, H2S e temperatura no Painel.\n"
+                "• **Procedimentos de Segurança**: Mantenha filtros de biogás e válvulas de alívio sempre revisados.\n"
+                "• **Suporte Dedicado**: Caso ocorra qualquer anomalia técnica ou incidente em campo, contate diretamente nossa equipe de operações."
+            )
+            action = "contact_support"
+            suggestions = [
+                QuickSuggestion(label="🚨 Ver Alertas no Painel", action_type="action", value="view_alerts"),
+                QuickSuggestion(label="🛠️ Agendar Manutenção", action_type="message", value="Agendar manutenção"),
+                QuickSuggestion(label="📞 Falar com Suporte", action_type="action", value="contact_support"),
+            ]
 
     elif intent == "pedido_exportar_pdf":
         response = "📄 Vou gerar o relatório em *PDF* para você agora! Aguarde..."
@@ -632,7 +968,6 @@ def chatbot_endpoint(req: ChatRequest):
         action = "export_excel"
 
     # ─── Fluxos conversacionais ──────────────────────────────────────────────
-
     elif intent == "agendar_manutencao":
         response = (
             "📅 Certo! Vou agendar uma manutenção.\n\n"
@@ -684,15 +1019,7 @@ def chatbot_endpoint(req: ChatRequest):
         response = "Foi um prazer te ajudar! Até logo e continuo à disposição! 🌿"
 
     else:
-        response = (
-            "Desculpe, não entendi muito bem. Posso te ajudar com:\n"
-            "• Endereços dos biodigestores\n"
-            "• Métricas de energia e resíduos\n"
-            "• Agendar manutenções\n"
-            "• Registrar ou editar métricas\n"
-            "• Cadastrar novos biodigestores\n"
-            "• Gerar relatórios por período"
-        )
+        return build_default_fallback_response(confidence, entities, context)
 
     return ChatResponse(
         intent=intent,
@@ -700,6 +1027,8 @@ def chatbot_endpoint(req: ChatRequest):
         confidence=round(confidence, 4),
         action=action,
         entities=entities,
+        suggestions=suggestions,
+        context=context,
     )
 
 
