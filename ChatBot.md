@@ -106,17 +106,32 @@ Texto do usuário
 
 ### Intenções Reconhecidas
 
-| Intenção | Exemplos de Frase | Resposta |
+| Intenção | Exemplos de Frase | Resposta e Comportamento |
 |---|---|---|
-| `saudacao` | "Oi", "Bom dia", "Olá" | "Olá! Em que posso ajudar você hoje? 😊" |
+| `saudacao` | "Oi", "Bom dia", "Olá" | "Olá! Em que posso ajudar você hoje? 😊" + sugestões rápidas |
+| `duvida_operacional` | "Alerta de H2S", "Pressão alta", "pH ideal", "Como operar" | Instruções operacionais detalhadas + ações (`view_alerts`, `contact_support`) |
 | `pedido_endereco` | "Onde fica o biodigestor?", "Qual o endereço?" | Endereço real dos marcadores do mapa |
-| `pedido_residuos` | "Quantos resíduos foram processados?" | Valor em kg do último registro |
-| `pedido_energia` | "Quanta energia foi gerada?", "kWh" | Valor em kWh do último registro |
+| `pedido_residuos` | "Quantos resíduos foram processados?", "E os resíduos?" | Valor em kg do último registro (considera contexto anterior) |
+| `pedido_energia` | "Quanta energia foi gerada?", "E a energia?" | Valor em kWh do último registro (considera contexto anterior) |
 | `pedido_metricas` | "Como está o biodigestor?", "Status" | Resumo de resíduos + energia + benefícios |
+| `agendar_manutencao` | "Agendar manutenção", "Troca de filtro" | Fluxo conversacional guiado de agendamento |
 | `pedido_exportar_pdf` | "Gera um PDF", "Relatório PDF" | Abre modal de impressão / download PDF |
 | `pedido_exportar_csv` | "Exportar CSV", "Arquivo CSV" | Download do CSV com os indicadores |
 | `pedido_exportar_excel` | "Exportar Excel", "Planilha" | Download do Excel (.csv formatado) |
+| `nao_compreendido` | Solicitações fora de escopo ou ininteligíveis | Resposta orientativa amigável + botões interativos de ajuda |
 | `despedida` | "Tchau", "Obrigado", "Encerrar" | "Foi um prazer te ajudar! Até logo e continuo à disposição! 🌿" |
+
+### Interpretação de Contexto e Histórico Multi-turn
+- O frontend envia o histórico das últimas 5 mensagens (`history`) e o estado contextual (`context`).
+- Perguntas elípticas ou de continuidade (ex: *"e os resíduos?"*, *"e no mês passado?"*, *"como resolvo isso?"*) preservam o tópico ou biodigestor previamente consultado.
+
+### Direcionamento Operacional e Segurança
+- Perguntas sobre parâmetros críticos (**H2S**, **pressão de biogás**, **temperatura** e **faixa de pH**) fornecem diretrizes técnicas imediatas.
+- Ações automáticas (`action: "view_alerts"`, `action: "contact_support"`) acionam alertas visuais ou direcionamento para suporte operacional especializado (`suporte@biodash.com`).
+
+### Tratamento de Fallback
+- Limiar de confiança (`CONFIDENCE_THRESHOLD = 0.40`) e validação de vocabulário de domínio.
+- Caso a solicitação não possa ser interpretada, o chatbot não chuta respostas aleatórias; ele responde com um menu contextual de opções e sugestões clicáveis.
 
 ### Parâmetros do Modelo
 ```python
@@ -135,7 +150,7 @@ SVC(
 ```
 
 ### Dataset de Treinamento
-O modelo foi treinado com **80+ frases** em português distribuídas entre as 9 intenções acima. O dataset está embutido no `ai-service/main.py` e pode ser expandido a qualquer momento adicionando novas tuplas `("intencao", "frase de exemplo")` na lista `TRAINING_DATA`.
+O modelo foi treinado com **250+ frases** em português distribuídas entre as intenções do sistema, incluindo procedimentos operacionais e de emergência. O dataset está embutido no `ai-service/main.py`.
 
 ---
 
