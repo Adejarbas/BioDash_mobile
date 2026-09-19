@@ -519,19 +519,14 @@ def extract_entities(text: str) -> Dict[str, Any]:
     normalized = normalize_text(text)
 
     # ─── Tópicos Operacionais ────────────────────────────────────────────────
-    if any(w in normalized for w in ['h2s', 'sulfidrico', 'gas sulfidrico']):
     if any(w in normalized for w in ['h2s', 'sulfidrico', 'gas sulfidrico', 'dessulfurizacao', 'cheiro de ovo']):
         entities['operational_topic'] = 'h2s'
-    elif any(w in normalized for w in ['pressao', 'sobrepressao', 'valvula']):
     elif any(w in normalized for w in ['pressao', 'sobrepressao', 'valvula', 'despressurizacao', 'gasometro', 'estufar', 'alivio']):
         entities['operational_topic'] = 'pressao'
-    elif any(w in normalized for w in ['temperatura', 'calor', 'graus', 'termica']):
     elif any(w in normalized for w in ['temperatura', 'calor', 'graus', 'termica', 'termico', 'esfriar', 'esfria', 'esfriou', 'esfriamento', 'esquentar', 'esquenta', 'aquecer', 'aquecimento', 'congelar', 'resfriar', 'resfriamento', 'choque termico']):
         entities['operational_topic'] = 'temperatura'
-    elif any(w in normalized for w in ['ph', 'acidez', 'acidificacao', 'alcalinidade']):
     elif any(w in normalized for w in ['ph', 'acidez', 'acidificacao', 'alcalinidade', 'acido', 'acidificar', 'acidose', 'alcalino', 'alcalinizacao', 'amonia']):
         entities['operational_topic'] = 'ph'
-    elif any(w in normalized for w in ['alimentacao', 'biomassa', 'carga organica']):
     elif any(w in normalized for w in ['alimentacao', 'biomassa', 'carga organica', 'alimentar', 'sobrecarga', 'substrato', 'esterco', 'dejeto']):
         entities['operational_topic'] = 'alimentacao'
     elif any(w in normalized for w in ['seguranca', 'vazamento', 'cheiro', 'odor', 'emergencia']):
@@ -831,7 +826,6 @@ def chatbot_endpoint(req: ChatRequest):
                 )
 
         # Se for pergunta sobre resíduos em continuidade
-        if any(w in normalized for w in ['residuo', 'residuos', 'lixo', 'biomassa']):
         elif any(w in normalized for w in ['residuo', 'residuos', 'lixo', 'biomassa']):
             if 'alimentacao' not in entities.get('operational_topic', ''):
                 intent = "pedido_residuos"
