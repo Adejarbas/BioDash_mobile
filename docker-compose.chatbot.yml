@@ -1,0 +1,17 @@
+services:
+  biodash-ai:
+    build:
+      context: ./ai-service
+    environment:
+      AI_SERVICE_PORT: "5000"
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+    ports:
+      - "5000:5000"
+    volumes:
+      - whisper-cache:/root/.cache/huggingface
+    restart: unless-stopped
+
+volumes:
+  whisper-cache:
