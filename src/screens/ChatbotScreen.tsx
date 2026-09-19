@@ -143,6 +143,14 @@ const parseDate = (text: string): { date: Date; label: string } | null => {
             label: `${padDate(afterTomorrow.getDate())}/${padDate(afterTomorrow.getMonth() + 1)}/${afterTomorrow.getFullYear()}`,
         }
     }
+    if (norm === 'ontem' || norm === 'de ontem' || norm === 'pra ontem') {
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        return {
+            date: yesterday,
+            label: `${padDate(yesterday.getDate())}/${padDate(yesterday.getMonth() + 1)}/${yesterday.getFullYear()}`,
+        }
+    }
 
     // 2. Formato numérico: DD/MM/AAAA, DD/MM/AA ou DD/MM
     const dm = text.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/)
@@ -928,8 +936,9 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 return
             }
             data.priority = p; setActiveFlow({ ...flow, step: 'data', data })
+            const currentYear = new Date().getFullYear()
             addBotMessage(
-                `${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/2025, "25 de outubro" ou "hoje")`,
+                `${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/${currentYear}, "25 de outubro" ou "hoje")`,
                 [
                     { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
                     { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
@@ -938,9 +947,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
         if (flow.step === 'data') {
             const parsed = parseDate(text)
+            const currentYear = new Date().getFullYear()
             if (!parsed) {
                 addBotMessage(
-                    '⚠️ Data não reconhecida ou inválida. Por favor, informe uma data válida:\n• Formato numérico: **25/10/2025**\n• Por extenso: **25 de outubro de 2025**\n• Ou termos como **hoje** ou **amanhã**.',
+                    `⚠️ Data não reconhecida ou inválida. Por favor, informe uma data válida:\n• Formato numérico: **25/10/${currentYear}**\n• Por extenso: **25 de outubro de ${currentYear}**\n• Ou termos como **hoje** ou **amanhã**.`,
                     [
                         { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
                         { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
@@ -948,6 +958,24 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 )
                 return
             }
+
+            // Não permite agendamento em datas passadas
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            const targetDate = new Date(parsed.date)
+            targetDate.setHours(0, 0, 0, 0)
+
+            if (targetDate.getTime() < today.getTime()) {
+                addBotMessage(
+                    `⚠️ Não é possível agendar manutenção em datas que já passaram (*${parsed.label}*). Por favor, informe uma data a partir de **hoje**:`,
+                    [
+                        { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                        { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                    ]
+                )
+                return
+            }
+
             data.scheduledDate = parsed.date.toISOString()
             data.dateLabel = parsed.label
             setActiveFlow({ ...flow, step: 'confirmar', data })
