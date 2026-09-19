@@ -109,10 +109,93 @@ const parseNumber = (text: string): number | null => {
 }
 
 const parsePriority = (text: string): string | null => {
-    const n = normalizeStr(text)
-    if (['alta','urgente','critica','importante'].some(w => n.includes(w))) return 'high'
-    if (['media','moderada','normal'].some(w => n.includes(w))) return 'medium'
-    if (['baixa','leve','pequena'].some(w => n.includes(w))) return 'low'
+    const n = normalizeStr(text).trim()
+    if (n === '1' || ['alta', 'alto', 'urgente', 'urgencia', 'critica', 'critico', 'importante'].some(w => n.includes(w))) return 'high'
+    if (n === '2' || ['media', 'medio', 'moderada', 'moderado', 'normal', 'intermediaria', 'padrao'].some(w => n.includes(w))) return 'medium'
+    if (n === '3' || ['baixa', 'baixo', 'leve', 'pequena', 'pequeno', 'tranquila', 'tranquilo'].some(w => n.includes(w))) return 'low'
+    return null
+}
+
+const parseDate = (text: string): { date: Date; label: string } | null => {
+    const norm = normalizeStr(text).trim()
+    const now = new Date()
+
+    // 1. Termos relativos diretos
+    if (norm === 'hoje' || norm === 'para hoje' || norm === 'de hoje' || norm === 'pra hoje') {
+        return {
+            date: now,
+            label: `${padDate(now.getDate())}/${padDate(now.getMonth() + 1)}/${now.getFullYear()}`,
+        }
+    }
+    if (norm === 'amanha' || norm === 'para amanha' || norm === 'de amanha' || norm === 'pra amanha') {
+        const tomorrow = new Date(now)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        return {
+            date: tomorrow,
+            label: `${padDate(tomorrow.getDate())}/${padDate(tomorrow.getMonth() + 1)}/${tomorrow.getFullYear()}`,
+        }
+    }
+    if (norm === 'depois de amanha' || norm === 'para depois de amanha' || norm === 'pra depois de amanha') {
+        const afterTomorrow = new Date(now)
+        afterTomorrow.setDate(afterTomorrow.getDate() + 2)
+        return {
+            date: afterTomorrow,
+            label: `${padDate(afterTomorrow.getDate())}/${padDate(afterTomorrow.getMonth() + 1)}/${afterTomorrow.getFullYear()}`,
+        }
+    }
+    if (norm === 'ontem' || norm === 'de ontem' || norm === 'pra ontem') {
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        return {
+            date: yesterday,
+            label: `${padDate(yesterday.getDate())}/${padDate(yesterday.getMonth() + 1)}/${yesterday.getFullYear()}`,
+        }
+    }
+
+    // 2. Formato numérico: DD/MM/AAAA, DD/MM/AA ou DD/MM
+    const dm = text.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/)
+    if (dm) {
+        const day = parseInt(dm[1], 10)
+        const month = parseInt(dm[2], 10) - 1
+        let year = dm[3] ? parseInt(dm[3], 10) : now.getFullYear()
+        if (year < 100) year += 2000
+
+        const candidate = new Date(year, month, day)
+        if (
+            candidate.getFullYear() === year &&
+            candidate.getMonth() === month &&
+            candidate.getDate() === day
+        ) {
+            return {
+                date: candidate,
+                label: `${padDate(day)}/${padDate(month + 1)}/${year}`,
+            }
+        }
+        return null
+    }
+
+    // 3. Formato textual: ex "25 de outubro de 2025", "25 de outubro", "dia 5 de maio"
+    const month = parseMonth(text)
+    if (month !== null) {
+        const year = parseYear(text) ?? now.getFullYear()
+        const textWithoutYear = text.replace(/\b20\d{2}\b/, '')
+        const dayMatch = textWithoutYear.match(/\b([1-9]|[12]\d|3[01])\b/)
+        if (dayMatch) {
+            const day = parseInt(dayMatch[1], 10)
+            const candidate = new Date(year, month, day)
+            if (
+                candidate.getFullYear() === year &&
+                candidate.getMonth() === month &&
+                candidate.getDate() === day
+            ) {
+                return {
+                    date: candidate,
+                    label: `${padDate(day)}/${padDate(month + 1)}/${year}`,
+                }
+            }
+        }
+    }
+
     return null
 }
 
@@ -824,28 +907,85 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const processManutencaoStep = async (text: string) => {
         const flow = activeFlow!; const data = { ...flow.data }
         if (flow.step === 'nome') {
-            data.name = text.trim(); setActiveFlow({ ...flow, step: 'prioridade', data })
-            addBotMessage(`📋 Nome: *${data.name}*\n\nQual a **prioridade**?\n• alta (urgente)\n• média\n• baixa`); return
+            const name = text.trim()
+            if (!name) {
+                addBotMessage('⚠️ Por favor, informe um nome ou descrição para a manutenção.')
+                return
+            }
+            data.name = name; setActiveFlow({ ...flow, step: 'prioridade', data })
+            addBotMessage(
+                `📋 Nome: *${data.name}*\n\nQual a **prioridade**?\n• alta (urgente)\n• média\n• baixa`,
+                [
+                    { label: '🔴 Alta', action_type: 'message', value: 'alta' },
+                    { label: '🟡 Média', action_type: 'message', value: 'média' },
+                    { label: '🟢 Baixa', action_type: 'message', value: 'baixa' },
+                ]
+            ); return
         }
         if (flow.step === 'prioridade') {
-            const p = parsePriority(text) || 'medium'; data.priority = p; setActiveFlow({ ...flow, step: 'data', data })
-            addBotMessage(`${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/2025 ou "25 de outubro de 2025")`); return
+            const p = parsePriority(text)
+            if (!p) {
+                addBotMessage(
+                    '⚠️ Prioridade não reconhecida. Por favor, escolha uma das opções válidas:\n• **alta** (urgente)\n• **média**\n• **baixa**',
+                    [
+                        { label: '🔴 Alta', action_type: 'message', value: 'alta' },
+                        { label: '🟡 Média', action_type: 'message', value: 'média' },
+                        { label: '🟢 Baixa', action_type: 'message', value: 'baixa' },
+                    ]
+                )
+                return
+            }
+            data.priority = p; setActiveFlow({ ...flow, step: 'data', data })
+            const currentYear = new Date().getFullYear()
+            addBotMessage(
+                `${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/${currentYear}, "25 de outubro" ou "hoje")`,
+                [
+                    { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                    { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                ]
+            ); return
         }
         if (flow.step === 'data') {
-            let day = 1, month = new Date().getMonth(), year = new Date().getFullYear()
-            const dm = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
-            if (dm) {
-                day = parseInt(dm[1]); month = parseInt(dm[2]) - 1
-                if (dm[3]) { year = parseInt(dm[3]); if (year < 100) year += 2000 }
-            } else {
-                const m = parseMonth(text); const y = parseYear(text); const dayM = text.match(/\b(\d{1,2})\b/)
-                if (m !== null) month = m; if (y !== null) year = y
-                if (dayM) { const d = parseInt(dayM[1]); if (d >= 1 && d <= 31) day = d }
+            const parsed = parseDate(text)
+            const currentYear = new Date().getFullYear()
+            if (!parsed) {
+                addBotMessage(
+                    `⚠️ Data não reconhecida ou inválida. Por favor, informe uma data válida:\n• Formato numérico: **25/10/${currentYear}**\n• Por extenso: **25 de outubro de ${currentYear}**\n• Ou termos como **hoje** ou **amanhã**.`,
+                    [
+                        { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                        { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                    ]
+                )
+                return
             }
-            data.scheduledDate = new Date(year, month, day).toISOString()
-            data.dateLabel = `${padDate(day)}/${padDate(month+1)}/${year}`
+
+            // Não permite agendamento em datas passadas
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            const targetDate = new Date(parsed.date)
+            targetDate.setHours(0, 0, 0, 0)
+
+            if (targetDate.getTime() < today.getTime()) {
+                addBotMessage(
+                    `⚠️ Não é possível agendar manutenção em datas que já passaram (*${parsed.label}*). Por favor, informe uma data a partir de **hoje**:`,
+                    [
+                        { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                        { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                    ]
+                )
+                return
+            }
+
+            data.scheduledDate = parsed.date.toISOString()
+            data.dateLabel = parsed.label
             setActiveFlow({ ...flow, step: 'confirmar', data })
-            addBotMessage(`✅ Pronto para confirmar:\n\n• Nome: *${data.name}*\n• Prioridade: *${PRIORITY_LABELS[data.priority]}*\n• Data: *${data.dateLabel}*\n\nResponda **sim** ou **não**.`); return
+            addBotMessage(
+                `✅ Pronto para confirmar:\n\n• Nome: *${data.name}*\n• Prioridade: *${PRIORITY_LABELS[data.priority]}*\n• Data: *${data.dateLabel}*\n\nResponda **sim** ou **não**.`,
+                [
+                    { label: '✅ Sim', action_type: 'message', value: 'sim' },
+                    { label: '❌ Não', action_type: 'message', value: 'não' },
+                ]
+            ); return
         }
         if (flow.step === 'confirmar') {
             if (isConfirm(text)) {
@@ -856,7 +996,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     addBotMessage(`✅ Manutenção *"${data.name}"* agendada para *${data.dateLabel}*!\n\nVisível na aba Manutenção do Dashboard.`)
                 } catch { addBotMessage('❌ Erro ao agendar. Tente novamente.'); setActiveFlow(null) }
             } else {
-                addBotMessage('⚠️ Não entendi a confirmação. Responda **sim** para agendar ou **não** para cancelar.')
+                addBotMessage(
+                    '⚠️ Não entendi a confirmação. Responda **sim** para agendar ou **não** para cancelar.',
+                    [
+                        { label: '✅ Sim', action_type: 'message', value: 'sim' },
+                        { label: '❌ Não', action_type: 'message', value: 'não' },
+                    ]
+                )
             }
         }
     }
@@ -1004,13 +1150,33 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             const m = parseMonth(text); const y = parseYear(text) ?? new Date().getFullYear()
             if (m === null) { addBotMessage('⚠️ Não entendi. Ex: "junho 2025"'); return }
             data.endMonth = m; data.endYear = y; setActiveFlow({ ...flow, step: 'formato', data })
-            addBotMessage(`📅 Fim: *${MONTH_NAMES[m]} ${y}*\n\nQual o **formato**?\n• PDF\n• CSV\n• Excel`); return
+            addBotMessage(
+                `📅 Fim: *${MONTH_NAMES[m]} ${y}*\n\nQual o **formato**?\n• PDF\n• CSV\n• Excel`,
+                [
+                    { label: '📄 PDF', action_type: 'message', value: 'PDF' },
+                    { label: '📊 CSV', action_type: 'message', value: 'CSV' },
+                    { label: '📑 Excel', action_type: 'message', value: 'Excel' },
+                ]
+            ); return
         }
         if (flow.step === 'formato') {
-            const lower = text.toLowerCase()
-            let fmt = 'pdf'
+            const lower = text.toLowerCase().trim()
+            let fmt: string | null = null
             if (lower.includes('csv')) fmt = 'csv'
             else if (lower.includes('excel') || lower.includes('xlsx')) fmt = 'excel'
+            else if (lower.includes('pdf')) fmt = 'pdf'
+
+            if (!fmt) {
+                addBotMessage(
+                    '⚠️ Formato não reconhecido. Por favor, escolha uma das opções válidas:\n• **PDF**\n• **CSV**\n• **Excel**',
+                    [
+                        { label: '📄 PDF', action_type: 'message', value: 'PDF' },
+                        { label: '📊 CSV', action_type: 'message', value: 'CSV' },
+                        { label: '📑 Excel', action_type: 'message', value: 'Excel' },
+                    ]
+                )
+                return
+            }
             const filtered = cachedIndicators.current.filter((ind: any) => {
                 const d = new Date(ind.measured_at); const im = d.getMonth(); const iy = d.getFullYear()
                 return (iy > data.startYear || (iy === data.startYear && im >= data.startMonth)) &&
@@ -1232,12 +1398,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
     }
 
-    const addBotMessage = (text: string) => {
+    const addBotMessage = (text: string, suggestions?: QuickSuggestionPayload[]) => {
         setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'bot',
             text,
             timestamp: new Date(),
+            suggestions,
         }])
         scrollToBottom()
     }
