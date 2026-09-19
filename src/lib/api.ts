@@ -183,9 +183,29 @@ const AI_SERVICE_URL = (() => {
   return process.env.EXPO_PUBLIC_AI_SERVICE_URL || 'http://192.168.15.14:5000';
 })();
 
+export interface ChatMessagePayload {
+  role: 'user' | 'bot';
+  text: string;
+}
+
+export interface ChatContextPayload {
+  last_intent?: string;
+  last_topic?: string;
+  selected_biodigestor?: string;
+  period?: string;
+}
+
+export interface QuickSuggestionPayload {
+  label: string;
+  action_type: 'message' | 'action';
+  value: string;
+}
+
 export const chatbotApi = {
   send: (data: {
     message: string;
+    history?: ChatMessagePayload[];
+    context?: ChatContextPayload;
     markers?: any[];
     indicators?: any[];
   }) =>
