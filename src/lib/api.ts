@@ -176,16 +176,9 @@ export const profileApi = {
 };
 
 // ==========================================
-// AI Service (Python - TF-IDF + SVM Chatbot + Busca Semântica)
+// Assistente de IA. O frontend conversa somente com a API autenticada do
+// BioDash; o backend injeta os dados do usuário e chama o serviço Python.
 // ==========================================
-// No browser (Expo Web), usa localhost; no app mobile, usa o IP configurado
-const AI_SERVICE_URL = (() => {
-  if (typeof window !== 'undefined' && window?.location?.hostname === 'localhost') {
-    return 'http://localhost:5000';
-  }
-  return process.env.EXPO_PUBLIC_AI_SERVICE_URL || 'http://192.168.15.14:5000';
-})();
-
 export interface ChatMessagePayload {
   role: 'user' | 'bot';
   text: string;
@@ -211,10 +204,8 @@ export const chatbotApi = {
     message: string;
     history?: ChatMessagePayload[];
     context?: ChatContextPayload;
-    markers?: any[];
-    indicators?: any[];
   }) =>
-    apiRequest(`${AI_SERVICE_URL}/chatbot`, {
+    authRequest(`${API_BASE_URL}/chatbot`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -229,20 +220,19 @@ export const chatbotApi = {
 };
 
 export const semanticSearchApi = {
-  search: (data: { query: string; markers?: any[] }) =>
-    apiRequest(`${AI_SERVICE_URL}/semantic-search`, {
+  search: (data: { query: string }) =>
+    authRequest(`${API_BASE_URL}/semantic-search`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 };
 
 // ==========================================
-// biodigestoresApi — Busca diretamente do Supabase via AI Service
-// Permite ao chatbot consultar endereços sem depender do payload do frontend
+// biodigestoresApi — Busca via API autenticada
 // ==========================================
 export const biodigestoresApi = {
   fetch: (userId: string) =>
-    apiRequest(`${AI_SERVICE_URL}/biodigestores?user_id=${encodeURIComponent(userId)}`, {
+    authRequest(`${API_BASE_URL}/markers?user_id=${encodeURIComponent(userId)}`, {
       method: "GET",
     }),
 };
