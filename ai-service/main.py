@@ -17,14 +17,18 @@ Run: uvicorn main:app --host 0.0.0.0 --port 5000 --reload
 import os
 import re
 from enum import Enum
+import tempfile
+import threading
+from pathlib import Path
 from typing import Optional, List, Any, Dict
 
 import httpx
 import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
 from sklearn.metrics.pairwise import cosine_similarity
@@ -37,6 +41,64 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Limiar mínimo de confiança do classificador SVM
 CONFIDENCE_THRESHOLD = 0.25
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(20 * 1024 * 1024)))
+WHISPER_INITIAL_PROMPT = os.getenv(
+    "WHISPER_INITIAL_PROMPT",
+    (
+        "Conversa em português brasileiro sobre o sistema BioDash. "
+        "Vocabulário: biodigestor, biodigestores, resíduos, energia, kWh, "
+        "quilogramas, benefícios fiscais, métricas, manutenção, relatório, "
+        "endereço, localização e CEP."
+    ),
+)
+
+_whisper_model = None
+_whisper_model_lock = threading.Lock()
+
+
+def get_whisper_model():
+    """Carrega o modelo apenas na primeira transcrição."""
+    global _whisper_model
+    if _whisper_model is None:
+        with _whisper_model_lock:
+            if _whisper_model is None:
+                from faster_whisper import WhisperModel
+                _whisper_model = WhisperModel(
+                    WHISPER_MODEL,
+                    device=WHISPER_DEVICE,
+                    compute_type=WHISPER_COMPUTE_TYPE,
+                )
+    return _whisper_model
+
+
+def transcribe_file(path: str) -> Dict[str, Any]:
+    model = get_whisper_model()
+    segments, info = model.transcribe(
+        path,
+        language="pt",
+        task="transcribe",
+        vad_filter=True,
+        vad_parameters={
+            "min_silence_duration_ms": 350,
+            "speech_pad_ms": 300,
+        },
+        beam_size=5,
+        best_of=5,
+        patience=1.0,
+        temperature=0.0,
+        condition_on_previous_text=False,
+        initial_prompt=WHISPER_INITIAL_PROMPT,
+    )
+    text = " ".join(segment.text.strip() for segment in segments).strip()
+    return {
+        "text": text,
+        "language": info.language,
+        "duration": round(float(info.duration), 2),
+        "model": WHISPER_MODEL,
+    }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # APP SETUP
@@ -709,6 +771,43 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """Transcreve áudio gravado pelo browser usando Whisper local."""
+    allowed_prefixes = ("audio/", "video/webm")
+    content_type = (audio.content_type or "").lower()
+    if content_type and not content_type.startswith(allowed_prefixes):
+        raise HTTPException(status_code=415, detail="Formato de áudio não suportado.")
+
+    contents = await audio.read(MAX_AUDIO_BYTES + 1)
+    await audio.close()
+    if not contents:
+        raise HTTPException(status_code=400, detail="O arquivo de áudio está vazio.")
+    if len(contents) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="O áudio excede o limite permitido.")
+
+    suffix = Path(audio.filename or "voice-message.webm").suffix.lower()
+    if suffix not in {".webm", ".ogg", ".mp4", ".m4a", ".wav", ".mpeg", ".mp3"}:
+        suffix = ".webm"
+
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+            temp_file.write(contents)
+            temp_path = temp_file.name
+        result = await run_in_threadpool(transcribe_file, temp_path)
+        if not result["text"]:
+            raise HTTPException(status_code=422, detail="Nenhuma fala foi reconhecida.")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Falha ao transcrever áudio: {exc}") from exc
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
 
 
 @app.get("/biodigestores")
