@@ -27,6 +27,7 @@ import {
     Alert,
     Animated,
     Keyboard,
+    Image,
 } from 'react-native'
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -924,8 +925,12 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 isUser ? styles.userWrapper : styles.botWrapper
             ]}>
                 {!isUser && (
-                    <View style={[styles.botAvatar, { backgroundColor: '#16a34a' }]}>
-                        <Text style={{ fontSize: 14 }}>🌿</Text>
+                    <View style={styles.botAvatar}>
+                        <Image
+                            source={require('../../assets/biodash-assistent.png')}
+                            style={styles.botAvatarImage}
+                            resizeMode="cover"
+                        />
                     </View>
                 )}
                 <View style={[
@@ -984,7 +989,11 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 )}
                 <View style={styles.headerInfo}>
                     <View style={styles.avatarContainer}>
-                        <Text style={{ fontSize: 22 }}>🌿</Text>
+                        <Image
+                            source={require('../../assets/biodash-assistent.png')}
+                            style={styles.avatarImage}
+                            resizeMode="cover"
+                        />
                     </View>
                     <View>
                         <Text style={[styles.headerTitle, { color: colors.text }]}>Assistente BioDash</Text>
@@ -1185,6 +1194,12 @@ const styles = StyleSheet.create({
         backgroundColor: '#dcfce7',
         alignItems: 'center',
         justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    avatarImage: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
     },
     headerTitle: {
         fontSize: 16,
@@ -1287,6 +1302,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 2,
+        overflow: 'hidden',
+    },
+    botAvatarImage: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
     },
     bubble: {
         borderRadius: 16,
