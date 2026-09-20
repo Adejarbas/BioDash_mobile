@@ -29,6 +29,8 @@ import {
     Keyboard,
     Linking,
     Image,
+    Modal,
+    ScrollView,
 } from 'react-native'
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -273,7 +275,7 @@ function TypingDots({ color }: { color: string }) {
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
-    const { colors } = useTheme()
+    const { colors, theme } = useTheme()
     const insets = useSafeAreaInsets()
     const flatListRef = useRef<FlatList>(null)
 
@@ -301,6 +303,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const [searchResults, setSearchResults] = useState<any[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const [showSearch, setShowSearch] = useState(false)
+    const [showActionsModal, setShowActionsModal] = useState(false)
     const [activeFlow, setActiveFlow] = useState<FlowState | null>(null)
 
     // Dados em cache para evitar múltiplas requisições
@@ -1446,43 +1449,81 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     </View>
                 </View>
 
-                {/* Sugestões interativas logo abaixo da resposta do bot */}
+                {/* Sugestões interativas contextuais do bot */}
                 {!isUser && item.suggestions && item.suggestions.length > 0 && (
                     <View style={styles.inlineSuggestionsContainer}>
-                        {item.suggestions.map((sug, idx) => (
-                            <TouchableOpacity
-                                key={idx}
-                                style={[styles.inlineSuggestionBtn, { borderColor: colors.primary, backgroundColor: colors.cardBackground }]}
-                                onPress={() => {
-                                    if (sug.action_type === 'action') {
-                                        handleChatAction(sug.value)
-                                    } else {
-                                        sendMessage(sug.value)
-                                    }
-                                }}
-                            >
-                                <Text style={[styles.inlineSuggestionText, { color: colors.primary }]}>{sug.label}</Text>
-                            </TouchableOpacity>
-                        ))}
+                        <View style={styles.inlineSuggestionsHeader}>
+                            <MaterialIcons name="auto-awesome" size={13} color={colors.primary} />
+                            <Text style={[styles.inlineSuggestionsTitle, { color: colors.primary }]}>
+                                Sugestões
+                            </Text>
+                        </View>
+                        <View style={styles.inlineSuggestionsList}>
+                            {item.suggestions.map((sug, idx) => (
+                                <TouchableOpacity
+                                    key={idx}
+                                    style={[
+                                        styles.inlineSuggestionBtn,
+                                        {
+                                            borderColor: theme === 'dark' ? 'rgba(74, 222, 128, 0.35)' : 'rgba(22, 163, 74, 0.25)',
+                                            backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.15)' : '#f0fdf4',
+                                        }
+                                    ]}
+                                    disabled={isLoading}
+                                    onPress={() => {
+                                        if (sug.action_type === 'action') {
+                                            handleChatAction(sug.value)
+                                        } else {
+                                            sendMessage(sug.value)
+                                        }
+                                    }}
+                                >
+                                    <Text style={[styles.inlineSuggestionText, { color: theme === 'dark' ? '#4ade80' : '#15803d' }]}>
+                                        {sug.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
                     </View>
                 )}
             </View>
         )
     }
 
-    // ─── Atalhos rápidos ─────────────────────────────────────────────────────
-    const quickReplies = [
-        { label: '⚙️ Operação', text: 'Como funciona a operação do biodigestor?' },
-        { label: '📍 Endereço', text: 'Qual o endereço do biodigestor?' },
-        { label: '⚡ Energia', text: 'Quanta energia foi gerada?' },
-        { label: '♻️ Resíduos', text: 'Quantos resíduos foram processados?' },
-        { label: '📊 Métricas', text: 'Quais são as métricas do biodigestor?' },
-        { label: '🔧 Manutenção', text: 'Agendar manutenção' },
-        { label: '📈 Registrar', text: 'Adicionar métricas' },
-        { label: '📍 Novo BD', text: 'Adicionar biodigestor' },
-        { label: '📅 Por Período', text: 'Relatório por período' },
-        { label: '📄 PDF', text: 'Gera um relatório em PDF' },
-        { label: '📋 Excel', text: 'Exportar Excel' },
+    // ─── Categorias de Atalhos Rápidos (Menu de Ajuda) ────────────────────────
+    const quickActionCategories = [
+        {
+            title: '⚙️ Consultas Operacionais',
+            items: [
+                { icon: 'settings', label: 'Operação', text: 'Como funciona a operação do biodigestor?' },
+                { icon: 'bolt', label: 'Energia Gerada', text: 'Quanta energia foi gerada?' },
+                { icon: 'recycling', label: 'Resíduos Processados', text: 'Quantos resíduos foram processados?' },
+                { icon: 'insert-chart', label: 'Métricas Gerais', text: 'Quais são as métricas do biodigestor?' },
+                { icon: 'location-on', label: 'Localização / Endereço', text: 'Qual o endereço do biodigestor?' },
+            ]
+        },
+        {
+            title: '🛠️ Ações e Registros',
+            items: [
+                { icon: 'build', label: 'Agendar Manutenção', text: 'Agendar manutenção' },
+                { icon: 'edit', label: 'Registrar Métrica', text: 'Adicionar métricas' },
+                { icon: 'add-location', label: 'Novo Biodigestor', text: 'Adicionar biodigestor' },
+            ]
+        },
+        {
+            title: '📄 Relatórios e Exportação',
+            items: [
+                { icon: 'picture-as-pdf', label: 'Relatório em PDF', text: 'Gera um relatório em PDF' },
+                { icon: 'table-chart', label: 'Exportar para Excel', text: 'Exportar Excel' },
+                { icon: 'date-range', label: 'Relatório por Período', text: 'Relatório por período' },
+            ]
+        },
+        {
+            title: '📞 Suporte',
+            items: [
+                { icon: 'support-agent', label: 'Suporte Técnico', text: 'Como entro em contato com o suporte?' },
+            ]
+        }
     ]
 
     // ─── Render ───────────────────────────────────────────────────────────────
@@ -1520,13 +1561,23 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         </View>
                     </View>
                 </View>
-                <TouchableOpacity
-                    onPress={() => setShowSearch(!showSearch)}
-                    style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
-                    id="chatbot-search-toggle"
-                >
-                    <MaterialIcons name="search" size={20} color={colors.text} />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                        onPress={() => setShowActionsModal(true)}
+                        style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
+                        id="chatbot-actions-header-button"
+                        accessibilityLabel="Menu de ações rápidas"
+                    >
+                        <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setShowSearch(!showSearch)}
+                        style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
+                        id="chatbot-search-toggle"
+                    >
+                        <MaterialIcons name="search" size={20} color={colors.text} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Busca Semântica (colapsável) */}
@@ -1599,26 +1650,6 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 </View>
             )}
 
-            {/* Atalhos Rápidos */}
-            <View style={styles.quickRepliesContainer}>
-                <FlatList
-                    horizontal
-                    data={quickReplies}
-                    keyExtractor={(item) => item.label}
-                    renderItem={({ item }) => (
-                        <TouchableOpacity
-                            style={[styles.quickReply, { borderColor: colors.primary, backgroundColor: colors.cardBackground }]}
-                            onPress={() => sendMessage(item.text)}
-                            id={`quick-reply-${item.label.replace(/[^a-zA-Z0-9]/g, '-')}`}
-                        >
-                            <Text style={[styles.quickReplyText, { color: colors.primary }]}>{item.label}</Text>
-                        </TouchableOpacity>
-                    )}
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingHorizontal: 12 }}
-                />
-            </View>
-
             {/* Input de Mensagem */}
             <View style={[styles.inputContainer, {
                 backgroundColor: colors.cardBackground,
@@ -1641,6 +1672,16 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     </View>
                 )}
                 <Animated.View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: animatedBorderColor }]}>
+                    {/* Botão de Menu de Ações Rápidas */}
+                    <TouchableOpacity
+                        style={[styles.actionMenuBtn, { backgroundColor: colors.iconBg }]}
+                        onPress={() => setShowActionsModal(true)}
+                        id="chatbot-actions-input-button"
+                        accessibilityLabel="Menu de ações rápidas"
+                    >
+                        <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+
                     <TextInput
                         style={[
                             styles.textInput,
@@ -1700,6 +1741,88 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 </Animated.View>
             </View>
         </KeyboardAvoidingView>
+
+        {/* Modal de Ajuda & Opções do Assistente */}
+        <Modal
+            visible={showActionsModal}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setShowActionsModal(false)}
+        >
+            <TouchableOpacity
+                style={styles.modalBackdrop}
+                activeOpacity={1}
+                onPress={() => setShowActionsModal(false)}
+            >
+                <TouchableOpacity
+                    activeOpacity={1}
+                    style={[
+                        styles.modalContent,
+                        {
+                            backgroundColor: colors.cardBackground,
+                            borderTopColor: colors.border,
+                        }
+                    ]}
+                >
+                    {/* Drag Handle */}
+                    <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+
+                    {/* Header do Modal */}
+                    <View style={styles.modalHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={[styles.modalHeaderIcon, { backgroundColor: colors.iconBg }]}>
+                                <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                            </View>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Menu de Ações Rápidas</Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => setShowActionsModal(false)}
+                            style={[styles.modalCloseBtn, { backgroundColor: colors.iconBg }]}
+                        >
+                            <MaterialIcons name="close" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ paddingBottom: 28 }}
+                    >
+                        {quickActionCategories.map((category, catIdx) => (
+                            <View key={catIdx} style={styles.categorySection}>
+                                <Text style={[styles.categoryTitle, { color: colors.textMuted }]}>
+                                    {category.title}
+                                </Text>
+                                <View style={styles.categoryGrid}>
+                                    {category.items.map((action, actIdx) => (
+                                        <TouchableOpacity
+                                            key={actIdx}
+                                            style={[
+                                                styles.actionCard,
+                                                {
+                                                    backgroundColor: colors.background,
+                                                    borderColor: colors.border,
+                                                }
+                                            ]}
+                                            onPress={() => {
+                                                setShowActionsModal(false)
+                                                sendMessage(action.text)
+                                            }}
+                                        >
+                                            <View style={[styles.actionIconContainer, { backgroundColor: colors.iconBg }]}>
+                                                <MaterialIcons name={action.icon as any} size={18} color={colors.primary} />
+                                            </View>
+                                            <Text style={[styles.actionCardText, { color: colors.text }]}>
+                                                {action.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+                        ))}
+                    </ScrollView>
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
         </View>
     )
 }
@@ -1899,19 +2022,12 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '500',
     },
-    quickRepliesContainer: {
-        paddingVertical: 8,
-    },
-    quickReply: {
-        borderWidth: 1,
-        borderRadius: 20,
-        paddingHorizontal: 14,
-        paddingVertical: 7,
-        marginRight: 8,
-    },
-    quickReplyText: {
-        fontSize: 12,
-        fontWeight: '600',
+    actionMenuBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     inputContainer: {
         paddingHorizontal: 16,
@@ -1942,17 +2058,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 1.5,
         borderRadius: 26,
-        paddingHorizontal: 14,
+        paddingHorizontal: 10,
         paddingVertical: Platform.OS === 'web' ? 6 : (Platform.OS === 'ios' ? 8 : 4),
         minHeight: 52,
-        gap: 8,
+        gap: 6,
     },
     textInput: {
         flex: 1,
         fontSize: 15,
         lineHeight: 20,
         maxHeight: 120,
-        paddingHorizontal: 10,
+        paddingHorizontal: 6,
         paddingVertical: Platform.OS === 'web' ? 8 : 6,
         ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
     },
@@ -1971,12 +2087,26 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     inlineSuggestionsContainer: {
+        marginTop: 8,
+        marginLeft: 40,
+        marginRight: 16,
+    },
+    inlineSuggestionsHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 6,
+    },
+    inlineSuggestionsTitle: {
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    inlineSuggestionsList: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 6,
-        marginTop: 6,
-        marginLeft: 40,
-        marginRight: 16,
     },
     inlineSuggestionBtn: {
         borderWidth: 1,
@@ -1986,6 +2116,85 @@ const styles = StyleSheet.create({
     },
     inlineSuggestionText: {
         fontSize: 12,
+        fontWeight: '600',
+    },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderTopWidth: 1,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        maxHeight: '75%',
+    },
+    modalHandle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: 14,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 16,
+    },
+    modalHeaderIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    modalCloseBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    categorySection: {
+        marginBottom: 18,
+    },
+    categoryTitle: {
+        fontSize: 12,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 10,
+    },
+    categoryGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    actionCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        gap: 8,
+    },
+    actionIconContainer: {
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    actionCardText: {
+        fontSize: 13,
         fontWeight: '600',
     },
 })
