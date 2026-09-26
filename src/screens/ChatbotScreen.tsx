@@ -44,7 +44,8 @@ import * as FileSystem from 'expo-file-system/legacy'
 import {
     ExpoSpeechRecognitionModule,
     useSpeechRecognitionEvent,
-} from 'expo-speech-recognition'
+    isSpeechRecognitionAvailable,
+} from '../services/speechRecognition'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -396,7 +397,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 webMediaStreamRef.current = null
                 webAudioChunksRef.current = []
             } else {
-                ExpoSpeechRecognitionModule.abort()
+                ExpoSpeechRecognitionModule?.abort?.()
             }
         }
     }, [])
@@ -668,6 +669,15 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
 
         // ── Nativo (iOS / Android) via expo-speech-recognition ─────────────
+        if (!isSpeechRecognitionAvailable || !ExpoSpeechRecognitionModule) {
+            updateVoiceMode(null)
+            Alert.alert(
+                'Reconhecimento de Voz',
+                'O reconhecimento de voz nativo requer uma Development Build (APK de desenvolvimento) e não é suportado no Expo Go padrão.\n\nPara utilizar o microfone no celular, gere a build de desenvolvimento com:\nnpx expo run:android\n\nNo Expo Go, você pode utilizar o chat normalmente digitando mensagens.'
+            )
+            return
+        }
+
         // Solicita permissão de microfone
         const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
         if (!result.granted) {
@@ -738,7 +748,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
 
         updateListeningState(false)
-        if (hadActiveSession) ExpoSpeechRecognitionModule.stop()
+        if (hadActiveSession) ExpoSpeechRecognitionModule?.stop?.()
     }
 
     const handleMicPress = () => {
