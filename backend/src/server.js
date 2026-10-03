@@ -1,7 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose');
+const supabase = require('./lib/supabase');
 // Pool PostgreSQL compartilhado — criado apenas uma vez aqui
 const pgPool = require('./database/pg');
 
@@ -39,27 +39,7 @@ app.use(cors({
 app.use(express.json());
 
 // ==========================================
-// 1. Conexão com MongoDB (EC2 - Geolocalização)
-// URI sem autenticação, conforme configuração da EC2
-// ==========================================
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('🟢 Conectado ao MongoDB (AWS EC2)'))
-  .catch((err) => console.error('🔴 Erro de conexão com MongoDB:', err));
-
-// Schema e Modelo de Marcadores do Mapa
-const markerSchema = new mongoose.Schema({
-  userId: { type: String, required: true, index: true }, // ← vínculo com o usuário autenticado
-  title: { type: String, required: true },
-  latitude: { type: Number, required: true },
-  longitude: { type: Number, required: true },
-  description: { type: String, default: '' },
-  address: { type: Object, default: {} },
-  createdAt: { type: Date, default: Date.now },
-});
-const Marker = mongoose.model('Marker', markerSchema);
-
-// ==========================================
-// 2. Conexão com PostgreSQL (RDS - Dados Principais)
+// 1. Conexão com PostgreSQL (Supabase - Dados Principais)
 // ==========================================
 pgPool.connect()
   .then(client => {
@@ -88,12 +68,31 @@ app.get('/api/health', (req, res) => {
 
 
 // ==========================================
-// Rotas - MongoDB (Mapas / Geolocalização)
+// Rotas - Supabase (Mapas / Geolocalização)
+// Tabela: biodigestor_maps (id, user_id uuid, address json, created_at)
 // ==========================================
+
 // GET /api/markers — retorna apenas os marcadores do usuário autenticado
 app.get('/api/markers', authMiddleware, async (req, res) => {
   try {
-    const markers = await Marker.find({ userId: req.user.id });
+    const { rows } = await pgPool.query(
+      'SELECT * FROM biodigestor_maps WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+
+    // Normaliza para o formato esperado pelo frontend
+    const markers = rows.map(row => ({
+      _id: String(row.id),
+      id: String(row.id),
+      userId: row.user_id,
+      title: row.address?.title || 'Biodigestor',
+      latitude: row.address?.latitude || -14.235,
+      longitude: row.address?.longitude || -51.925,
+      description: row.address?.description || '',
+      address: row.address || {},
+      createdAt: row.created_at,
+    }));
+
     res.json({ success: true, data: markers });
   } catch (error) {
     console.error('Erro ao buscar marcadores:', error);
@@ -104,23 +103,64 @@ app.get('/api/markers', authMiddleware, async (req, res) => {
 // POST /api/markers — cria ou atualiza marcador vinculado ao usuário autenticado
 app.post('/api/markers', authMiddleware, async (req, res) => {
   try {
-    // Verifica se é um update (tem id) e se pertence ao usuário
+    const addressPayload = {
+      title: req.body.title,
+      latitude: req.body.latitude,
+      longitude: req.body.longitude,
+      description: req.body.description || '',
+      ...(req.body.address || {}),
+    };
+
+    // Atualização (tem id)
     if (req.body.id) {
-      const existing = await Marker.findOne({ _id: req.body.id, userId: req.user.id });
-      if (!existing) {
+      const checkRes = await pgPool.query(
+        'SELECT id FROM biodigestor_maps WHERE id = $1 AND user_id = $2',
+        [req.body.id, req.user.id]
+      );
+
+      if (checkRes.rowCount === 0) {
         return res.status(404).json({ success: false, message: 'Marcador não encontrado ou sem permissão.' });
       }
-      const updated = await Marker.findByIdAndUpdate(
-        req.body.id,
-        { title: req.body.title, latitude: req.body.latitude, longitude: req.body.longitude, description: req.body.description, address: req.body.address },
-        { new: true }
+
+      const updateRes = await pgPool.query(
+        'UPDATE biodigestor_maps SET address = $1 WHERE id = $2 RETURNING *',
+        [addressPayload, req.body.id]
       );
-      return res.json({ success: true, data: updated });
+
+      const updated = updateRes.rows[0];
+
+      return res.json({
+        success: true,
+        data: {
+          _id: String(updated.id),
+          id: String(updated.id),
+          userId: updated.user_id,
+          ...addressPayload,
+          address: addressPayload,
+          createdAt: updated.created_at,
+        }
+      });
     }
-    // Novo marcador — vincula ao usuário autenticado
-    const newMarker = new Marker({ ...req.body, userId: req.user.id });
-    const saved = await newMarker.save();
-    res.json({ success: true, data: saved });
+
+    // Novo marcador
+    const insertRes = await pgPool.query(
+      'INSERT INTO biodigestor_maps (user_id, address) VALUES ($1, $2) RETURNING *',
+      [req.user.id, addressPayload]
+    );
+
+    const inserted = insertRes.rows[0];
+
+    res.json({
+      success: true,
+      data: {
+        _id: String(inserted.id),
+        id: String(inserted.id),
+        userId: inserted.user_id,
+        ...addressPayload,
+        address: addressPayload,
+        createdAt: inserted.created_at,
+      }
+    });
   } catch (error) {
     console.error('Erro ao salvar marcador:', error);
     res.status(500).json({ success: false, message: 'Erro ao salvar marcador' });
@@ -130,10 +170,15 @@ app.post('/api/markers', authMiddleware, async (req, res) => {
 // DELETE /api/markers/:id — remove marcador apenas se pertencer ao usuário autenticado
 app.delete('/api/markers/:id', authMiddleware, async (req, res) => {
   try {
-    const deleted = await Marker.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
-    if (!deleted) {
+    const result = await pgPool.query(
+      'DELETE FROM biodigestor_maps WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+
+    if (result.rowCount === 0) {
       return res.status(404).json({ success: false, message: 'Marcador não encontrado ou sem permissão.' });
     }
+
     res.json({ success: true, message: 'Marcador removido com sucesso' });
   } catch (error) {
     console.error('Erro ao deletar marcador:', error);

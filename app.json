@@ -23,6 +23,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Permitir que o BioDash acesse o microfone para reconhecimento de voz.",
+          "speechRecognitionPermission": "Permitir que o BioDash use o reconhecimento de voz para transcrever suas mensagens."
+        }
+      ]
+    ]
   }
-}
+}

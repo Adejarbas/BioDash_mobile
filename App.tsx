@@ -10,6 +10,7 @@ import CompanyProfileScreen from './src/screens/CompanyProfileScreen'
 import NotificationsScreen from './src/screens/NotificationsScreen'
 import TermsScreen from './src/screens/TermsScreen'
 import HelpCenterScreen from './src/screens/HelpCenterScreen'
+import ChatbotScreen from './src/screens/ChatbotScreen'
 import { StatusBar } from 'expo-status-bar'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
@@ -21,7 +22,7 @@ const TEST_MODE = false; // <--- MODO DE TESTE DESATIVADO
 type SubScreen = 'none' | 'profile' | 'notifications' | 'terms' | 'helpCenter';
 
 function MainTabs({ onLogout }: { onLogout: () => void }) {
-  const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home')
+  const [activeTab, setActiveTab] = useState<'home' | 'chatbot' | 'settings'>('home')
   const [currentSubScreen, setCurrentSubScreen] = useState<SubScreen>('none')
   const { theme, toggleTheme, colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -44,6 +45,8 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
       <View style={{ flex: 1 }}>
         {activeTab === 'home' ? (
           <DashboardScreen />
+        ) : activeTab === 'chatbot' ? (
+          <ChatbotScreen />
         ) : currentSubScreen === 'profile' ? (
           <CompanyProfileScreen onBack={() => setCurrentSubScreen('none')} />
         ) : currentSubScreen === 'notifications' ? (
@@ -72,9 +75,23 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
             setCurrentSubScreen('none');
           }}
           activeOpacity={0.7}
+          id="tab-home"
         >
           <MaterialIcons name="dashboard" size={24} color={activeTab === 'home' ? colors.primary : colors.textMuted} />
           <Text style={[styles.tabLabel, activeTab === 'home' && { color: colors.primary }]}>Painel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.tabItem}
+          onPress={() => {
+            setActiveTab('chatbot');
+            setCurrentSubScreen('none');
+          }}
+          activeOpacity={0.7}
+          id="tab-chatbot"
+        >
+          <MaterialCommunityIcons name="robot-outline" size={24} color={activeTab === 'chatbot' ? colors.primary : colors.textMuted} />
+          <Text style={[styles.tabLabel, activeTab === 'chatbot' && { color: colors.primary }]}>Assistente</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -84,6 +101,7 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
             setCurrentSubScreen('none'); // Reseta a sub-tela ao clicar na tab
           }}
           activeOpacity={0.7}
+          id="tab-settings"
         >
           <MaterialIcons name="settings" size={24} color={activeTab === 'settings' ? colors.primary : colors.textMuted} />
           <Text style={[styles.tabLabel, activeTab === 'settings' && { color: colors.primary }]}>Ajustes</Text>

@@ -1,5 +1,5 @@
 const express = require('express');
-const pgPool = require('../database/pg');
+const supabase = require('../lib/supabase');
 const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
@@ -9,13 +9,20 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const since = new Date();
     since.setMonth(since.getMonth() - 13);
-    const result = await pgPool.query(
-      `SELECT * FROM biodigester_indicators
-       WHERE user_id = $1 AND measured_at >= $2
-       ORDER BY measured_at DESC`,
-      [req.user.id, since.toISOString()]
-    );
-    res.json({ success: true, data: result.rows });
+
+    const { data, error } = await supabase
+      .from('biodigester_indicators')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .gte('measured_at', since.toISOString())
+      .order('measured_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro Supabase ao buscar indicadores:', error);
+      return res.status(500).json({ success: false, message: 'Erro ao buscar indicadores.' });
+    }
+
+    res.json({ success: true, data });
   } catch (err) {
     console.error('Erro ao buscar indicadores:', err);
     res.status(500).json({ success: false, message: 'Erro ao buscar indicadores.' });
@@ -34,26 +41,51 @@ router.post('/', authMiddleware, async (req, res) => {
     const endDate = new Date(yearVal, monthIdx + 1, 0, 23, 59, 59).toISOString();
 
     // Verifica se já existe registro para este mês/ano
-    const existing = await pgPool.query(
-      `SELECT id FROM biodigester_indicators
-       WHERE user_id = $1 AND measured_at >= $2 AND measured_at <= $3
-       LIMIT 1`,
-      [req.user.id, startDate, endDate]
-    );
+    const { data: existing, error: findError } = await supabase
+      .from('biodigester_indicators')
+      .select('id')
+      .eq('user_id', req.user.id)
+      .gte('measured_at', startDate)
+      .lte('measured_at', endDate)
+      .limit(1);
 
-    if (existing.rows.length > 0) {
-      await pgPool.query(
-        `UPDATE biodigester_indicators
-         SET waste_processed = $1, energy_generated = $2, tax_savings = $3, measured_at = $4
-         WHERE id = $5`,
-        [wasteProcessed || 0, energyGenerated || 0, taxSavings || 0, measuredAt, existing.rows[0].id]
-      );
+    if (findError) {
+      console.error('Erro Supabase ao verificar indicador existente:', findError);
+      return res.status(500).json({ success: false, message: 'Erro ao salvar indicador.' });
+    }
+
+    if (existing && existing.length > 0) {
+      // Atualiza o registro existente
+      const { error: updateError } = await supabase
+        .from('biodigester_indicators')
+        .update({
+          waste_processed: wasteProcessed || 0,
+          energy_generated: energyGenerated || 0,
+          tax_savings: taxSavings || 0,
+          measured_at: measuredAt,
+        })
+        .eq('id', existing[0].id);
+
+      if (updateError) {
+        console.error('Erro Supabase ao atualizar indicador:', updateError);
+        return res.status(500).json({ success: false, message: 'Erro ao salvar indicador.' });
+      }
     } else {
-      await pgPool.query(
-        `INSERT INTO biodigester_indicators (user_id, waste_processed, energy_generated, tax_savings, measured_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [req.user.id, wasteProcessed || 0, energyGenerated || 0, taxSavings || 0, measuredAt]
-      );
+      // Insere novo registro
+      const { error: insertError } = await supabase
+        .from('biodigester_indicators')
+        .insert({
+          user_id: req.user.id,
+          waste_processed: wasteProcessed || 0,
+          energy_generated: energyGenerated || 0,
+          tax_savings: taxSavings || 0,
+          measured_at: measuredAt,
+        });
+
+      if (insertError) {
+        console.error('Erro Supabase ao inserir indicador:', insertError);
+        return res.status(500).json({ success: false, message: 'Erro ao salvar indicador.' });
+      }
     }
 
     res.json({ success: true, message: 'Indicador salvo com sucesso.' });

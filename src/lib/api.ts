@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// URL base do Express (EC2 AWS - node/express conectado ao MongoDB e PostgreSQL RDS) na porta 3003
+// API única do BioDash. No desenvolvimento, o Next.js roda na porta 3003.
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL || "http://biodash-api.duckdns.org:3003/api";
 
@@ -29,10 +29,13 @@ export async function apiRequest<T = any>(
     ? endpoint
     : `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
   const config: RequestInit = {
     ...options,
+    credentials: options.credentials ?? "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...options.headers,
     },
   };
@@ -52,7 +55,7 @@ export async function apiRequest<T = any>(
     if (!res.ok) {
       return {
         success: false,
-        error: data.message || `Erro ${res.status}: ${res.statusText}`,
+        error: data.error || data.message || `Erro ${res.status}: ${res.statusText}`,
       };
     }
 
@@ -169,5 +172,67 @@ export const profileApi = {
     authRequest(`${API_BASE_URL}/profile`, {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+};
+
+// ==========================================
+// Assistente de IA. O frontend conversa somente com a API autenticada do
+// BioDash; o backend injeta os dados do usuário e chama o serviço Python.
+// ==========================================
+export interface ChatMessagePayload {
+  role: 'user' | 'bot';
+  text: string;
+}
+
+export interface ChatContextPayload {
+  last_intent?: string;
+  last_topic?: string;
+  last_operational_topic?: string;
+  last_question_type?: string;
+  selected_biodigestor?: string;
+  period?: string;
+}
+
+export interface QuickSuggestionPayload {
+  label: string;
+  action_type: 'message' | 'action';
+  value: string;
+}
+
+export const chatbotApi = {
+  send: (data: {
+    message: string;
+    history?: ChatMessagePayload[];
+    context?: ChatContextPayload;
+  }) =>
+    authRequest(`${API_BASE_URL}/chatbot`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  transcribeAudio: (audio: Blob, filename = "voice-message.webm") => {
+    const formData = new FormData();
+    formData.append("audio", audio, filename);
+    return authRequest<{ text: string }>(`${API_BASE_URL}/chatbot/transcribe`, {
+      method: "POST",
+      body: formData,
+    });
+  },
+};
+
+export const semanticSearchApi = {
+  search: (data: { query: string }) =>
+    authRequest(`${API_BASE_URL}/semantic-search`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};
+
+// ==========================================
+// biodigestoresApi — Busca via API autenticada
+// ==========================================
+export const biodigestoresApi = {
+  fetch: (userId: string) =>
+    authRequest(`${API_BASE_URL}/markers?user_id=${encodeURIComponent(userId)}`, {
+      method: "GET",
     }),
 };
