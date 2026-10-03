@@ -47,3 +47,7 @@ _referencias_web/
 __pycache__/
 *.pyc
 
+
+# Backups locais de env (contem credenciais) e dumps temporarios
+*.bak
+git_status.txt
