@@ -185,27 +185,27 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${{ steps.version.outputs.new_version }}
           build-args: |
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL }}
-            EXPO_PUBLIC_NEXT_API_URL=${{ secrets.EXPO_PUBLIC_NEXT_API_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy to EC2
-        if: github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-            docker stop biodash_mobile_web || true
-            docker rm biodash_mobile_web || true
-            docker run -d \
-              --name biodash_mobile_web \
-              --restart unless-stopped \
-              -p 80:80 \
-              ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-            docker image prune -f
+      # Deploy legado na AWS EC2 desativado (Migração para Azure Container Apps em andamento)
+      # - name: Deploy to EC2
+      #   if: github.ref == 'refs/heads/main'
+      #   uses: appleboy/ssh-action@v1.0.3
+      #   with:
+      #     host: ${{ secrets.EC2_HOST }}
+      #     username: ${{ secrets.EC2_USER }}
+      #     key: ${{ secrets.EC2_SSH_KEY }}
+      #     script: |
+      #       docker pull ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
+      #       docker stop biodash_mobile_web || true
+      #       docker rm biodash_mobile_web || true
+      #       docker run -d \
+      #         --name biodash_mobile_web \
+      #         --restart unless-stopped \
+      #         -p 80:80 \
+      #         ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
+      #       docker image prune -f
 
       # Envio de e-mail quando pipeline FALHAR
       # - name: Enviar email se falhar
