@@ -2,13 +2,21 @@
   "name": "biodash-mobile",
   "version": "0.18.0",
   "main": "index.ts",
-  "scripts": {
+    "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
-    "ai": "cd ai-service && uv run --python 3.11 --with-requirements requirements.txt uvicorn main:app --host 127.0.0.1 --port 5000"
+    "ai": "cd ai-service && uv run --python 3.11 --with-requirements requirements.txt uvicorn main:app --host 127.0.0.1 --port 5000",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:build": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker ps",
+    "docker:front": "docker compose up -d biodash-mobile",
+    "docker:back": "docker compose up -d biodash-backend",
+    "docker:ai": "docker compose -f docker-compose.chatbot.yml up -d"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1035.0",
