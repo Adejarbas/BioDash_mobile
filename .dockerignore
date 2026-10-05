@@ -13,3 +13,6 @@ web-build
 .vscode
 .env
 .env.*
+backend
+ai-service
+

@@ -1,31 +1,7 @@
 services:
   # ==========================================
-  # Backend Express (PostgreSQL RDS + MongoDB)
-  # EC2: 100.30.203.65 — porta 3003
-  # ==========================================
-  biodash-backend:
-    image: thiagohmn93/biodash_backend:latest
-    build:
-      context: .
-      args:
-        EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL}
-        EXPO_PUBLIC_NEXT_API_URL: ${EXPO_PUBLIC_NEXT_API_URL:-$EXPO_PUBLIC_API_URL}
-    ports:
-      - "3003:3003"
-    env_file:
-      - ./backend/.env
-    container_name: biodash_backend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3003/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  # ==========================================
   # Frontend Expo Web (Nginx)
-  # EC2: 98.83.234.240 — porta 80
+  # Porta 80
   # ==========================================
   biodash-mobile:
     image: thiagohmn93/biodash_mobile:latest
@@ -33,7 +9,6 @@ services:
       context: .
       args:
         EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL}
-        EXPO_PUBLIC_NEXT_API_URL: ${EXPO_PUBLIC_NEXT_API_URL}
     ports:
       - "80:80"
     container_name: biodash_mobile_web

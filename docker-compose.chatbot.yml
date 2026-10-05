@@ -1,12 +1,10 @@
 services:
   biodash-ai:
+    image: mathgueff/biodash_ai-service:latest
     build:
-      context: ./ai-service
-    environment:
-      AI_SERVICE_PORT: "5000"
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_DEVICE: cpu
-      WHISPER_COMPUTE_TYPE: int8
+      context: ../BioDash_ai-service
+    env_file:
+      - ../BioDash_ai-service/.env
     ports:
       - "5000:5000"
     volumes:

@@ -13,10 +13,7 @@
     "docker:down": "docker compose down",
     "docker:build": "docker compose up -d --build",
     "docker:logs": "docker compose logs -f",
-    "docker:ps": "docker ps",
-    "docker:front": "docker compose up -d biodash-mobile",
-    "docker:back": "docker compose up -d biodash-backend",
-    "docker:ai": "docker compose -f docker-compose.chatbot.yml up -d"
+    "docker:ps": "docker compose ps"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1035.0",
