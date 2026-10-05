@@ -1,8 +1,8 @@
 {
   "name": "biodash-mobile",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "main": "index.ts",
-    "scripts": {
+  "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
