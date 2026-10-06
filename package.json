@@ -1,6 +1,6 @@
 {
   "name": "biodash-mobile",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -8,7 +8,11 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
-    "ai": "cd ai-service && uv run --python 3.11 --with-requirements requirements.txt uvicorn main:app --host 127.0.0.1 --port 5000"
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:build": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1035.0",
