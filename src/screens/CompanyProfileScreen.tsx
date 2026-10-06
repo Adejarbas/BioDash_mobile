@@ -20,7 +20,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { authLib } from '../lib/auth';
 import { profileApi } from '../lib/api';
-import { uploadImageToS3, getImageFromS3 } from '../lib/aws-s3';
+import { uploadFile, getDownloadUrl } from '../lib/storage';
 
 // ─── Funções de máscara ────────────────────────────────────────────
 const maskCNPJ = (value: string): string => {
@@ -165,11 +165,20 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                 const profile = res.data;
 
                 if (profile?.avatar_url) {
-                    const key = profile.avatar_url.includes('amazonaws.com/')
-                        ? profile.avatar_url.split('amazonaws.com/')[1]
-                        : profile.avatar_url;
-                    const base64 = await getImageFromS3(key);
-                    if (base64) setAvatarUri(base64);
+                    let key = profile.avatar_url;
+                    if (key.includes('amazonaws.com/')) {
+                        key = key.split('amazonaws.com/')[1];
+                    } else if (key.includes('.blob.core.windows.net/')) {
+                        try {
+                            const urlObj = new URL(key);
+                            const parts = urlObj.pathname.split('/').filter(Boolean);
+                            key = parts.slice(1).join('/');
+                        } catch {
+                            // Mantém a key como está caso não seja URL completa válida
+                        }
+                    }
+                    const downloadUrl = await getDownloadUrl(key);
+                    if (downloadUrl) setAvatarUri(downloadUrl);
                 }
 
                 setFormData({
@@ -277,16 +286,16 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     reader.readAsDataURL(blob);
                 });
                 // base64String já é "data:image/jpeg;base64,XXXX" — precisamos só do conteúdo
-                const s3Key = await uploadImageToS3(uri, fileName);
-                await profileApi.update({ avatarUrl: s3Key });
-                const downloadUrl = await getImageFromS3(s3Key);
+                const storageKey = await uploadFile(uri, fileName);
+                await profileApi.update({ avatarUrl: storageKey });
+                const downloadUrl = await getDownloadUrl(storageKey);
                 if (downloadUrl) setAvatarUri(downloadUrl);
-                // Exibe preview imediato enquanto aguarda a URL do S3
+                // Exibe preview imediato enquanto aguarda a URL do storage
                 setAvatarUri(base64String);
             } else {
-                const s3Key = await uploadImageToS3(uri, fileName);
-                await profileApi.update({ avatarUrl: s3Key });
-                const downloadUrl = await getImageFromS3(s3Key);
+                const storageKey = await uploadFile(uri, fileName);
+                await profileApi.update({ avatarUrl: storageKey });
+                const downloadUrl = await getDownloadUrl(storageKey);
                 if (downloadUrl) setAvatarUri(downloadUrl);
             }
 

@@ -213,9 +213,10 @@ Para assegurar **Custo Zero** e preservar os créditos de estudante:
 
 O diagnóstico inicial atesta que o projeto possui excelente viabilidade de migração devido à ausência de lock-in em banco de dados ou mensageria proprietária. O principal gargalo reside na camada de arquivos e credenciais de infraestrutura.
 
-**Plano Imediato para o Marco 2:**
-1. Criação do contrato universal `IFileStorage` na pasta `src/ports/`.
-2. Criação do `AzureBlobStorageAdapter` utilizando `@azure/storage-blob` com autenticação via `DefaultAzureCredential` / `Managed Identity`.
-3. Manutenção do `AwsS3StorageAdapter` para referência de desacoplamento.
-4. Refatoração do roteador HTTP para delegar exclusivamente à interface abstrata.
+**Plano Imediato para o Marco 2 (Concluído):**
+1. Criação do contrato universal `IFileStorage` / `IFileStoragePort` em `lib/storage/ports/storage.port.ts`.
+2. Criação do `AzureBlobStorageAdapter` em `lib/storage/adapters/azure-blob.adapter.ts` utilizando `@azure/storage-blob` com geração dinâmica de SAS Tokens para uploads e downloads seguros.
+3. Eliminação total do `@aws-sdk/client-s3` e `@aws-sdk/s3-request-presigner` de todo o ecossistema (removidos do `package.json` do frontend e backend), garantindo 100% de desacoplamento sem nenhum resíduo de dependência da AWS.
+4. Criação do cliente universal `storage.ts` no frontend (`BioDash_mobile`) com tratamento do cabeçalho obrigatório `x-ms-blob-type: BlockBlob` para o Azure Blob Storage.
+5. Criação das rotas agnósticas `/api/storage/upload-url` e `/api/storage/download-url` no backend oficial (`BioDashBD`).
 
