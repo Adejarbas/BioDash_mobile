@@ -126,11 +126,12 @@ $prParameters | Out-File -FilePath $tempFilePR -Encoding utf8
 az ad app federated-credential create --id $appId --parameters $tempFilePR --output none 2>$null
 Remove-Item -Path $tempFilePR -Force -ErrorAction SilentlyContinue
 
-# 5. Atribuir Papel de Contributor (RBAC) no Resource Group
-Write-Host "`n[5/5] Concedendo papel 'Contributor' no Resource Group..." -ForegroundColor Yellow
+# 5. Atribuir Papéis Contributor e User Access Administrator no Resource Group
+Write-Host "`n[5/5] Concedendo papéis 'Contributor' e 'User Access Administrator' no Resource Group..." -ForegroundColor Yellow
 $scope = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName"
 az role assignment create --role "Contributor" --assignee-object-id $spId --assignee-principal-type "ServicePrincipal" --scope $scope --output none
-Write-Host " -> Permissão 'Contributor' concedida com sucesso no escopo: $scope" -ForegroundColor Green
+az role assignment create --role "User Access Administrator" --assignee-object-id $spId --assignee-principal-type "ServicePrincipal" --scope $scope --output none
+Write-Host " -> Permissões concedidas com sucesso no escopo: $scope" -ForegroundColor Green
 
 # Resumo Final e Segredos do GitHub
 Write-Host "`n=================================================================" -ForegroundColor Green

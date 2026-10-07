@@ -82,14 +82,18 @@ az ad app federated-credential create --id "${APP_ID}" --parameters "{
   \"audiences\": [\"api://AzureADTokenExchange\"]
 }" -o none 2>/dev/null || echo "    (Credencial 'gh-pull-requests' já configurada)"
 
-# 5. Atribuir Papel Contributor
-echo -e "\n[5/5] Concedendo papel 'Contributor' no Resource Group..."
+# 5. Atribuir Papéis Contributor e User Access Administrator
+echo -e "\n[5/5] Concedendo papéis 'Contributor' e 'User Access Administrator' no Resource Group..."
 SCOPE="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}"
 az role assignment create --role "Contributor" \
   --assignee-object-id "${SP_ID}" \
   --assignee-principal-type "ServicePrincipal" \
   --scope "${SCOPE}" -o none
-echo " -> Permissão concedida no escopo: ${SCOPE}"
+az role assignment create --role "User Access Administrator" \
+  --assignee-object-id "${SP_ID}" \
+  --assignee-principal-type "ServicePrincipal" \
+  --scope "${SCOPE}" -o none || true
+echo " -> Permissões concedidas com sucesso no escopo: ${SCOPE}"
 
 echo -e "\n================================================================="
 echo " SUCESSO! A Federação OIDC está configurada."
