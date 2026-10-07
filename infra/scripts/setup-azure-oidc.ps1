@@ -33,7 +33,7 @@ param(
     [string]$ResourceGroupName = "rg-biodash-prod",
 
     [Parameter(Mandatory = $false)]
-    [string]$Location = "brazilsouth"
+    [string]$Location = "chilecentral"
 )
 
 Write-Host " [Marco 4] Configuração de OIDC (GitHub Actions <-> Microsoft Azure)" -ForegroundColor Cyan

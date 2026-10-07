@@ -11,7 +11,7 @@ param workloadName string
 param vnetAddressPrefix string = '10.0.0.0/16'
 
 @description('Prefixo CIDR da Subnet para Azure Container Apps')
-param acaSubnetPrefix string = '10.0.1.0/23'
+param acaSubnetPrefix string = '10.0.0.0/23'
 
 @description('Prefixo CIDR da Subnet para Banco de Dados')
 param dbSubnetPrefix string = '10.0.4.0/24'

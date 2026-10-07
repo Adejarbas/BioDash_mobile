@@ -121,7 +121,7 @@ jobs:
       - name: Ensure Target Resource Group Exists
         env:
           RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
-          LOCATION: ${{ vars.AZURE_LOCATION || 'brazilsouth' }}
+          LOCATION: ${{ vars.AZURE_LOCATION || 'chilecentral' }}
         run: |
           echo "Garantindo Resource Group '$RG_NAME' na região '$LOCATION'..."
           az group create --name "$RG_NAME" --location "$LOCATION" \

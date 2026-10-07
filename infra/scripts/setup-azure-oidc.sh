@@ -5,11 +5,12 @@
 # ==============================================================================
 
 set -euo pipefail
+export MSYS_NO_PATHCONV=1
 
 GITHUB_ORG="${1:-Adejarbas}"
 GITHUB_REPO="${2:-BioDash_mobile}"
 RESOURCE_GROUP="${3:-rg-biodash-prod}"
-LOCATION="${4:-brazilsouth}"
+LOCATION="${4:-chilecentral}"
 
 echo "================================================================="
 echo " [Marco 4] Configuração OIDC (GitHub Actions <-> Microsoft Azure)"

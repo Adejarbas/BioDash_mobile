@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 @description('Localização do Resource Group e recursos')
-param location string = 'brazilsouth'
+param location string = 'chilecentral'
 
 @description('Ambiente de execução (dev, staging, prod)')
 @allowed([
