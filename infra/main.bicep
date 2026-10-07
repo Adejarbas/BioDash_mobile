@@ -148,7 +148,7 @@ module databaseModule './modules/database.bicep' = if (deployDatabase) {
 
 // Resolução da connection string de banco de dados
 var resolvedDbConnectionString = deployDatabase
-  ? databaseModule.outputs.connectionString
+  ? (databaseModule.?outputs.connectionString ?? '')
   : externalDatabaseConnectionString
 
 // ============================================================================

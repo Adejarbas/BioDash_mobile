@@ -54,9 +54,7 @@ resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-03-01-pr
     }
     network: !empty(dbSubnetId) ? {
       delegatedSubnetResourceId: dbSubnetId
-    } : {
-      publicNetworkAccess: 'Enabled'
-    }
+    } : {}
   }
 }
 
@@ -100,4 +98,5 @@ output serverFqdn string = postgresServer.properties.fullyQualifiedDomainName
 output databaseName string = database.name
 
 @description('Connection string formatada para o pool de conexões (Node.js pg)')
+@secure()
 output connectionString string = 'postgres://${administratorLogin}:${administratorLoginPassword}@${postgresServer.properties.fullyQualifiedDomainName}:5432/${databaseName}?sslmode=require'

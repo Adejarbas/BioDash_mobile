@@ -68,6 +68,7 @@ output logAnalyticsWorkspaceId string = logAnalyticsWorkspace.id
 output logAnalyticsCustomerId string = logAnalyticsWorkspace.properties.customerId
 
 @description('Primary Shared Key do Log Analytics')
+@secure()
 output logAnalyticsPrimaryKey string = logAnalyticsWorkspace.listKeys().primarySharedKey
 
 @description('ID do Application Insights')
