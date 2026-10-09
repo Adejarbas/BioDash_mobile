@@ -9,10 +9,10 @@
       "value": "biodash"
     },
     "backendImage": {
-      "value": "docker.io/adejarbas/biodash-api:latest"
+      "value": "docker.io/thiagohmn93/biodashbd:latest"
     },
     "frontendImage": {
-      "value": "docker.io/adejarbas/biodash_mobile:latest"
+      "value": "docker.io/thiagohmn93/biodash_mobile:latest"
     },
     "dockerHubUsername": {
       "value": ""

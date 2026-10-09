@@ -15,10 +15,10 @@ param environment string = 'prod'
 param workloadName string = 'biodash'
 
 @description('Imagem Docker Hub da API Backend')
-param backendImage string = 'docker.io/adejarbas/biodash-api:latest'
+param backendImage string = 'docker.io/thiagohmn93/biodashbd:latest'
 
 @description('Imagem Docker Hub do Frontend Mobile Web')
-param frontendImage string = 'docker.io/adejarbas/biodash_mobile:latest'
+param frontendImage string = 'docker.io/thiagohmn93/biodash_mobile:latest'
 
 @description('Usuário do Docker Hub (opcional se imagens forem públicas)')
 param dockerHubUsername string = ''
