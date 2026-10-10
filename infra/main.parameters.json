@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "prod"
+    },
+    "workloadName": {
+      "value": "biodash"
+    },
+    "backendImage": {
+      "value": "docker.io/thiagohmn93/biodashbd:latest"
+    },
+    "frontendImage": {
+      "value": "docker.io/thiagohmn93/biodash_mobile:latest"
+    },
+    "dockerHubUsername": {
+      "value": ""
+    },
+    "dockerHubPassword": {
+      "value": ""
+    },
+    "deployDatabase": {
+      "value": true
+    },
+    "dbAdministratorLogin": {
+      "value": "biodashadmin"
+    },
+    "dbAdministratorLoginPassword": {
+      "value": ""
+    },
+    "externalDatabaseConnectionString": {
+      "value": ""
+    },
+    "supabaseUrl": {
+      "value": "https://scsldapnrzpjkyqkeiop.supabase.co"
+    },
+    "supabaseAnonKey": {
+      "value": ""
+    },
+    "customTags": {
+      "value": {
+        "Project": "BioDash",
+        "Author": "BioDash Team",
+        "Role": "Cloud Azure & IaC Bicep",
+        "CostCenter": "ZeroCost-AzureForStudents"
+      }
+    }
+  }
+}

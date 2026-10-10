@@ -1,9 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// API única do BioDash (Next.js - BioDashBD na porta 3003)
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ||
-  "http://localhost:3003/api";
+// Helper para normalizar a URL da API garantindo o sufixo /api
+const normalizeApiUrl = (url?: string) => {
+  if (!url) return "http://biodash-api.duckdns.org:3003/api";
+  const clean = url.trim().replace(/\/+$/, '');
+  return clean.endsWith('/api') ? clean : `${clean}/api`;
+};
+
+// API única do BioDash. No desenvolvimento, o Next.js roda na porta 3003.
+const API_BASE_URL = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL);
 
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;

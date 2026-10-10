@@ -1,0 +1,179 @@
+name: Infrastructure CI/CD (Azure Bicep)
+
+# ==============================================================================
+# Pipeline de Provisionamento Automático de Infraestrutura Azure via Bicep
+# Marco 4: Governança Cloud, FinOps e Automação CI/CD
+# Responsável: Cloud Azure & IaC Bicep
+# Autenticação: OIDC (OpenID Connect) sem senhas ou credenciais de longa duração
+# ==============================================================================
+
+on:
+  push:
+    branches:
+      - main
+      - feat/azure-bicep
+      - feat/azure-integration
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente de destino (dev, staging, prod)'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      dryRun:
+        description: 'Executar apenas validação e What-If (sem alterar recursos)?'
+        required: false
+        default: false
+        type: boolean
+
+# Permissões necessárias para autenticação federada OIDC com o Entra ID
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ============================================================================
+  # Job 1: Lint, Validação Sintática e What-If (Prévia de Mudanças)
+  # ============================================================================
+  validate:
+    name: Lint & Pre-flight Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Azure CLI
+        run: |
+          az version
+
+      - name: Bicep Syntax Lint
+        run: |
+          echo "Compilando e validando sintaxe de todos os arquivos Bicep..."
+          az bicep build --file ./infra/main.bicep
+          az bicep build --file ./infra/subscription.bicep
+          echo "Sintaxe Bicep 100% válida e sem violações."
+
+      - name: Azure Login via OIDC (Passwordless)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Azure Resource Manager Pre-Flight Validation
+        if: env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+        run: |
+          echo "Validando deployment com o Azure Resource Manager..."
+          az deployment group validate \
+            --resource-group "$RG_NAME" \
+            --template-file ./infra/main.bicep \
+            --parameters ./infra/main.parameters.json \
+            --parameters dbAdministratorLoginPassword="${{ secrets.DB_ADMIN_PASSWORD || 'BioDash@TestValidation123!' }}"
+
+      - name: Azure Bicep What-If Preview
+        if: env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+        run: |
+          echo "Executando What-If para antecipar impactos na infraestrutura..."
+          az deployment group what-if \
+            --resource-group "$RG_NAME" \
+            --template-file ./infra/main.bicep \
+            --parameters ./infra/main.parameters.json \
+            --parameters dbAdministratorLoginPassword="${{ secrets.DB_ADMIN_PASSWORD || 'BioDash@TestValidation123!' }}"
+
+  # ============================================================================
+  # Job 2: Provisionamento Automático de Infraestrutura (azure/arm-deploy)
+  # ============================================================================
+  deploy:
+    name: Deploy Infrastructure (IaC)
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && inputs.dryRun != true
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login via OIDC (Zero Secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure Target Resource Group Exists
+        env:
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+          LOCATION: ${{ vars.AZURE_LOCATION || 'chilecentral' }}
+        run: |
+          echo "Garantindo Resource Group '$RG_NAME' na região '$LOCATION'..."
+          az group create --name "$RG_NAME" --location "$LOCATION" \
+            --tags Project=BioDash FinOps=CostZero ManagedBy=Bicep-IaC
+
+      - name: Deploy Azure Infrastructure via arm-deploy
+        id: arm_deploy
+        uses: azure/arm-deploy@v2
+        with:
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+          template: ./infra/main.bicep
+          parameters: >-
+            ./infra/main.parameters.json
+            dbAdministratorLoginPassword="${{ secrets.DB_ADMIN_PASSWORD }}"
+            externalDatabaseConnectionString="${{ secrets.POSTGRES_URL }}"
+            supabaseUrl="${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
+            supabaseAnonKey="${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}"
+          deploymentMode: Incremental
+          failOnStdErr: false
+
+      - name: Apply Database Schema & Seed (PostgreSQL)
+        if: steps.arm_deploy.outputs.postgresServerFqdn != ''
+        env:
+          PGHOST: ${{ steps.arm_deploy.outputs.postgresServerFqdn }}
+          PGUSER: biodashadmin
+          PGPASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
+          PGDATABASE: biodash_db
+          PGSSLMODE: require
+        run: |
+          echo "Aplicando schema no Azure Database for PostgreSQL Flexible Server ($PGHOST)..."
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f ./infra/scripts/schema.sql
+          echo "✅ Schema e dados iniciais aplicados com sucesso no banco PostgreSQL da Azure!"
+
+      - name: Publish Deployment Summary
+        run: |
+          echo "### 🚀 Infraestrutura Azure Provisionada com Sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Recurso | Detalhes |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Responsável Técnico** | Cloud Azure & IaC Bicep |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Governança / FinOps** | Custo Zero (minReplicas: 0 / Azure for Students) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Backend API URL** | \`${{ steps.arm_deploy.outputs.backendApiUrl }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Frontend Web URL** | \`${{ steps.arm_deploy.outputs.frontendWebUrl }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **PostgreSQL Server** | \`${{ steps.arm_deploy.outputs.postgresServerFqdn }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **PostgreSQL Database** | \`${{ steps.arm_deploy.outputs.postgresDatabaseName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Storage Account** | \`${{ steps.arm_deploy.outputs.storageAccountName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container Fotos** | \`${{ steps.arm_deploy.outputs.avatarsContainerName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **VNet & NSG** | \`${{ steps.arm_deploy.outputs.vnetName }}\` / \`${{ steps.arm_deploy.outputs.nsgName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Todos os recursos foram aplicados via Bicep sem intervenção manual." >> $GITHUB_STEP_SUMMARY
+
