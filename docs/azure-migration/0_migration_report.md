@@ -1,10 +1,4 @@
 # Relatório de Diagnóstico Arquitetural e Auditoria de Lock-in (Marco 1)
-**Projeto:** BioGen / BioDash — Sistema de Gestão e Monitoramento de Biodigestores  
-**Finalidade:** Diagnóstico Arquitetural Inicial e Estratégia de Desacoplamento para Migração AWS ➔ Microsoft Azure  
-**Público-Alvo:** Equipe de Engenharia, Governança Cloud, DevOps e Avaliação Acadêmica  
-**Data:** 03 de Outubro de 2026  
-**Status:** Aprovado para Execução (Marco 1 Concluído)
-
 ---
 
 ## 1. Resumo Executivo
