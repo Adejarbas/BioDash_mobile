@@ -120,4 +120,4 @@ output databaseName string = database.name
 
 @description('Connection string formatada para o pool de conexões (Node.js pg)')
 @secure()
-output connectionString string = 'postgres://${administratorLogin}:${administratorLoginPassword}@${postgresServer.properties.fullyQualifiedDomainName}:5432/${databaseName}?sslmode=require'
+output connectionString string = 'postgres://${administratorLogin}:${uriComponent(administratorLoginPassword)}@${postgresServer.properties.fullyQualifiedDomainName}:5432/${databaseName}?sslmode=require'
