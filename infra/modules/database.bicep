@@ -80,6 +80,18 @@ resource allowAllExternalFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/fir
 }
 
 // ============================================================================
+// Habilitação de Extensões PostgreSQL (pgcrypto para bcrypt e UUIDs)
+// ============================================================================
+resource azureExtensionsConfig 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-03-01-preview' = {
+  parent: postgresServer
+  name: 'azure.extensions'
+  properties: {
+    value: 'PGCRYPTO,UUID-OSSP'
+    source: 'user-override'
+  }
+}
+
+// ============================================================================
 // Banco de dados padrão
 // ============================================================================
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-03-01-preview' = {

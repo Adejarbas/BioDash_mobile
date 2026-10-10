@@ -187,7 +187,7 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               type: 'Liveness'
               httpGet: {
-                path: '/api/alerts'
+                path: '/api/health'
                 port: 3003
               }
               initialDelaySeconds: 15
@@ -198,7 +198,7 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               type: 'Readiness'
               httpGet: {
-                path: '/api/alerts'
+                path: '/api/health'
                 port: 3003
               }
               initialDelaySeconds: 10

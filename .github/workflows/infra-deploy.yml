@@ -156,7 +156,7 @@ jobs:
         run: |
           echo "Aplicando schema no Azure Database for PostgreSQL Flexible Server ($PGHOST)..."
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f ./infra/scripts/schema.sql
+          psql -v ON_ERROR_STOP=1 -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f ./infra/scripts/schema.sql
           echo "✅ Schema e dados iniciais aplicados com sucesso no banco PostgreSQL da Azure!"
 
       - name: Publish Deployment Summary

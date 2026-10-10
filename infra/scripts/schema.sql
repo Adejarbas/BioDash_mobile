@@ -132,13 +132,13 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM users LIMIT 1) THEN
     RAISE NOTICE 'Base de dados vazia detectada. Executando seed inicial para demonstração...';
 
-    -- 9.1 Usuários de Demonstração (senhas com hash bcrypt seguro)
+    -- 9.1 Usuários de Demonstração (senhas com hash bcrypt seguro padrão $2a$)
     -- - biogen@gmail.com: Biogen123!
     -- - gueffmatheus@gmail.com: gueff12
     INSERT INTO users (email, password_hash)
     VALUES 
-      ('biogen@gmail.com', crypt('Biogen123!', gen_salt('bf', 10))),
-      ('gueffmatheus@gmail.com', crypt('gueff12', gen_salt('bf', 10)));
+      ('biogen@gmail.com', '$2a$10$eAH8/F3QlpAvq46/nMP6Nu.PAEHCWROI1hDq7LrpQFs.l3dleP9c.'),
+      ('gueffmatheus@gmail.com', '$2a$10$IKBVq0NYlvC1Gm4oDbDDpuiOEPjQRTA/xg8981wMStONdySO9m1LK');
 
     SELECT id INTO v_biogen_id FROM users WHERE email = 'biogen@gmail.com';
     SELECT id INTO v_gueff_id FROM users WHERE email = 'gueffmatheus@gmail.com';
