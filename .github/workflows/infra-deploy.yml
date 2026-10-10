@@ -85,7 +85,8 @@ jobs:
           az deployment group validate \
             --resource-group "$RG_NAME" \
             --template-file ./infra/main.bicep \
-            --parameters ./infra/main.parameters.json
+            --parameters ./infra/main.parameters.json \
+            --parameters dbAdministratorLoginPassword="${{ secrets.DB_ADMIN_PASSWORD || 'BioDash@TestValidation123!' }}"
 
       - name: Azure Bicep What-If Preview
         if: env.AZURE_CLIENT_ID != ''
@@ -97,7 +98,8 @@ jobs:
           az deployment group what-if \
             --resource-group "$RG_NAME" \
             --template-file ./infra/main.bicep \
-            --parameters ./infra/main.parameters.json
+            --parameters ./infra/main.parameters.json \
+            --parameters dbAdministratorLoginPassword="${{ secrets.DB_ADMIN_PASSWORD || 'BioDash@TestValidation123!' }}"
 
   # ============================================================================
   # Job 2: Provisionamento Automático de Infraestrutura (azure/arm-deploy)
@@ -136,11 +138,26 @@ jobs:
           template: ./infra/main.bicep
           parameters: >-
             ./infra/main.parameters.json
+            dbAdministratorLoginPassword="${{ secrets.DB_ADMIN_PASSWORD }}"
             externalDatabaseConnectionString="${{ secrets.POSTGRES_URL }}"
             supabaseUrl="${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
             supabaseAnonKey="${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}"
           deploymentMode: Incremental
           failOnStdErr: false
+
+      - name: Apply Database Schema & Seed (PostgreSQL)
+        if: steps.arm_deploy.outputs.postgresServerFqdn != ''
+        env:
+          PGHOST: ${{ steps.arm_deploy.outputs.postgresServerFqdn }}
+          PGUSER: biodashadmin
+          PGPASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
+          PGDATABASE: biodash_db
+          PGSSLMODE: require
+        run: |
+          echo "Aplicando schema no Azure Database for PostgreSQL Flexible Server ($PGHOST)..."
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -f ./infra/scripts/schema.sql
+          echo "✅ Schema e dados iniciais aplicados com sucesso no banco PostgreSQL da Azure!"
 
       - name: Publish Deployment Summary
         run: |
@@ -152,8 +169,11 @@ jobs:
           echo "| **Governança / FinOps** | Custo Zero (minReplicas: 0 / Azure for Students) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Backend API URL** | \`${{ steps.arm_deploy.outputs.backendApiUrl }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Frontend Web URL** | \`${{ steps.arm_deploy.outputs.frontendWebUrl }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **PostgreSQL Server** | \`${{ steps.arm_deploy.outputs.postgresServerFqdn }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **PostgreSQL Database** | \`${{ steps.arm_deploy.outputs.postgresDatabaseName }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Storage Account** | \`${{ steps.arm_deploy.outputs.storageAccountName }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Container Fotos** | \`${{ steps.arm_deploy.outputs.avatarsContainerName }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **VNet & NSG** | \`${{ steps.arm_deploy.outputs.vnetName }}\` / \`${{ steps.arm_deploy.outputs.nsgName }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Todos os recursos foram aplicados via Bicep sem intervenção manual." >> $GITHUB_STEP_SUMMARY
+

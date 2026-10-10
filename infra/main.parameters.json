@@ -21,7 +21,7 @@
       "value": ""
     },
     "deployDatabase": {
-      "value": false
+      "value": true
     },
     "dbAdministratorLogin": {
       "value": "biodashadmin"

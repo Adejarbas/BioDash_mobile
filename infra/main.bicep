@@ -209,6 +209,14 @@ output managedIdentityClientId string = identityModule.outputs.clientId
 
 @description('Nome da Virtual Network')
 output vnetName string = networkModule.outputs.vnetName
-
+ 
 @description('Nome do Network Security Group')
 output nsgName string = networkModule.outputs.nsgName
+
+@description('FQDN do Servidor PostgreSQL Flexible Server (se deployDatabase = true)')
+output postgresServerFqdn string = deployDatabase ? (databaseModule.?outputs.serverFqdn ?? '') : ''
+
+@description('Nome do Banco de Dados PostgreSQL')
+output postgresDatabaseName string = deployDatabase ? (databaseModule.?outputs.databaseName ?? '') : ''
+
+

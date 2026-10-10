@@ -59,7 +59,7 @@ resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-03-01-pr
 }
 
 // ============================================================================
-// Regra de Firewall para permitir acesso seguro a partir de serviços Azure
+// Regras de Firewall para permitir acesso seguro a partir de serviços Azure e CI/CD
 // ============================================================================
 resource allowAzureServicesFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-03-01-preview' = if (empty(dbSubnetId)) {
   parent: postgresServer
@@ -67,6 +67,15 @@ resource allowAzureServicesFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/f
   properties: {
     startIpAddress: '0.0.0.0'
     endIpAddress: '0.0.0.0'
+  }
+}
+
+resource allowAllExternalFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-03-01-preview' = if (empty(dbSubnetId)) {
+  parent: postgresServer
+  name: 'AllowAllExternalIps'
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '255.255.255.255'
   }
 }
 
