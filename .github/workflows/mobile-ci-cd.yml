@@ -64,11 +64,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Setup Node.js & Semver
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install -g semver
+
+      - name: Install Semver
+        run: npm install -g semver
 
       - name: Criar tag inicial v0.0.0 caso não exista
         env:
@@ -199,7 +201,7 @@ jobs:
     name: Continuous Deployment (Azure ACA Web)
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.ref == 'refs/heads/feat/azure-integration' || github.ref == 'refs/heads/feat/azure-ci-improvements' || github.event_name == 'workflow_dispatch') && env.AZURE_CLIENT_ID != ''
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.ref == 'refs/heads/feat/azure-integration' || github.ref == 'refs/heads/feat/azure-ci-improvements' || github.event_name == 'workflow_dispatch'
     environment:
       name: production
       url: https://ca-biodash-web-prod.victoriousmoss-60cc301a.chilecentral.azurecontainerapps.io
