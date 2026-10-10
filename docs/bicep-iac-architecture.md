@@ -1,190 +1,210 @@
-# Relatório Técnico de Infraestrutura como Código (IaC) com Azure Bicep (Marco 3)
+# Documentação Geral de Infraestrutura como Código (IaC) — Azure Bicep
 
-**Projeto:** BioGen / BioDash — Sistema de Gestão e Monitoramento de Biodigestores  
-**Etapa:** Marco 3 — Provisionamento da Infraestrutura (IaC) e Rede no Azure  
-**Responsável:** Cloud Azure & IaC Bicep  
+**Projeto:** BioGen / BioDash — Sistema de Monitoramento e Gestão de Biodigestores  
+**Tecnologia:** Microsoft Azure Bicep (DSL declarativa)  
 **Assinatura Alvo:** Azure for Students (FinOps — Custo Zero Absoluto)  
-**Linguagem de IaC:** Microsoft Bicep (Orquestração Modular)  
-**Status:** Concluído e Validado
+**Ambiente:** Produção (`rg-biodash-prod`) / Região: `chilecentral`  
+**Automação:** GitHub Actions via OIDC (OpenID Connect / Passwordless)  
 
 ---
 
-## 1. Resumo Executivo e Atribuições
+## 1. Funcionamento Geral da Infraestrutura como Código (IaC)
 
-O **Marco 3** do projeto de migração de infraestrutura da **AWS para o Microsoft Azure** compreende a definição formal, estruturada e automatizada de toda a topologia de nuvem necessária para a sustentação do sistema **BioDash**.
+A infraestrutura do **BioDash** é provisionada, versionada e gerenciada inteiramente como código (**Infrastructure as Code — IaC**) utilizando **Microsoft Bicep**. A abordagem adota os seguintes pilares arquiteturais:
 
-Conforme estabelecido no planejamento de papéis do projeto, as atribuições de **Cloud Azure & IaC Bicep** englobam:
-1. **Provisionamento 100% Declarativo via Código (IaC):** Eliminação integral de qualquer criação manual no portal da Azure, garantindo rastreabilidade, reprodutibilidade e conformidade com auditorias de software.
-2. **Arquitetura Modular em Bicep (`/infra`):** Separação de conceitos em módulos específicos (`network`, `identity`, `monitoring`, `storage`, `container-apps-env`, `container-apps`, `database`).
-3. **Topologia de Rede e Segurança Estruturada:** Criação de Virtual Network (VNet), subnets segregadas por função e Network Security Group (NSG) com regras de firewall restritivas.
-4. **Armazenamento de Imagens e Documentos:** Provisionamento de Storage Account com suporte a CORS para upload via SAS Tokens pelo aplicativo mobile/web, contendo o container **`avatars`** (para fotos de biodigestores e perfis) e integração RBAC com **User-Assigned Managed Identity**.
-5. **Ambiente de Execução Serverless de Baixo Custo:** Configuração do **Azure Container Apps (ACA)** puxando imagens de contêineres do **Docker Hub**, com autoscaling KEDA parametrizado com **`minReplicas: 0`** (escala a zero para retenção total de custos).
-6. **Governança FinOps:** Aplicação de diretrizes rigorosas que garantem a operação contínua dentro dos limites gratuitos da assinatura *Azure for Students*.
+### 1.1. Arquitetura Modular e Desacoplada
+Em vez de um arquivo único monolítico, a infraestrutura adota o padrão **Hub & Spoke / Orchestrator & Modules**:
+* O arquivo mestre [main.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/main.bicep) orquestra a ordem de criação dos recursos, resolvendo dependências automaticamente (ex: a rede e o Log Analytics são criados antes dos Container Apps).
+* Cada recurso físico ou domínio de serviço reside em seu próprio módulo reutilizável na pasta [infra/modules/](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules).
 
----
+### 1.2. Segurança Passwordless & Princípio do Menor Privilégio
+* **Autenticação OIDC no GitHub Actions:** Não existem senhas nem chaves estáticas (`AZURE_CREDENTIALS`) salvas no repositório. O GitHub Actions solicita tokens JWT de curta duração autenticados pelo Microsoft Entra ID via credenciais federadas.
+* **Managed Identity:** O backend utiliza **User-Assigned Managed Identity (`id-biodash-prod`)** com papel RBAC *Storage Blob Data Contributor*, eliminando chaves de acesso gravadas em código.
+* **Sanitização de Segredos:** A pipeline de CI/CD limpa automaticamente quebras de linha (`\r\n`) de segredos como a senha administrativa do PostgreSQL antes do repasse ao Resource Manager.
 
-## 2. Diagrama da Topologia de Nuvem Provisionada
-
-O diagrama a seguir ilustra a infraestrutura provisionada pelo orquestrador `main.bicep`:
+### 1.3. FinOps Custo Zero (Azure for Students)
+* **Escala a Zero (Scale-to-Zero):** Azure Container Apps configurados com `minReplicas: 0`. Quando não há requisições ativas, o consumo de CPU/RAM é zero.
+* **Docker Hub como Registry:** Uso de imagens públicas no Docker Hub, eliminando o custo proibitivo do Azure Container Registry (ACR).
+* **Camadas Gratuitas:** PostgreSQL Flexible Server em SKU Burstable `Standard_B1ms` (750 horas/mês gratuitas) e Storage Account `Standard_LRS` no tier Hot.
 
 ```mermaid
 graph TD
-    subgraph Azure_Sub["Microsoft Azure (Subscription Azure for Students)"]
-        subgraph RG["Resource Group: rg-biodash-prod"]
-            
-            subgraph Sec_Ident["Identidade & Governança"]
-                MI["User-Assigned Managed Identity<br>id-biodash-prod"]
-                Tags["Tags de Governança FinOps<br>Role: Cloud-IaC-Bicep"]
-            end
-            
-            subgraph VNet["Rede Virtual: vnet-biodash-prod (10.0.0.0/16)"]
-                NSG["Network Security Group (NSG)<br>• Allow HTTP (80) & HTTPS (443)<br>• Allow API (3003)<br>• Deny Internet to Postgres (5432)"]
-                
-                subgraph Subnet_ACA["Subnet Apps: snet-aca (10.0.1.0/23)"]
-                    CAE["ACA Managed Environment<br>cae-biodash-prod"]
-                    CA_Back["Container App: Backend API<br>Express / Node.js (Porta 3003)<br>minReplicas: 0 | maxReplicas: 1"]
-                    CA_Front["Container App: Frontend Web<br>Nginx / Expo Web (Porta 80)<br>minReplicas: 0 | maxReplicas: 1"]
-                end
-                
-                subgraph Subnet_DB["Subnet Dados: snet-db (10.0.4.0/24)"]
-                    PG["Azure PostgreSQL Flexible Server<br>SKU Standard_B1ms (32 GB)"]
-                end
-            end
-            
-            subgraph Storage["Armazenamento de Objetos"]
-                ST["Storage Account: stbiodashprod* (Standard_LRS)"]
-                C_Avatars["Blob Container: 'avatars'<br>(Fotos de Perfil e Biodigestores)"]
-                C_Docs["Blob Container: 'documents'<br>(Relatórios Técnicos)"]
-                ST --> C_Avatars
-                ST --> C_Docs
-            end
-            
-            subgraph Observability["Observabilidade & Telemetria"]
-                LAW["Log Analytics Workspace<br>log-biodash-prod (Retenção 30d)"]
-                AI["Application Insights (Workspace-based)<br>appi-biodash-prod (OTel Target)"]
-                LAW --> AI
-            end
-            
-        end
+    subgraph Orquestracao["1. Orquestração e Deploy"]
+        GH["GitHub Actions<br>(infra-deploy.yml)"] -->|OIDC Token| EntraID["Microsoft Entra ID<br>(Federated Credentials)"]
+        EntraID -->|ARM Deploy| MainBicep["infra/main.bicep"]
     end
 
-    DockerHub["Docker Hub (Registry Público)<br>• adejarbas/biodash-api<br>• adejarbas/biodash_mobile"] -->|Pull sem custos| CA_Back
-    DockerHub -->|Pull sem custos| CA_Front
+    subgraph Modulos["2. Módulos IaC (infra/modules)"]
+        MainBicep --> Net["network.bicep<br>(VNet, Subnets, NSG)"]
+        MainBicep --> Ident["identity.bicep<br>(Managed Identity)"]
+        MainBicep --> Mon["monitoring.bicep<br>(Log Analytics + App Insights)"]
+        MainBicep --> St["storage.bicep<br>(Blob: avatars / CORS)"]
+        MainBicep --> CAE["container-apps-env.bicep<br>(Managed Environment)"]
+        MainBicep --> DB["database.bicep<br>(PostgreSQL B1ms)"]
+        
+        CAE --> CA["container-apps.bicep<br>(API: 3003 / Web: 80)"]
+    end
 
-    MI -.->|RBAC: Storage Blob Data Contributor| ST
-    CA_Back -.->|Assina SAS Token| C_Avatars
-    CA_Back -->|Ingestão de Traces/Logs| AI
-    CAE -->|Logs Centralizados| LAW
-    CA_Back -->|Pool SQL Seguro| PG
+    subgraph Aplicacao["3. Cargas de Trabalho Ativas"]
+        CA -->|Escala a Zero| API["ca-biodash-api-prod<br>(Backend Next.js)"]
+        CA -->|Escala a Zero| Web["ca-biodash-web-prod<br>(Frontend Expo Web)"]
+        API -->|Pool SQL Seguro| DB
+        API -->|RBAC Data Contributor| St
+        API -->|Telemetry OTel| Mon
+    end
 ```
 
 ---
 
-## 3. Detalhamento dos Módulos Bicep (`/infra/modules`)
+## 2. Mapa dos Arquivos `.bicep`
 
-A infraestrutura foi estruturada de forma modular, permitindo testes isolados, manutenção independente e reutilização entre múltiplos ambientes (`dev`, `staging`, `prod`):
+A tabela abaixo resume o propósito e a responsabilidade de cada arquivo na pasta [infra/](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra):
 
-### 3.1. Módulo de Rede e Segurança (`modules/network.bicep`)
-- **Virtual Network (`vnet-biodash-prod`):** Espaço de endereçamento `10.0.0.0/16`.
-- **Subnet para Container Apps (`snet-aca`):** Prefixo `10.0.1.0/23`, delegada a `Microsoft.App/environments`.
-- **Subnet para Banco de Dados (`snet-db`):** Prefixo `10.0.4.0/24`, delegada a `Microsoft.DBforPostgreSQL/flexibleServers`.
-- **Network Security Group (`nsg-biodash-prod`):**
-  - `Allow-HTTP-Inbound` (Prioridade 100): Tráfego web externo na porta 80.
-  - `Allow-HTTPS-Inbound` (Prioridade 110): Tráfego seguro TLS/SSL na porta 443.
-  - `Allow-API-Inbound` (Prioridade 120): Chamadas diretas à API Express na porta 3003.
-  - `Deny-Database-Internet` (Prioridade 200): **Bloqueio explícito e mandatório de qualquer conexão externa direta ao PostgreSQL na porta 5432.**
-  - `Allow-VNet-Internal` (Prioridade 300): Comunicação irrestrita e segura entre os recursos internos da VNet.
-
-### 3.2. Módulo de Identidade Gerenciada (`modules/identity.bicep`)
-- Provisiona uma **User-Assigned Managed Identity (`id-biodash-prod`)**.
-- Evita o armazenamento de credenciais, chaves de API ou connection strings com senhas nos contêineres de aplicação.
-- Integra-se com o SDK da Azure via `DefaultAzureCredential`.
-
-### 3.3. Módulo de Observabilidade (`modules/monitoring.bicep`)
-- **Log Analytics Workspace (`log-biodash-prod`):**
-  - SKU `PerGB2018` com retenção fixada em **30 dias** (compatível com a camada gratuita de 5 GB/mês).
-  - Teto de ingestão diário (**Daily Quota = 1 GB**) para proteger contra estouro acidental de cota.
-- **Application Insights (`appi-biodash-prod`):**
-  - Configurado em modo integrado ao Workspace (*Workspace-based*).
-  - Disponibiliza a `appInsightsConnectionString` utilizada pela instrumentação do **OpenTelemetry (OTel)** no backend Node.js.
-
-### 3.4. Módulo de Armazenamento de Arquivos (`modules/storage.bicep`)
-- **Storage Account (`stbiodashprod*`):**
-  - SKU: `Standard_LRS` (redundância local de menor custo).
-  - Camada de acesso: `Hot`.
-  - Requisito de segurança: `supportsHttpsTrafficOnly: true`, `minimumTlsVersion: 'TLS1_2'`, `allowBlobPublicAccess: false` (sem blobs anônimos).
-- **Blob Containers:**
-  - **`avatars`:** Container específico requisitado para salvar fotos de perfil e biodigestores através do `AzureBlobStorageAdapter`.
-  - **`documents`:** Destinado a relatórios gerados.
-- **CORS (Cross-Origin Resource Sharing):** Habilitado para os verbos `GET, POST, PUT, DELETE, OPTIONS`, viabilizando o upload direto de imagens a partir do cliente mobile/web utilizando **SAS Tokens** com expiração controlada.
-- **Concessão de Papel RBAC:** Atribuição do papel **Storage Blob Data Contributor** (`ba92f5b4-2d11-453d-a403-e96b0029c9fe`) à Managed Identity do Container App.
-
-### 3.5. Módulo de Container Apps Environment (`modules/container-apps-env.bicep`)
-- Cria o **Azure Container Apps Managed Environment (`cae-biodash-prod`)**.
-- Encaminha automaticamente logs de stdout/stderr de todos os microserviços para o Log Analytics.
-- Desativa redundância de zona (`zoneRedundant: false`) para assegurar conformidade FinOps.
-
-### 3.6. Módulo de Execução de Contêineres (`modules/container-apps.bicep`)
-- **Backend API Container App (`ca-biodash-api-prod`):**
-  - Imagem: Docker Hub (`docker.io/adejarbas/biodash-api:latest`).
-  - Recursos: `cpu: 0.25`, `memory: 0.5Gi`.
-  - **Escala a Zero (FinOps):** `minReplicas = 0`, `maxReplicas = 1`.
-  - Regra de escalonamento HTTP (KEDA): Escala para 1 réplica após 50 requisições simultâneas.
-  - Probes HTTP:
-    - *Liveness Probe*: `/api/alerts` a cada 30 segundos.
-    - *Readiness Probe*: `/api/alerts` a cada 20 segundos.
-  - Injeção de variáveis de ambiente: `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_STORAGE_CONTAINER_NAME=avatars`, `APPLICATIONINSIGHTS_CONNECTION_STRING`, `PORT=3003`, `NODE_ENV=production`.
-- **Frontend Web Container App (`ca-biodash-web-prod`):**
-  - Imagem: Docker Hub (`docker.io/adejarbas/biodash_mobile:latest`).
-  - Recursos: `cpu: 0.25`, `memory: 0.5Gi`.
-  - **Escala a Zero:** `minReplicas = 0`, `maxReplicas = 1`.
-  - Ingress público na porta 80.
-
-### 3.7. Módulo de Banco Relacional (`modules/database.bicep`)
-- **Azure Database for PostgreSQL Flexible Server:**
-  - SKU: `Standard_B1ms` (1 vCPU, 2 GiB de memória, tier Burstable).
-  - Disco: 32 GB.
-  - Elegível às **750 horas mensais gratuitas** da assinatura *Azure for Students*.
+| Arquivo | Escopo | Responsabilidade Resumida |
+| :--- | :--- | :--- |
+| [main.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/main.bicep) | Resource Group | **Orquestrador Mestre.** Recebe parâmetros do ambiente, calcula nomes com `uniqueString`, define a ordem de dependências e chama todos os submódulos repassando outputs entre eles. |
+| [subscription.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/subscription.bicep) | Subscription | **Orquestrador de Assinatura.** Provisiona o Resource Group `rg-biodash-prod` em nível global da conta e dispara o `main.bicep` para provisionamento do zero absoluto. |
+| [main.parameters.json](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/main.parameters.json) | Configuração | Arquivo de parâmetros declarativos contendo tags de governança, nomes de ambiente (`prod`), região (`chilecentral`) e URLs externas. |
+| [modules/network.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/network.bicep) | Módulo | Cria a Virtual Network (`10.0.0.0/16`), a subnet dos Container Apps (`10.0.0.0/23`), a subnet de banco (`10.0.4.0/24`) e o Network Security Group (NSG) com bloqueio externo e portas 80/443 liberadas. |
+| [modules/identity.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/identity.bicep) | Módulo | Cria a **User-Assigned Managed Identity (`id-biodash-prod`)** utilizada pelos contêineres para autenticação nativa sem senhas em serviços da Azure. |
+| [modules/monitoring.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/monitoring.bicep) | Módulo | Provisiona o **Log Analytics Workspace** (com teto diário de 1 GB e retenção de 30 dias para FinOps) e o **Application Insights** integrado para telemetria OpenTelemetry. |
+| [modules/storage.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/storage.bicep) | Módulo | Provisiona a Storage Account `Standard_LRS`, cria os containers **`avatars`** (fotos de perfil/biodigestores) e `documents`, configura CORS para uploads via SAS Token e atribui papel RBAC à Managed Identity. |
+| [modules/container-apps-env.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/container-apps-env.bicep) | Módulo | Provisiona o ambiente gerenciado do Azure Container Apps integrado à subnet delegada e roteia automaticamente todos os logs para o Log Analytics. |
+| [modules/container-apps.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/container-apps.bicep) | Módulo | Cria os aplicativos de contêiner: **API Backend** (porta 3003, regras dinâmicas de CORS, conexão PostgreSQL e injeção de secrets) e **Frontend Web** (porta 80). Ambos com `minReplicas: 0`. |
+| [modules/database.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/modules/database.bicep) | Módulo | Provisiona o **PostgreSQL Flexible Server** (`Standard_B1ms`, 32 GB, versão 15), cria o banco `biodash_db`, ativa extensões `PGCRYPTO`/`UUID-OSSP` e exporta a connection string formatada para o pool Node.js. |
 
 ---
 
-## 4. Matriz de FinOps e Custo Zero
+## 3. Como Rodar a Infraestrutura
 
-A tabela a seguir comprova a viabilidade financeira e a garantia de custo zero sob a assinatura de estudante da Microsoft:
+Existem duas formas suportadas de executar o provisionamento: **Automação Contínua (CI/CD)** e **Execução Manual (CLI)**.
 
-| Recurso na Azure | Parâmetro no Bicep | Limite Gratuito Azure for Students | Custo Estimado |
-| :--- | :--- | :--- | :---: |
-| **Azure Container Apps (Compute)** | `minReplicas: 0`<br>`maxReplicas: 1`<br>`cpu: 0.25`<br>`memory: 0.5Gi` | 180.000 vCPU-segundos/mês<br>360.000 GiB-segundos/mês<br>2.000.000 requisições/mês | **$ 0,00** |
-| **Registro de Imagens** | Docker Hub (Público) | ❌ **ACR proibido no projeto**<br>Docker Hub sem custos para imagens públicas | **$ 0,00** |
-| **Azure Blob Storage** | SKU `Standard_LRS`<br>Tier `Hot` | Até 5 GB de armazenamento LRS gratuito na conta estudantil | **$ 0,00** |
-| **Log Analytics & App Insights** | Retenção: 30 dias<br>Daily Cap: 1 GB | 5 GB/mês de ingestão gratuita no Azure Monitor | **$ 0,00** |
-| **PostgreSQL Flexible Server** | `Standard_B1ms`<br>32 GB Storage | 750 horas/mês gratuitas no primeiro ano da assinatura | **$ 0,00** |
-| **Rede Virtual & NSG** | VNet + Subnets + NSG | VNets e NSGs são recursos sem custo de provisionamento | **$ 0,00** |
-| **Identidade (Entra ID)** | Managed Identity | Identidades gerenciadas não possuem cobrança | **$ 0,00** |
-| **TOTAL GERAL FINOPS** | — | — | **$ 0,00 / mês** |
+### 3.1. Execução Automática via CI/CD (Recomendado)
+Sempre que alterações na pasta `infra/**` ou no workflow forem enviadas às branches monitoradas (`main`, `feat/azure-integration`, `feat/azure-ci-improvements`), o GitHub Actions executa o pipeline [.github/workflows/infra-deploy.yml](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/.github/workflows/infra-deploy.yml):
+1. **Lint e Validação Prévia:** Compila os arquivos Bicep e roda `az deployment group validate`.
+2. **What-If Preview:** Exibe no log exatamente quais recursos serão criados, modificados ou mantidos.
+3. **Deploy Automatizado:** Executa `azure/arm-deploy@v2` autenticado via OIDC.
+4. **Aplicação de Schema:** Executa o script [schema.sql](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/scripts/schema.sql) no banco PostgreSQL.
 
 ---
 
-## 5. Orquestradores: `main.bicep` vs. `subscription.bicep`
+### 3.2. Execução Manual via Azure CLI (Local)
 
-Para oferecer flexibilidade máxima à equipe de engenharia e ao pipeline de CI/CD, dois orquestradores foram desenvolvidos:
+#### Pré-requisitos:
+* [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) instalada (`az version`).
+* Bicep CLI instalado (`az bicep install`).
+* Login ativo na conta Azure:
+  ```bash
+  az login
+  az account set --subscription "87ecec65-53dc-4995-b34d-cd1c65c7bdab"
+  ```
 
-1. **`infra/main.bicep` (`targetScope = 'resourceGroup'`):**
-   - Utilizado pelo GitHub Actions através da Action oficial `azure/arm-deploy@v2`.
-   - Aplica os módulos diretamente no Resource Group informado nas variáveis do workflow.
-2. **`infra/subscription.bicep` (`targetScope = 'subscription'`):**
-   - Cria o Resource Group `rg-biodash-prod` em nível de assinatura e delega a criação dos recursos ao `main.bicep`.
-   - Permite o provisionamento "do zero absoluto" com um único comando na CLI:
-     ```bash
-     az deployment sub create --location brazilsouth --template-file ./infra/subscription.bicep
-     ```
+#### Passo 1: Validação de Sintaxe (Compilação Local)
+Antes de enviar qualquer solicitação à nuvem, valide se os templates Bicep compilam perfeitamente para ARM JSON:
+```bash
+az bicep build --file ./infra/main.bicep
+```
+*(Se o comando retornar sem mensagens, o código está 100% válido).*
+
+#### Passo 2: Pré-visualização de Mudanças (What-If)
+O comando What-If simula a execução na nuvem e mostra a previsão de alterações sem modificar nada:
+```bash
+az deployment group what-if \
+  --resource-group rg-biodash-prod \
+  --template-file ./infra/main.bicep \
+  --parameters ./infra/main.parameters.json \
+  --parameters dbAdministratorLoginPassword="SuaSenhaForte123!"
+```
+
+#### Passo 3: Provisionamento Efetivo
+Para aplicar a infraestrutura no Resource Group:
+```bash
+az deployment group create \
+  --resource-group rg-biodash-prod \
+  --template-file ./infra/main.bicep \
+  --parameters ./infra/main.parameters.json \
+  --parameters dbAdministratorLoginPassword="SuaSenhaForte123!"
+```
 
 ---
 
-## 6. Validação e Qualidade de Código
+## 4. Como Adicionar Novo Código de Infraestrutura
 
-Todos os arquivos Bicep seguem as melhores práticas recomendadas pela Microsoft:
-- Tipagem estrita com decorators `@description`, `@allowed` e `@secure()`.
-- Nomes de recursos gerados deterministicamente com funções de hash `uniqueString()`.
-- Separação clara de parâmetros e variáveis (`var`).
-- Outputs padronizados disponibilizados para consumo imediato pelo pipeline de CI/CD.
+Quando um novo serviço ou recurso da Azure precisar ser incorporado ao ecossistema BioDash, siga o passo a passo padronizado abaixo:
+
+### Passo 1: Criar o Novo Módulo em `/infra/modules`
+Crie um arquivo específico com o nome do recurso em minúsculas (ex: `infra/modules/servicebus.bicep`, `infra/modules/redis.bicep`):
+
+```bicep
+// infra/modules/servicebus.bicep
+
+@description('Localização do recurso')
+param location string
+
+@description('Nome do ambiente (dev, prod)')
+param environment string
+
+@description('Nome da carga de trabalho')
+param workloadName string
+
+@description('Tags padrão para governança')
+param tags object = {}
+
+// Nomes gerados deterministicamente com uniqueString
+var cleanWorkload = replace(toLower(workloadName), '-', '')
+var cleanEnv = replace(toLower(environment), '-', '')
+var uniqueSuffix = take(uniqueString(resourceGroup().id, workloadName), 4)
+var serviceBusName = 'sb-${cleanWorkload}-${cleanEnv}-${uniqueSuffix}'
+
+resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
+  name: serviceBusName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Basic' // FinOps: menor tier possível
+  }
+}
+
+// Sempre exporte os outputs necessários
+@description('ID do recurso criado')
+output serviceBusId string = serviceBusNamespace.id
+
+@description('Nome do recurso criado')
+output serviceBusName string = serviceBusNamespace.name
+```
+
+### Passo 2: Declarar o Módulo no `main.bicep`
+Abra o arquivo [infra/main.bicep](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/main.bicep) e instancie o novo módulo, passando os parâmetros necessários:
+
+```bicep
+// ============================================================================
+// Novo Módulo: Service Bus
+// ============================================================================
+module serviceBusModule 'modules/servicebus.bicep' = {
+  name: 'deploy-servicebus-${environment}'
+  params: {
+    location: location
+    environment: environment
+    workloadName: workloadName
+    tags: commonTags
+  }
+}
+```
+
+### Passo 3: Repassar Parâmetros ou Outputs entre Módulos
+Se outro módulo (como o backend API no `container-apps.bicep`) precisar consumir o novo recurso:
+1. Adicione um `@description()` e `param` no módulo de destino (ex: `param serviceBusName string`).
+2. No `main.bicep`, conecte o output do primeiro módulo ao parâmetro do segundo:
+   ```bicep
+   module containerAppsModule 'modules/container-apps.bicep' = {
+     name: 'deploy-container-apps-${environment}'
+     params: {
+       ...
+       serviceBusName: serviceBusModule.outputs.serviceBusName
+     }
+   }
+   ```
+
+### Passo 4: Atualizar Parâmetros e Documentação
+1. Se o novo módulo exigir novos parâmetros externos (ex: chaves de terceiros ou flags), declare-os no topo do `main.bicep` e adicione valores padrão em [main.parameters.json](file:///c:/Projetos/Fatec/BioGen/BioDash_mobile/infra/main.parameters.json).
+2. Se forem segredos (senhas, tokens), decore obrigatoriamente com `@secure()` e **nunca** coloque valores no arquivo JSON.
