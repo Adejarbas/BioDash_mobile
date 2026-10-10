@@ -2,6 +2,7 @@ name: Mobile CI / CD (Android)
  
 permissions:
   contents: write
+  id-token: write
 
 on:
   workflow_dispatch:
@@ -190,24 +191,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Deploy legado na AWS EC2 desativado (Migração para Azure Container Apps em andamento)
-      # - name: Deploy to EC2
-      #   if: github.ref == 'refs/heads/main'
-      #   uses: appleboy/ssh-action@v1.0.3
-      #   with:
-      #     host: ${{ secrets.EC2_HOST }}
-      #     username: ${{ secrets.EC2_USER }}
-      #     key: ${{ secrets.EC2_SSH_KEY }}
-      #     script: |
-      #       docker pull ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-      #       docker stop biodash_mobile_web || true
-      #       docker rm biodash_mobile_web || true
-      #       docker run -d \
-      #         --name biodash_mobile_web \
-      #         --restart unless-stopped \
-      #         -p 80:80 \
-      #         ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-      #       docker image prune -f
+      - name: Azure Login via OIDC (Zero Secrets)
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.event_name == 'workflow_dispatch') && env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Container Apps (Update Web)
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.event_name == 'workflow_dispatch') && env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+          CONTAINER_APP_NAME: 'ca-biodash-web-prod'
+          IMAGE_NAME: 'docker.io/${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest'
+        run: |
+          echo "Atualizando Container App '$CONTAINER_APP_NAME' na Azure com a nova imagem..."
+          az containerapp update \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RG_NAME" \
+            --image "$IMAGE_NAME"
+          echo "✅ $CONTAINER_APP_NAME atualizado com sucesso no Azure Container Apps!"
 
       # Envio de e-mail quando pipeline FALHAR
       # - name: Enviar email se falhar
