@@ -161,6 +161,7 @@ module containerAppsModule './modules/container-apps.bicep' = {
     environment: environment
     workloadName: workloadName
     containerAppsEnvironmentId: containerAppsEnvModule.outputs.containerAppsEnvId
+    defaultDomain: containerAppsEnvModule.outputs.defaultDomain
     userAssignedIdentityId: identityModule.outputs.identityId
     userAssignedIdentityClientId: identityModule.outputs.clientId
     backendImage: backendImage

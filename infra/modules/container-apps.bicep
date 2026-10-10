@@ -53,11 +53,17 @@ param dockerHubUsername string = ''
 @secure()
 param dockerHubPassword string = ''
 
+@description('Domínio padrão gerado pelo Container Apps Environment para resolução de CORS')
+param defaultDomain string = ''
+
 @description('Tags padrão para governança e FinOps')
 param tags object = {}
 
 var backendAppName = 'ca-${workloadName}-api-${environment}'
 var frontendAppName = 'ca-${workloadName}-web-${environment}'
+
+var frontendFqdn = !empty(defaultDomain) ? '${frontendAppName}.${defaultDomain}' : ''
+var frontendOrigin = !empty(frontendFqdn) ? 'https://${frontendFqdn}' : ''
 
 var hasDockerHubAuth = !empty(dockerHubUsername) && !empty(dockerHubPassword)
 
@@ -84,9 +90,16 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
         transport: 'auto'
         allowInsecure: false
         corsPolicy: {
-          allowedOrigins: [
-            '*'
-          ]
+          allowCredentials: true
+          allowedOrigins: array(
+            filter([
+              !empty(frontendOrigin) ? frontendOrigin : null
+              'http://localhost:8081'
+              'http://localhost:3000'
+              'http://localhost:3001'
+              'http://localhost'
+            ], item => item != null)
+          )
           allowedMethods: [
             'GET'
             'POST'
@@ -95,7 +108,12 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             'OPTIONS'
           ]
           allowedHeaders: [
-            '*'
+            'Content-Type'
+            'Authorization'
+            'Accept'
+            'Origin'
+            'Cookie'
+            'X-Requested-With'
           ]
         }
       }
@@ -145,6 +163,10 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'NODE_ENV'
               value: 'production'
+            }
+            {
+              name: 'FRONTEND_URL'
+              value: !empty(frontendOrigin) ? frontendOrigin : 'http://localhost:80'
             }
             {
               name: 'AZURE_STORAGE_ACCOUNT_NAME'
