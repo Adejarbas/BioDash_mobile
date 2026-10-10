@@ -207,9 +207,10 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
           CONTAINER_APP_NAME: 'ca-biodash-web-prod'
-          IMAGE_NAME: 'docker.io/${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest'
+          IMAGE_TAG: ${{ steps.version.outputs.new_version || 'latest' }}
         run: |
-          echo "Atualizando Container App '$CONTAINER_APP_NAME' na Azure com a nova imagem..."
+          IMAGE_NAME="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${IMAGE_TAG}"
+          echo "Atualizando Container App '$CONTAINER_APP_NAME' para a imagem versionada '$IMAGE_NAME'..."
           az containerapp update \
             --name "$CONTAINER_APP_NAME" \
             --resource-group "$RG_NAME" \
