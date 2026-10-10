@@ -3,8 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const TOKEN_KEY = '@biodash_jwt_token';
 const USER_KEY = '@biodash_user';
 
-// EXPO_PUBLIC_NEXT_API_URL ou EXPO_PUBLIC_API_URL normalizado com sufixo /api
-const rawAuthUrl = process.env.EXPO_PUBLIC_NEXT_API_URL || process.env.EXPO_PUBLIC_API_URL || "http://biodash-api.duckdns.org/api";
+// EXPO_PUBLIC_API_URL normalizado com sufixo /api
+const rawAuthUrl = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3003/api";
 const cleanAuthUrl = rawAuthUrl.trim().replace(/\/+$/, '');
 const API_URL = cleanAuthUrl.endsWith('/api') ? cleanAuthUrl : `${cleanAuthUrl}/api`;
 

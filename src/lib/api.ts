@@ -10,9 +10,6 @@ const normalizeApiUrl = (url?: string) => {
 // API única do BioDash. No desenvolvimento, o Next.js roda na porta 3003.
 const API_BASE_URL = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL);
 
-// URL base do Next.js (BioDashBD) na porta 80
-const NEXT_API_BASE_URL = normalizeApiUrl(process.env.EXPO_PUBLIC_NEXT_API_URL || process.env.EXPO_PUBLIC_API_URL);
-
 // Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;
 

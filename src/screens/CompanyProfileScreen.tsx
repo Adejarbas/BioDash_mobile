@@ -49,6 +49,14 @@ const maskCEP = (value: string): string => {
     return digits.replace(/(\d{5})(\d)/, '$1-$2');
 };
 
+const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`${title}: ${message}`);
+    } else {
+        Alert.alert(title, message);
+    }
+};
+
 const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
     <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
 );
@@ -208,23 +216,38 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         }
     };
 
-        const handleChangePassword = async () => {
-        if (passwordData.nova !== passwordData.confirmar) {
-            Alert.alert('Erro', 'As senhas novas não coincidem.');
+    const handleChangePassword = async () => {
+        console.log('[DEBUG] Botão Alterar Senha clicado!', {
+            atual: passwordData.atual ? '***' : '(vazio)',
+            nova: passwordData.nova ? '***' : '(vazio)',
+            confirmar: passwordData.confirmar ? '***' : '(vazio)',
+            tamanhoNova: passwordData.nova?.length || 0,
+        });
+
+        if (!passwordData.nova && !passwordData.confirmar) {
+            showAlert('Aviso', 'Por favor, digite a nova senha e confirme-a.');
             return;
         }
+
+        if (passwordData.nova !== passwordData.confirmar) {
+            showAlert('Erro', 'As senhas novas não coincidem.');
+            return;
+        }
+
         if (passwordData.nova.length < 6) {
-            Alert.alert('Erro', 'A senha deve ter pelo menos 6 caracteres.');
+            showAlert('Erro', 'A senha deve ter pelo menos 6 caracteres.');
             return;
         }
 
         setLoading(true);
         try {
+            console.log('[DEBUG] Enviando requisição de alteração de senha...');
             await authLib.updatePassword(passwordData.nova);
-            Alert.alert('Sucesso', 'Senha alterada com segurança.');
+            showAlert('Sucesso', 'Senha alterada com sucesso!');
             setPasswordData({ atual: '', nova: '', confirmar: '' });
         } catch (e: any) {
-            Alert.alert('Erro', e.message || 'Falha ao alterar senha.');
+            console.error('[DEBUG] Falha ao alterar senha:', e);
+            showAlert('Erro', e.message || 'Falha ao alterar senha.');
         } finally {
             setLoading(false);
         }
