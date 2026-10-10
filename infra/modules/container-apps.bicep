@@ -168,6 +168,11 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: empty(appInsightsConnectionString) ? '' : null
             }
             {
+              name: 'POSTGRES_URL'
+              secretRef: !empty(databaseConnectionString) ? 'database-connection-string' : null
+              value: empty(databaseConnectionString) ? '' : null
+            }
+            {
               name: 'DATABASE_URL'
               secretRef: !empty(databaseConnectionString) ? 'database-connection-string' : null
               value: empty(databaseConnectionString) ? '' : null

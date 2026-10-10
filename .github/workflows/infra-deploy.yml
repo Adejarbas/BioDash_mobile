@@ -134,7 +134,11 @@ jobs:
           subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
           template: ./infra/main.bicep
-          parameters: ./infra/main.parameters.json
+          parameters: >-
+            ./infra/main.parameters.json
+            externalDatabaseConnectionString="${{ secrets.POSTGRES_URL }}"
+            supabaseUrl="${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
+            supabaseAnonKey="${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}"
           deploymentMode: Incremental
           failOnStdErr: false
 
