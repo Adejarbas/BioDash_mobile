@@ -56,6 +56,7 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.ref == 'refs/heads/feat/azure-integration' || github.ref == 'refs/heads/feat/azure-ci-improvements' || github.event_name == 'workflow_dispatch'
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
+      docker_tag: ${{ steps.version.outputs.docker_tag }}
       should_deploy: ${{ steps.version.outputs.should_deploy }}
     steps:
       - name: Checkout code
@@ -85,7 +86,7 @@ jobs:
             echo "Tag v0.0.0 já existe - nenhuma ação necessária."
           fi
 
-      - name: Calcular nova versão SemVer
+      - name: Calcular nova versão SemVer e Tag Docker
         id: version
         shell: bash
         run: |
@@ -95,10 +96,22 @@ jobs:
           if [ -n "${EXISTING_TAG:-}" ]; then
             echo "Reexecução detectada: usando tag existente $EXISTING_TAG"
             VERSION="${EXISTING_TAG#v}"
+            SHORT_SHA=$(git rev-parse --short=7 HEAD)
+            BRANCH_NAME="${GITHUB_REF_NAME:-branch}"
+            SAFE_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-15)
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              DOCKER_TAG="$VERSION"
+              DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest,${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${VERSION}"
+            else
+              DOCKER_TAG="${VERSION}-${SAFE_BRANCH}.${SHORT_SHA}"
+              DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${DOCKER_TAG}"
+            fi
             {
               echo "should_deploy=false"
               echo "current_version=$VERSION"
               echo "new_version=$VERSION"
+              echo "docker_tag=$DOCKER_TAG"
+              echo "docker_tags=$DOCKER_TAGS"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -135,12 +148,32 @@ jobs:
           elif [[ $PATCH -eq 1 ]]; then
             NEW_VERSION=$(semver -i patch "$CURRENT_VERSION")
           fi
-          echo "Versões (atual / nova): $CURRENT_VERSION -> $NEW_VERSION"
+
+          # Tag da imagem Docker:
+          # - main: usa SemVer limpo (ex: 1.0.1) e :latest
+          # - outras branches: usa pré-release com branch e commit SHA (ex: 1.0.1-feat-azure.7ce7ea4)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          BRANCH_NAME="${GITHUB_REF_NAME:-branch}"
+          SAFE_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-15)
+
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            DOCKER_TAG="$NEW_VERSION"
+            DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest,${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${NEW_VERSION}"
+          else
+            DOCKER_TAG="${NEW_VERSION}-${SAFE_BRANCH}.${SHORT_SHA}"
+            DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${DOCKER_TAG}"
+          fi
+
+          echo "Versões (atual / nova / docker_tag): $CURRENT_VERSION -> $NEW_VERSION ($DOCKER_TAG)"
           {
             echo "should_deploy=true"
             echo "current_version=$CURRENT_VERSION"
             echo "new_version=$NEW_VERSION"
+            echo "docker_tag=$DOCKER_TAG"
+            echo "docker_tags=$DOCKER_TAGS"
           } >> "$GITHUB_OUTPUT"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "DOCKER_TAG=$DOCKER_TAG" >> "$GITHUB_ENV"
 
       - name: Atualizar versão no package.json (apenas main)
         if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
@@ -186,9 +219,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${{ steps.version.outputs.new_version }}
+          tags: ${{ steps.version.outputs.docker_tags }}
           build-args: |
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL }}
           cache-from: type=gha
@@ -209,7 +240,7 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
       CONTAINER_APP_NAME: 'ca-biodash-web-prod'
-      IMAGE_TAG: ${{ needs.build-and-push.outputs.new_version || 'latest' }}
+      IMAGE_TAG: ${{ needs.build-and-push.outputs.docker_tag || needs.build-and-push.outputs.new_version || 'latest' }}
     steps:
       - name: Azure Login via OIDC (Zero Secrets)
         uses: azure/login@v2
