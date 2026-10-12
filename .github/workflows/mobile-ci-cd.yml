@@ -260,8 +260,11 @@ jobs:
           echo "✅ Container App atualizado com sucesso no Azure Container Apps!"
 
       - name: Smoke Test Pós-Deploy (Disponibilidade Web Ativa)
+        id: smoke_test
         run: |
-          WEB_URL="https://${CONTAINER_APP_NAME}.victoriousmoss-60cc301a.chilecentral.azurecontainerapps.io"
+          WEB_FQDN=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --query "properties.configuration.ingress.fqdn" -o tsv)
+          WEB_URL="https://${WEB_FQDN}"
+          echo "web_url=$WEB_URL" >> "$GITHUB_OUTPUT"
           echo "Executando Smoke Test no Frontend Web: $WEB_URL..."
           
           MAX_RETRIES=5
@@ -289,13 +292,14 @@ jobs:
       - name: Publicar Resumo do Deploy (Step Summary)
         if: always()
         run: |
+          WEB_URL="${{ steps.smoke_test.outputs.web_url || 'https://ca-biodash-web-prod.victoriousmoss-60cc301a.chilecentral.azurecontainerapps.io' }}"
           echo "### 🚀 Deploy Azure Container Apps (Frontend Web)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Propriedade | Valor |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
           echo "| **Container App** | \`$CONTAINER_APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Imagem Docker** | \`${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Versão SemVer** | \`v$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Imagem Docker** | \`docker.io/thiagohmn93/biodash_mobile:$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Versão / Tag** | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Ambiente** | \`production\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Web URL** | https://${CONTAINER_APP_NAME}.victoriousmoss-60cc301a.chilecentral.azurecontainerapps.io |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Web URL** | [$WEB_URL]($WEB_URL) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Status Smoke Test** | ✅ 200 OK |" >> $GITHUB_STEP_SUMMARY
