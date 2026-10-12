@@ -44,8 +44,8 @@ export async function uploadFile(
   };
   const contentType = contentTypes[ext] || "application/octet-stream";
 
-  // 1. Solicita URL de upload ao backend (/api/storage/upload-url com fallback para /api/s3/upload-url)
-  let res = await fetch(`${API_BASE_URL}/storage/upload-url`, {
+  // 1. Solicita URL de upload ao backend via rota oficial do Azure Storage (/api/storage/upload-url)
+  const res = await fetch(`${API_BASE_URL}/storage/upload-url`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -53,18 +53,6 @@ export async function uploadFile(
     },
     body: JSON.stringify({ fileName, contentType }),
   });
-
-  if (!res.ok) {
-    // Fallback legado caso o endpoint /api/storage ainda não esteja disponível
-    res = await fetch(`${API_BASE_URL}/s3/upload-url`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ fileName, contentType }),
-    });
-  }
 
   const json = await res.json();
   if (!res.ok || !json.success) {
@@ -123,18 +111,10 @@ export async function getDownloadUrl(key: string): Promise<string | null> {
   if (!token) return null;
 
   try {
-    let res = await fetch(
+    const res = await fetch(
       `${API_BASE_URL}/storage/download-url?key=${encodeURIComponent(key)}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-
-    if (!res.ok) {
-      // Fallback legado
-      res = await fetch(
-        `${API_BASE_URL}/s3/download-url?key=${encodeURIComponent(key)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-    }
 
     const json = await res.json();
     if (!res.ok || !json.success) return null;
