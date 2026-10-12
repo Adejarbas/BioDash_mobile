@@ -161,8 +161,6 @@ jobs:
             ./infra/main.parameters.json
             dbAdministratorLoginPassword="${{ steps.sanitize.outputs.clean_password }}"
             externalDatabaseConnectionString="${{ secrets.POSTGRES_URL }}"
-            supabaseUrl="${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
-            supabaseAnonKey="${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}"
           deploymentMode: Incremental
           failOnStdErr: false
 
@@ -190,6 +188,7 @@ jobs:
           echo "| **Governança / FinOps** | Custo Zero (minReplicas: 0 / Azure for Students) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Backend API URL** | \`${{ steps.arm_deploy.outputs.backendApiUrl }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Frontend Web URL** | \`${{ steps.arm_deploy.outputs.frontendWebUrl }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **AI Chatbot URL** | \`${{ steps.arm_deploy.outputs.aiApiUrl }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **PostgreSQL Server** | \`${{ steps.arm_deploy.outputs.postgresServerFqdn }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **PostgreSQL Database** | \`${{ steps.arm_deploy.outputs.postgresDatabaseName }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Storage Account** | \`${{ steps.arm_deploy.outputs.storageAccountName }}\` |" >> $GITHUB_STEP_SUMMARY
