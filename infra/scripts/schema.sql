@@ -86,6 +86,18 @@ ALTER TABLE maintenance_incidents ADD COLUMN IF NOT EXISTS resolution_message TE
 ALTER TABLE maintenance_incidents ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending';
 
 -- ==============================================================================
+-- 5.1 BIODIGESTOR_MAPS (Plantas, Localização e Marcadores de Biodigestores)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS biodigestor_maps (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  address JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_biodigestor_maps_user_created ON biodigestor_maps(user_id, created_at DESC);
+
+-- ==============================================================================
 -- 6. SENSOR_ALERTS (Alertas de Sensores IoT / Telemetria)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS sensor_alerts (

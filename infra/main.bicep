@@ -20,6 +20,9 @@ param backendImage string = 'docker.io/thiagohmn93/biodashbd:latest'
 @description('Imagem Docker Hub do Frontend Mobile Web')
 param frontendImage string = 'docker.io/thiagohmn93/biodash_mobile:latest'
 
+@description('Imagem Docker Hub do Chatbot / AI Service')
+param aiImage string = 'docker.io/mathgueff/biodash_ai-service:latest'
+
 @description('Usuário do Docker Hub (opcional se imagens forem públicas)')
 param dockerHubUsername string = ''
 
@@ -40,13 +43,6 @@ param dbAdministratorLoginPassword string = ''
 @description('Connection string externa para PostgreSQL (caso deployDatabase seja false)')
 @secure()
 param externalDatabaseConnectionString string = ''
-
-@description('URL do Supabase (opcional)')
-param supabaseUrl string = ''
-
-@description('Chave Anônima do Supabase (opcional)')
-@secure()
-param supabaseAnonKey string = ''
 
 @description('Tags globais para governança e FinOps')
 param customTags object = {}
@@ -166,12 +162,11 @@ module containerAppsModule './modules/container-apps.bicep' = {
     userAssignedIdentityClientId: identityModule.outputs.clientId
     backendImage: backendImage
     frontendImage: frontendImage
+    aiImage: aiImage
     appInsightsConnectionString: monitoringModule.outputs.appInsightsConnectionString
     storageAccountName: storageModule.outputs.storageAccountName
     avatarsContainerName: storageModule.outputs.avatarsContainerName
     databaseConnectionString: resolvedDbConnectionString
-    supabaseUrl: supabaseUrl
-    supabaseAnonKey: supabaseAnonKey
     dockerHubUsername: dockerHubUsername
     dockerHubPassword: dockerHubPassword
     tags: tags
@@ -192,6 +187,12 @@ output frontendWebUrl string = containerAppsModule.outputs.frontendUrl
 
 @description('FQDN público do Frontend Web/Mobile')
 output frontendWebFqdn string = containerAppsModule.outputs.frontendFqdn
+
+@description('URL pública HTTPS do Chatbot / AI Service')
+output aiApiUrl string = containerAppsModule.outputs.aiUrl
+
+@description('FQDN público do Chatbot / AI Service')
+output aiApiFqdn string = containerAppsModule.outputs.aiFqdn
 
 @description('Nome da Storage Account provisionada')
 output storageAccountName string = storageModule.outputs.storageAccountName

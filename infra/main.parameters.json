@@ -14,6 +14,9 @@
     "frontendImage": {
       "value": "docker.io/thiagohmn93/biodash_mobile:latest"
     },
+    "aiImage": {
+      "value": "docker.io/mathgueff/biodash_ai-service:latest"
+    },
     "dockerHubUsername": {
       "value": ""
     },
@@ -30,12 +33,6 @@
       "value": ""
     },
     "externalDatabaseConnectionString": {
-      "value": ""
-    },
-    "supabaseUrl": {
-      "value": "https://scsldapnrzpjkyqkeiop.supabase.co"
-    },
-    "supabaseAnonKey": {
       "value": ""
     },
     "customTags": {
