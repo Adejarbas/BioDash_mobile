@@ -10,10 +10,8 @@ param workloadName string
 @description('Prefixo CIDR da Rede Virtual (VNet)')
 param vnetAddressPrefix string = '10.0.0.0/16'
 
-@description('Prefixo CIDR da Subnet para Azure Container Apps')
-param acaSubnetPrefix string = '10.0.0.0/23'
 
-@description('Prefixo CIDR da Subnet para Banco de Dados')
+@description('Prefixo CIDR da Subnet para Banco de Dados (PostgreSQL Flexible Server - desativado por padrão)')
 param dbSubnetPrefix string = '10.0.4.0/24'
 
 @description('Tags padrão para governança e FinOps')
@@ -119,23 +117,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
       ]
     }
     subnets: [
-      {
-        name: 'snet-aca'
-        properties: {
-          addressPrefix: acaSubnetPrefix
-          networkSecurityGroup: {
-            id: nsg.id
-          }
-          delegations: [
-            {
-              name: 'aca-delegation'
-              properties: {
-                serviceName: 'Microsoft.App/environments'
-              }
-            }
-          ]
-        }
-      }
+      // FinOps: Subnet de ACA REMOVIDA. Não delegamos mais subnet para
+      // 'Microsoft.App/environments' pois isso cria DNS Private Zone paga.
+      // O Container Apps Environment opera em modo público (sem VNet) = custo zero.
       {
         name: 'snet-db'
         properties: {
@@ -143,6 +127,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' = {
           networkSecurityGroup: {
             id: nsg.id
           }
+          // Delegação para PostgreSQL Flexible Server (ativada apenas quando deployDatabase=true)
           delegations: [
             {
               name: 'pg-delegation'
@@ -172,8 +157,8 @@ output vnetId string = vnet.id
 @description('Nome da VNet')
 output vnetName string = vnet.name
 
-@description('ID da Subnet para Azure Container Apps')
-output acaSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'snet-aca')
+// FinOps: output de acaSubnetId REMOVIDO. O Container Apps Environment NÃO
+// deve ser integrado à VNet no tier Azure for Students (gera cobrança de IP público dedicado).
 
-@description('ID da Subnet para Banco de Dados Relacional')
+@description('ID da Subnet para Banco de Dados Relacional (PostgreSQL Flexible Server)')
 output dbSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'snet-db')
