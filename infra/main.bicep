@@ -165,6 +165,7 @@ module containerAppsModule './modules/container-apps.bicep' = {
     aiImage: aiImage
     appInsightsConnectionString: monitoringModule.outputs.appInsightsConnectionString
     storageAccountName: storageModule.outputs.storageAccountName
+    storageAccountKey: storageModule.outputs.storageAccountKey
     avatarsContainerName: storageModule.outputs.avatarsContainerName
     databaseConnectionString: resolvedDbConnectionString
     dockerHubUsername: dockerHubUsername

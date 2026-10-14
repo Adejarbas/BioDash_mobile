@@ -10,8 +10,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { decode } from "base64-arraybuffer";
 
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://localhost:3003/api";
+// Helper para normalizar a URL da API garantindo o sufixo /api
+const normalizeApiUrl = (url?: string) => {
+  if (!url) return "http://localhost:3003/api";
+  const clean = url.trim().replace(/\/+$/, "");
+  return clean.endsWith("/api") ? clean : `${clean}/api`;
+};
+
+const API_BASE_URL = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL);
 
 const TOKEN_KEY = "@biodash_jwt_token";
 

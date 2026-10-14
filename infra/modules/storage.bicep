@@ -145,3 +145,7 @@ output avatarsContainerName string = avatarsContainer.name
 
 @description('Nome do container de documentos')
 output documentsContainerName string = documentsContainer.name
+
+@description('Chave de acesso primária da Storage Account')
+@secure()
+output storageAccountKey string = storageAccount.listKeys().keys[0].value

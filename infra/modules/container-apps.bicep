@@ -35,6 +35,10 @@ param storageAccountName string
 @description('Nome do container Blob de avatares')
 param avatarsContainerName string = 'avatars'
 
+@description('Chave da Storage Account para autenticação e geração de SAS Tokens')
+@secure()
+param storageAccountKey string = ''
+
 @description('Connection String do Banco de Dados PostgreSQL (opcional)')
 @secure()
 param databaseConnectionString string = ''
@@ -127,6 +131,10 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             name: 'database-connection-string'
             value: databaseConnectionString
           } : null
+          !empty(storageAccountKey) ? {
+            name: 'azure-storage-account-key'
+            value: storageAccountKey
+          } : null
           hasDockerHubAuth ? {
             name: 'dockerhub-password'
             value: dockerHubPassword
@@ -194,6 +202,11 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'DATABASE_URL'
               secretRef: !empty(databaseConnectionString) ? 'database-connection-string' : null
               value: empty(databaseConnectionString) ? '' : null
+            }
+            {
+              name: 'AZURE_STORAGE_ACCOUNT_KEY'
+              secretRef: !empty(storageAccountKey) ? 'azure-storage-account-key' : null
+              value: empty(storageAccountKey) ? '' : null
             }
           ]
           probes: [
