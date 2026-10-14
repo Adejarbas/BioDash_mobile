@@ -70,7 +70,7 @@ export async function uploadImageToS3(imageUri: string, fileName: string): Promi
   const uploadRes = await fetch(uploadUrl, {
     method: 'PUT',
     headers: { 'Content-Type': contentType },
-    body,
+    body: body as any,
   });
 
   if (!uploadRes.ok) {
