@@ -149,14 +149,70 @@ export const maintenanceApi = {
 };
 
 // ==========================================
-// alertsApi — Alertas de Sensores (PostgreSQL)
+// alertsApi — Alertas e Histórico de Ocorrências (PostgreSQL)
 // ==========================================
+export interface AlertFilters {
+  biodigesterId?: string;
+  sensorType?: string;
+  level?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface CreateAlertPayload {
+  biodigesterId?: string | number | null;
+  biodigesterName?: string;
+  sensorId?: string;
+  sensorType?: string;
+  readingValue?: number;
+  thresholdValue?: number;
+  unit?: string;
+  alertLevel?: string;
+  message?: string;
+  status?: string;
+}
+
 export const alertsApi = {
-  fetch: () => authRequest(`${API_BASE_URL}/alerts`, { method: "GET" }),
-  create: (data: { alertLevel: string; message: string }) =>
+  fetch: (filters?: AlertFilters) => {
+    let url = `${API_BASE_URL}/alerts`;
+    if (filters) {
+      const q = new URLSearchParams();
+      if (filters.biodigesterId) q.append("biodigesterId", filters.biodigesterId);
+      if (filters.sensorType) q.append("sensorType", filters.sensorType);
+      if (filters.level) q.append("level", filters.level);
+      if (filters.status) q.append("status", filters.status);
+      if (filters.startDate) q.append("startDate", filters.startDate);
+      if (filters.endDate) q.append("endDate", filters.endDate);
+      if (filters.page) q.append("page", String(filters.page));
+      if (filters.limit) q.append("limit", String(filters.limit));
+      const qs = q.toString();
+      if (qs) url += `?${qs}`;
+    }
+    return authRequest(url, { method: "GET" });
+  },
+  create: (data: CreateAlertPayload) =>
     authRequest(`${API_BASE_URL}/alerts`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+  resolve: async (id: string, notes?: string) => {
+    const body = JSON.stringify({ status: "resolved", resolutionNotes: notes });
+    const res = await authRequest(`${API_BASE_URL}/alerts/${id}`, {
+      method: "PATCH",
+      body,
+    });
+    if (res.success) return res;
+    return authRequest(`${API_BASE_URL}/alerts/${id}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  delete: (id: string) =>
+    authRequest(`${API_BASE_URL}/alerts/${id}`, {
+      method: "DELETE",
     }),
 };
 

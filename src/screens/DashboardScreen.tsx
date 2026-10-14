@@ -29,6 +29,7 @@ import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme } from '../context/ThemeContext'
 import { useFadeInUp } from '../hooks/useFadeInUp'
+import { classifySensorReading, getCriticalityBadgeInfo } from '../lib/anomalyClassifier'
 
 interface MetricData {
     value: number
@@ -78,7 +79,7 @@ const colorToMetric: Record<CardKey, string> = {
     'efficiency': '#10b981',  // Amber (Cooler Yellow/Orange)
 }
 
-export default function DashboardScreen() {
+export default function DashboardScreen({ onNavigateNotifications }: { onNavigateNotifications?: () => void } = {}) {
     const isSmallScreen = Dimensions.get('window').width < 420;
     const insets = useSafeAreaInsets()
     const chartRef = useRef<ViewShot>(null)
@@ -2820,18 +2821,23 @@ export default function DashboardScreen() {
                 ref={telemetryRef}
                 onAddMaintenance={() => loadDashboardData()}
                 alertsEnabled={alertsEnabled}
+                activeBiodigester={mapMarkers[0]}
+                onNavigateNotifications={onNavigateNotifications}
             />
         </View>
     )
 }
 
-const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, alertsEnabled: boolean }>(({ onAddMaintenance, alertsEnabled }, ref) => {
+const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, alertsEnabled: boolean, activeBiodigester?: any, onNavigateNotifications?: () => void }>(({ onAddMaintenance, alertsEnabled, activeBiodigester, onNavigateNotifications }, ref) => {
     const { colors } = useTheme();
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [temp, setTemp] = useState(35);
-    const [pressure, setPressure] = useState(1.5);
-    const [ph, setPh] = useState(7.0);
+    const [temp, setTemp] = useState(35.5);
+    const [pressure, setPressure] = useState(1.45);
+    const [ph, setPh] = useState(7.1);
+    const [h2s, setH2s] = useState(120);
     const [timeElapsed, setTimeElapsed] = useState(0);
+    const [cycleCount, setCycleCount] = useState(0);
+    const [simSensor, setSimSensor] = useState<'auto' | 'temp' | 'pressure' | 'ph' | 'h2s'>('auto');
     const [expanded, setExpanded] = useState(false);
     const [maintenanceModalVisible, setMaintenanceModalVisible] = useState(false);
     const [maintenanceStep, setMaintenanceStep] = useState(1);
@@ -2934,48 +2940,216 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
 
     // Animação para o ícone M/Alerta
     const pulseAnim = useRef(new Animated.Value(1)).current;
+    const lastRecordedAlertRef = useRef<Record<string, number>>({});
+    const [lastSavedAlertText, setLastSavedAlertText] = useState<string | null>(null);
 
+    // Gravação de Ocorrência no Histórico do Banco de Dados
+    const recordOccurrence = async (
+        sensorType: string,
+        readingValue: number,
+        anomalyInfo: { alertLevel: string; threshold: number; unit: string; description: string }
+    ) => {
+        if (!anomalyInfo || anomalyInfo.alertLevel === 'info') return;
+
+        const key = `${sensorType}_${anomalyInfo.alertLevel}`;
+        const now = Date.now();
+        // Não duplica registro da mesma anomalia no mesmo sensor dentro de 15 segundos
+        if (lastRecordedAlertRef.current[key] && now - lastRecordedAlertRef.current[key] < 15000) {
+            return;
+        }
+        lastRecordedAlertRef.current[key] = now;
+
+        const sId = sensorType === 'temperatura' ? 'SN-TMP-01' : sensorType === 'pressao' ? 'SN-PRS-02' : sensorType === 'ph' ? 'SN-PH-01' : 'SN-H2S-01';
+
+        let bdId: number | null = null;
+        if (activeBiodigester?.id && !isNaN(Number(activeBiodigester.id))) {
+            bdId = Number(activeBiodigester.id);
+        }
+
+        try {
+            const res = await alertsApi.create({
+                biodigesterId: bdId,
+                biodigesterName: activeBiodigester?.title || activeBiodigester?.name || 'Biodigestor Principal',
+                sensorId: sId,
+                sensorType,
+                readingValue: Number(readingValue.toFixed(2)),
+                thresholdValue: anomalyInfo.threshold,
+                unit: anomalyInfo.unit,
+                alertLevel: anomalyInfo.alertLevel,
+                message: anomalyInfo.description,
+                status: 'active'
+            });
+
+            if (res.success) {
+                const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                setLastSavedAlertText(`Registrado no histórico às ${hora}`);
+            }
+        } catch (err) {
+            console.error('[Telemetry] Erro ao gravar ocorrência:', err);
+        }
+    };
+
+    // Helper para teste direto de níveis (dispara e registra ocorrência imediatamente)
+    const handleTestLevel = (level: 'info' | 'low' | 'medium' | 'critical') => {
+        const target = simSensor === 'auto' ? 'temp' : simSensor;
+        let sType = 'temperatura';
+        let val = 35.5;
+
+        if (level === 'info') {
+            setTimeElapsed(0);
+            setLastSavedAlertText(null);
+            if (target === 'temp') { setTemp(35.5); sType = 'temperatura'; val = 35.5; }
+            if (target === 'pressure') { setPressure(1.45); sType = 'pressao'; val = 1.45; }
+            if (target === 'ph') { setPh(7.10); sType = 'ph'; val = 7.10; }
+            if (target === 'h2s') { setH2s(120); sType = 'h2s'; val = 120; }
+        } else if (level === 'low') {
+            setTimeElapsed(5);
+            if (target === 'temp') { setTemp(38.0); sType = 'temperatura'; val = 38.0; }
+            if (target === 'pressure') { setPressure(1.68); sType = 'pressao'; val = 1.68; }
+            if (target === 'ph') { setPh(6.62); sType = 'ph'; val = 6.62; }
+            if (target === 'h2s') { setH2s(290); sType = 'h2s'; val = 290; }
+            const c = classifySensorReading(sType, val);
+            recordOccurrence(sType, val, c);
+        } else if (level === 'medium') {
+            setTimeElapsed(8);
+            if (target === 'temp') { setTemp(39.3); sType = 'temperatura'; val = 39.3; }
+            if (target === 'pressure') { setPressure(1.83); sType = 'pressao'; val = 1.83; }
+            if (target === 'ph') { setPh(6.32); sType = 'ph'; val = 6.32; }
+            if (target === 'h2s') { setH2s(520); sType = 'h2s'; val = 520; }
+            const c = classifySensorReading(sType, val);
+            recordOccurrence(sType, val, c);
+        } else if (level === 'critical') {
+            setTimeElapsed(11);
+            if (target === 'temp') { setTemp(41.4); sType = 'temperatura'; val = 41.4; }
+            if (target === 'pressure') { setPressure(2.05); sType = 'pressao'; val = 2.05; }
+            if (target === 'ph') { setPh(5.85); sType = 'ph'; val = 5.85; }
+            if (target === 'h2s') { setH2s(780); sType = 'h2s'; val = 780; }
+            const c = classifySensorReading(sType, val);
+            recordOccurrence(sType, val, c);
+            if (alertsEnabled) setExpanded(true);
+        }
+    };
+
+    // Loop de Simulação Cíclica dos 4 Sensores
     useEffect(() => {
         const interval = setInterval(() => {
-            setTimeElapsed((prev) => (prev + 1) % 13);
-            if (timeElapsed >= 5 && timeElapsed < 10) {
-                setTemp((prev) => prev + 1.5);
-            } else if (timeElapsed >= 10) {
-                setTemp((prev) => Math.max(35, prev - 1.2));
-            } else {
-                setTemp((prev) => Math.max(34.5, Math.min(35.5, prev + (Math.random() - 0.5) * 0.5)));
-            }
-            setPressure((prev) => Math.max(1.3, Math.min(1.7, prev + (Math.random() - 0.5) * 0.1)));
-            setPh((prev) => Math.max(6.8, Math.min(7.2, prev + (Math.random() - 0.5) * 0.1)));
-        }, 2000);
-        return () => clearInterval(interval);
-    }, [timeElapsed]);
+            setCycleCount((prev) => prev + 1);
+            setTimeElapsed((prev) => (prev + 1) % 16);
 
-    // Força abrir automaticamente se tiver temperatura crítica
+            // Determina qual sensor está no foco do ciclo
+            let targetSensor = simSensor;
+            if (simSensor === 'auto') {
+                const autoIndex = Math.floor(cycleCount / 16) % 4;
+                targetSensor = autoIndex === 0 ? 'temp' : autoIndex === 1 ? 'pressure' : autoIndex === 2 ? 'ph' : 'h2s';
+            }
+
+            // 1. Simulação de Temperatura
+            // Normal: 35.0-37.5 | Atenção: 37.6-38.5 | Médio: 38.6-40.0 | Crítico: > 40.0
+            if (targetSensor === 'temp') {
+                if (timeElapsed >= 4 && timeElapsed <= 6) {
+                    setTemp(38.0 + (Math.random() - 0.5) * 0.4);
+                } else if (timeElapsed >= 7 && timeElapsed <= 9) {
+                    setTemp(39.3 + (Math.random() - 0.5) * 0.4);
+                } else if (timeElapsed >= 10 && timeElapsed <= 12) {
+                    setTemp(41.4 + (Math.random() - 0.5) * 0.4);
+                } else if (timeElapsed >= 13) {
+                    setTemp((prev) => Math.max(35.2, prev - 1.8));
+                } else {
+                    setTemp(35.4 + (Math.random() - 0.5) * 0.4);
+                }
+            } else {
+                setTemp((prev) => Math.max(35.0, Math.min(36.2, prev + (Math.random() - 0.5) * 0.2)));
+            }
+
+            // 2. Simulação de Pressão (bar)
+            // Normal: 1.20-1.60 | Atenção: 1.61-1.75 | Médio: 1.76-1.90 | Crítico: > 1.90
+            if (targetSensor === 'pressure') {
+                if (timeElapsed >= 4 && timeElapsed <= 6) {
+                    setPressure(1.68 + (Math.random() - 0.5) * 0.04);
+                } else if (timeElapsed >= 7 && timeElapsed <= 9) {
+                    setPressure(1.83 + (Math.random() - 0.5) * 0.04);
+                } else if (timeElapsed >= 10 && timeElapsed <= 12) {
+                    setPressure(2.05 + (Math.random() - 0.5) * 0.06);
+                } else if (timeElapsed >= 13) {
+                    setPressure((prev) => Math.max(1.45, prev - 0.18));
+                } else {
+                    setPressure(1.45 + (Math.random() - 0.5) * 0.04);
+                }
+            } else {
+                setPressure((prev) => Math.max(1.40, Math.min(1.50, prev + (Math.random() - 0.5) * 0.02)));
+            }
+
+            // 3. Simulação de pH
+            // Normal: 6.8-7.4 | Atenção: 6.5-6.7 | Médio: 6.2-6.4 | Crítico: < 6.2
+            if (targetSensor === 'ph') {
+                if (timeElapsed >= 4 && timeElapsed <= 6) {
+                    setPh(6.62 + (Math.random() - 0.5) * 0.05);
+                } else if (timeElapsed >= 7 && timeElapsed <= 9) {
+                    setPh(6.32 + (Math.random() - 0.5) * 0.05);
+                } else if (timeElapsed >= 10 && timeElapsed <= 12) {
+                    setPh(5.85 + (Math.random() - 0.5) * 0.08);
+                } else if (timeElapsed >= 13) {
+                    setPh((prev) => Math.min(7.10, prev + 0.35));
+                } else {
+                    setPh(7.10 + (Math.random() - 0.5) * 0.05);
+                }
+            } else {
+                setPh((prev) => Math.max(7.00, Math.min(7.20, prev + (Math.random() - 0.5) * 0.02)));
+            }
+
+            // 4. Simulação de H2S (ppm)
+            // Normal: < 200 | Atenção: 200-400 | Médio: 401-700 | Crítico: > 700
+            if (targetSensor === 'h2s') {
+                if (timeElapsed >= 4 && timeElapsed <= 6) {
+                    setH2s(Math.round(290 + (Math.random() - 0.5) * 30));
+                } else if (timeElapsed >= 7 && timeElapsed <= 9) {
+                    setH2s(Math.round(520 + (Math.random() - 0.5) * 40));
+                } else if (timeElapsed >= 10 && timeElapsed <= 12) {
+                    setH2s(Math.round(780 + (Math.random() - 0.5) * 40));
+                } else if (timeElapsed >= 13) {
+                    setH2s((prev) => Math.max(120, prev - 180));
+                } else {
+                    setH2s(Math.round(115 + (Math.random() - 0.5) * 15));
+                }
+            } else {
+                setH2s((prev) => Math.round(Math.max(100, Math.min(130, prev + (Math.random() - 0.5) * 6))));
+            }
+        }, 2200);
+        return () => clearInterval(interval);
+    }, [timeElapsed, simSensor, cycleCount]);
+
+    // Classificação contínua das métricas dos 4 sensores
+    const tempClass = classifySensorReading('temperatura', temp);
+    const pressClass = classifySensorReading('pressao', pressure);
+    const phClass = classifySensorReading('ph', ph);
+    const h2sClass = classifySensorReading('h2s', h2s);
+
+    const allClassifications = [tempClass, pressClass, phClass, h2sClass];
+    const rank: Record<string, number> = { critical: 3, critico: 3, medium: 2, medio: 2, low: 1, aviso: 1, info: 0 };
+    const sorted = [...allClassifications].sort((a, b) => (rank[b.alertLevel] || 0) - (rank[a.alertLevel] || 0));
+    const highestAlert = sorted[0].isAnomaly ? sorted[0] : null;
+
+    const isCritical = sorted[0].alertLevel === 'critical';
+    const isMedium = sorted[0].alertLevel === 'medium';
+    const isLow = sorted[0].alertLevel === 'low';
+
+    // Gravação contínua no histórico quando anomalia detectada (Atenção, Médio ou Crítico)
     useEffect(() => {
-        if (temp > 40) {
-            if (alertsEnabled) {
+        if (highestAlert && highestAlert.isAnomaly) {
+            const sType = highestAlert.unit === '°C' ? 'temperatura' : highestAlert.unit === 'bar' ? 'pressao' : highestAlert.unit === 'pH' ? 'ph' : 'h2s';
+            const rVal = highestAlert.unit === '°C' ? temp : highestAlert.unit === 'bar' ? pressure : highestAlert.unit === 'pH' ? ph : h2s;
+
+            if (isCritical && alertsEnabled) {
                 setExpanded(true);
             }
-            if (!alertSent) {
-                setAlertSent(true);
-                authLib.getUser().then((user) => {
-                    if (user) {
-                        alertsApi.create({
-                            alertLevel: 'critico',
-                            message: `Temperatura atingiu ${temp.toFixed(1)}°C - Risco Crítico`,
-                        });
-                    }
-                });
-            }
-        } else if (temp < 38) {
-            setAlertSent(false);
-        }
-    }, [temp, alertSent]);
 
-    // Ativa animação
+            recordOccurrence(sType, rVal, highestAlert);
+        }
+    }, [highestAlert?.alertLevel, highestAlert?.unit, isCritical]);
+
+    // Ativa animação quando crítico
     useEffect(() => {
-        if (temp > 40 && !expanded) {
+        if (isCritical && !expanded) {
             Animated.loop(
                 Animated.sequence([
                     Animated.timing(pulseAnim, { toValue: 1.25, duration: 600, useNativeDriver: true }),
@@ -2986,45 +3160,217 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
             pulseAnim.setValue(1);
             pulseAnim.stopAnimation();
         }
-    }, [temp, expanded]);
+    }, [isCritical, expanded]);
 
-    const isCritical = temp > 40;
+    // Componente auxiliar de Badge de Sensor
+    const renderSensorTag = (level: string, label: string) => {
+        const info = getCriticalityBadgeInfo(level);
+        return (
+            <View style={{ backgroundColor: info.bgColor, borderColor: info.borderColor, borderWidth: 0.5, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: info.color }}>{label.toUpperCase()}</Text>
+            </View>
+        );
+    };
 
     return (
         <View style={{ position: 'absolute', bottom: 100, right: 20, zIndex: 999, alignItems: 'flex-end' }}>
             {expanded && (
-                <View style={{ width: 280, backgroundColor: colors.cardBackground, borderRadius: 12, padding: 16, elevation: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: isCritical ? '#fecaca' : colors.border }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>Monitoramento</Text>
+                <View style={{ width: 300, backgroundColor: colors.cardBackground, borderRadius: 14, padding: 16, elevation: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: isCritical ? '#fecaca' : isMedium ? '#fdba74' : colors.border }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <MaterialCommunityIcons name="access-point" size={16} color={colors.primary} />
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>Monitoramento de Sensores</Text>
+                        </View>
                         <TouchableOpacity onPress={() => setExpanded(false)}>
                             <Text style={{ fontSize: 16, color: colors.textMuted }}>✕</Text>
                         </TouchableOpacity>
                     </View>
 
-                    {/* Linhas de Dados */}
-                    <View style={{ gap: 12, marginBottom: isCritical ? 16 : 0 }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 13 }}>🌡️ Temperatura</Text>
-                            <Text style={{ color: isCritical ? '#dc2626' : colors.text, fontWeight: 'bold' }}>{temp.toFixed(1)}°C</Text>
+                    {/* Linhas de Dados dos 4 Sensores */}
+                    <View style={{ gap: 9, marginBottom: 14 }}>
+                        {/* 1. Temperatura */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>🌡️ Temperatura</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ color: tempClass.alertLevel === 'critical' ? '#dc2626' : tempClass.alertLevel === 'medium' ? '#ea580c' : tempClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
+                                    {temp.toFixed(1)}°C
+                                </Text>
+                                {renderSensorTag(tempClass.alertLevel, tempClass.label)}
+                            </View>
                         </View>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 13 }}>⏱️ Pressão</Text>
-                            <Text style={{ color: colors.text, fontWeight: 'bold' }}>{pressure.toFixed(2)} bar</Text>
+
+                        {/* 2. Pressão */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>⏱️ Pressão</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ color: pressClass.alertLevel === 'critical' ? '#dc2626' : pressClass.alertLevel === 'medium' ? '#ea580c' : pressClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
+                                    {pressure.toFixed(2)} bar
+                                </Text>
+                                {renderSensorTag(pressClass.alertLevel, pressClass.label)}
+                            </View>
                         </View>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 13 }}>💧 pH</Text>
-                            <Text style={{ color: colors.text, fontWeight: 'bold' }}>{ph.toFixed(1)}</Text>
+
+                        {/* 3. pH */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>💧 pH Biomassa</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ color: phClass.alertLevel === 'critical' ? '#dc2626' : phClass.alertLevel === 'medium' ? '#ea580c' : phClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
+                                    {ph.toFixed(1)}
+                                </Text>
+                                {renderSensorTag(phClass.alertLevel, phClass.label)}
+                            </View>
+                        </View>
+
+                        {/* 4. H2S */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>🧪 H2S (Gás)</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ color: h2sClass.alertLevel === 'critical' ? '#dc2626' : h2sClass.alertLevel === 'medium' ? '#ea580c' : h2sClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
+                                    {h2s.toFixed(0)} ppm
+                                </Text>
+                                {renderSensorTag(h2sClass.alertLevel, h2sClass.label)}
+                            </View>
                         </View>
                     </View>
 
-                    {/* Alerta Crítico Embutido */}
-                    {isCritical && (
-                        <View style={{ backgroundColor: '#fee2e2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#fecaca' }}>
-                            <Text style={{ color: '#b91c1c', fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>⚠️ Temperatura Crítica!</Text>
-                            <Text style={{ color: '#991b1b', fontSize: 11, marginBottom: 10 }}>Notificação enviada ao responsável.</Text>
-                            <TouchableOpacity style={{ backgroundColor: '#dc2626', paddingVertical: 8, borderRadius: 6, alignItems: 'center' }} onPress={() => setMaintenanceModalVisible(true)}>
-                                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Solicitar Manutenção</Text>
-                            </TouchableOpacity>
+                    {/* Barra de Seleção de Sensor Simulado */}
+                    <View style={{ backgroundColor: colors.background, padding: 8, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: colors.border }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textMuted, marginBottom: 5 }}>
+                            SIMULAR SENSOR: {simSensor.toUpperCase()}
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 4, marginBottom: 6 }}>
+                            {[
+                                { key: 'auto', label: 'Auto 🔄' },
+                                { key: 'temp', label: 'Temp' },
+                                { key: 'pressure', label: 'Pressão' },
+                                { key: 'ph', label: 'pH' },
+                                { key: 'h2s', label: 'H2S' },
+                            ].map((s) => (
+                                <TouchableOpacity
+                                    key={s.key}
+                                    style={{
+                                        flex: 1,
+                                        paddingVertical: 4,
+                                        alignItems: 'center',
+                                        borderRadius: 4,
+                                        backgroundColor: simSensor === s.key ? colors.primary : colors.cardBackground,
+                                        borderWidth: 0.5,
+                                        borderColor: colors.border
+                                    }}
+                                    onPress={() => setSimSensor(s.key as any)}
+                                >
+                                    <Text style={{ fontSize: 9, fontWeight: '600', color: simSensor === s.key ? '#fff' : colors.text }}>
+                                        {s.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+
+                        {/* Teste Rápido de Nível */}
+                        <View style={{ flexDirection: 'row', gap: 4 }}>
+                            {[
+                                { key: 'info', label: 'Normal', color: '#0284c7' },
+                                { key: 'low', label: 'Atenção', color: '#ca8a04' },
+                                { key: 'medium', label: 'Médio', color: '#ea580c' },
+                                { key: 'critical', label: 'Crítico', color: '#dc2626' },
+                            ].map((lvl) => (
+                                <TouchableOpacity
+                                    key={lvl.key}
+                                    style={{
+                                        flex: 1,
+                                        paddingVertical: 3,
+                                        alignItems: 'center',
+                                        borderRadius: 4,
+                                        borderWidth: 0.5,
+                                        borderColor: lvl.color
+                                    }}
+                                    onPress={() => handleTestLevel(lvl.key as any)}
+                                >
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: lvl.color }}>
+                                        {lvl.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Alerta / Anomalia Embutido com Classificação */}
+                    {highestAlert && highestAlert.isAnomaly && (
+                        <View style={{
+                            backgroundColor: isCritical ? '#fee2e2' : isMedium ? '#ffedd5' : '#fef9c3',
+                            padding: 10,
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: isCritical ? '#fecaca' : isMedium ? '#fed7aa' : '#fde047'
+                        }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                                <Text style={{
+                                    color: isCritical ? '#b91c1c' : isMedium ? '#c2410c' : '#854d0e',
+                                    fontWeight: 'bold',
+                                    fontSize: 12
+                                }}>
+                                    ⚠️ {highestAlert.label}: {highestAlert.unit === '°C' ? 'Temperatura' : highestAlert.unit === 'bar' ? 'Pressão' : highestAlert.unit === 'pH' ? 'pH' : 'H2S'}
+                                </Text>
+                            </View>
+                            <Text style={{
+                                color: isCritical ? '#991b1b' : isMedium ? '#9a3412' : '#713f12',
+                                fontSize: 11,
+                                lineHeight: 15,
+                                marginBottom: 8
+                            }}>
+                                {highestAlert.description}
+                            </Text>
+                            {lastSavedAlertText && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.7)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 }}>
+                                    <MaterialCommunityIcons name="check-circle" size={12} color="#16a34a" />
+                                    <Text style={{ fontSize: 10, color: '#166534', fontWeight: '600' }}>
+                                        {lastSavedAlertText}
+                                    </Text>
+                                </View>
+                            )}
+                            <View style={{ gap: 6 }}>
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04',
+                                        paddingVertical: 6,
+                                        borderRadius: 6,
+                                        alignItems: 'center'
+                                    }}
+                                    onPress={() => {
+                                        const sName = highestAlert.unit === '°C' ? 'Sensor Temperatura' : highestAlert.unit === 'bar' ? 'Sensor Pressão' : highestAlert.unit === 'pH' ? 'Sensor pH' : 'Sensor H2S';
+                                        setMaintenanceForm(prev => ({
+                                            ...prev,
+                                            name: `Manutenção - ${sName}`,
+                                            priority: isCritical ? 'Urgente - Problema técnico' : isMedium ? 'Alta - Problema técnico' : 'Média - Problema técnico',
+                                            description: highestAlert.description
+                                        }));
+                                        setMaintenanceModalVisible(true);
+                                    }}
+                                >
+                                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>Solicitar Manutenção</Text>
+                                </TouchableOpacity>
+
+                                {onNavigateNotifications && (
+                                    <TouchableOpacity
+                                        style={{
+                                            borderWidth: 1,
+                                            borderColor: isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04',
+                                            paddingVertical: 5,
+                                            borderRadius: 6,
+                                            alignItems: 'center',
+                                            flexDirection: 'row',
+                                            justifyContent: 'center',
+                                            gap: 4
+                                        }}
+                                        onPress={onNavigateNotifications}
+                                    >
+                                        <MaterialCommunityIcons name="history" size={13} color={isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04'} />
+                                        <Text style={{ color: isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04', fontWeight: '700', fontSize: 11 }}>
+                                            Ver Histórico de Alertas →
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
                         </View>
                     )}
                 </View>
@@ -3214,7 +3560,7 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
             {!expanded && (
                 <TouchableOpacity
                     style={{
-                        backgroundColor: isCritical ? '#dc2626' : colors.cardBackground,
+                        backgroundColor: isCritical ? '#dc2626' : isMedium ? '#ea580c' : isLow ? '#ca8a04' : colors.cardBackground,
                         flexDirection: 'row',
                         alignItems: 'center',
                         gap: 8,
@@ -3225,7 +3571,7 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                         shadowColor: '#000',
                         shadowOpacity: 0.2,
                         borderWidth: 1,
-                        borderColor: isCritical ? '#b91c1c' : colors.border
+                        borderColor: isCritical ? '#b91c1c' : isMedium ? '#c2410c' : isLow ? '#a16207' : colors.border
                     }}
                     onPress={() => setExpanded(true)}
                 >
@@ -3234,11 +3580,15 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', position: 'absolute', top: -2, right: -2 }} />
                             <MaterialCommunityIcons name="alert" size={18} color="#fff" />
                         </Animated.View>
+                    ) : isMedium ? (
+                        <MaterialCommunityIcons name="alert-outline" size={18} color="#fff" />
+                    ) : isLow ? (
+                        <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#fff" />
                     ) : (
                         <MaterialCommunityIcons name="access-point" size={18} color={colors.text} />
                     )}
-                    <Text style={{ fontWeight: '700', color: isCritical ? '#fff' : colors.text, fontSize: 13 }}>
-                        {isCritical ? 'Alerta Crítico' : 'Sensores'}
+                    <Text style={{ fontWeight: '700', color: (isCritical || isMedium || isLow) ? '#fff' : colors.text, fontSize: 13 }}>
+                        {isCritical ? 'Alerta Crítico' : isMedium ? 'Alerta Médio' : isLow ? 'Atenção' : 'Sensores'}
                     </Text>
                 </TouchableOpacity>
             )}
