@@ -166,13 +166,11 @@ export default function CompanyProfileScreen({ onBack }: Props) {
 
                 if (profile?.avatar_url) {
                     let key = profile.avatar_url;
-                    if (key.includes('amazonaws.com/')) {
-                        key = key.split('amazonaws.com/')[1];
-                    } else if (key.includes('.blob.core.windows.net/')) {
+                    if (key.startsWith('http://') || key.startsWith('https://')) {
                         try {
                             const urlObj = new URL(key);
                             const parts = urlObj.pathname.split('/').filter(Boolean);
-                            key = parts.slice(1).join('/');
+                            key = parts.length > 1 ? parts.slice(1).join('/') : (parts[0] || key);
                         } catch {
                             // Mantém a key como está caso não seja URL completa válida
                         }
@@ -276,7 +274,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
 
             if (Platform.OS === 'web') {
                 // Na web, expo-file-system não funciona.
-                // Convertemos o blob URI para base64 via FileReader e enviamos ao S3.
+                // Convertemos o blob URI para base64 via FileReader e enviamos ao storage.
                 const response = await fetch(uri);
                 const blob = await response.blob();
                 const base64String: string = await new Promise((resolve, reject) => {
