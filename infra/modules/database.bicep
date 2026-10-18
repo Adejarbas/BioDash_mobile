@@ -77,6 +77,9 @@ resource allowAllExternalFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/fir
     startIpAddress: '0.0.0.0'
     endIpAddress: '255.255.255.255'
   }
+  dependsOn: [
+    allowAzureServicesFirewall
+  ]
 }
 
 // ============================================================================
@@ -89,6 +92,9 @@ resource azureExtensionsConfig 'Microsoft.DBforPostgreSQL/flexibleServers/config
     value: 'PGCRYPTO,UUID-OSSP'
     source: 'user-override'
   }
+  dependsOn: [
+    allowAllExternalFirewall
+  ]
 }
 
 // ============================================================================
@@ -101,6 +107,9 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-03-0
     charset: 'UTF8'
     collation: 'en_US.utf8'
   }
+  dependsOn: [
+    azureExtensionsConfig
+  ]
 }
 
 // ============================================================================
