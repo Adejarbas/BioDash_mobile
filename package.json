@@ -8,6 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
+    "typecheck": "tsc --noEmit",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:build": "docker compose up -d --build",
@@ -15,8 +16,6 @@
     "docker:ps": "docker compose ps"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1035.0",
-    "@aws-sdk/s3-request-presigner": "^3.1036.0",
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "^8.4.4",

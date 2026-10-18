@@ -317,6 +317,14 @@ docker-compose up --build
 * O Backend estará acessível em http://localhost:3003.
 * O Frontend Web (servido via Nginx) estará acessível em http://localhost:80.
 
+---
+
+## ☁️ Migração para Microsoft Azure & Infraestrutura como Código (Bicep)
+
+Como parte do processo de modernização arquitetural e desacoplamento de nuvem (*cloud portability*), a infraestrutura do **BioDash** foi migrada da AWS para a **Microsoft Azure**, com provisionamento 100% via código (**IaC com Bicep**), autenticação segura sem senhas (**OIDC**) e custo operacional zero (**FinOps** na assinatura *Azure for Students*).
+
+
+---
 
 ## 👥 EQUIPE
 
@@ -333,14 +341,6 @@ docker-compose up --build
       <td>
        <a href="https://github.com/alerodriguesm02" target="_blank">
           <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Alessandro Rodrigues">
-        </a>
-      </td>
-    </tr>
-    <tr>
-      <td>Ariele Peres</td>
-      <td>
-         <a href="https://github.com/arieleperes" target="_blank">
-          <img src="https://img.shields.io/badge/GitHub-000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Ariele Peres">
         </a>
       </td>
     </tr>

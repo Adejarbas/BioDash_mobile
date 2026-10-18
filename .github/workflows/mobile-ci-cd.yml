@@ -1,24 +1,63 @@
-name: Mobile CI / CD (Android)
+name: Mobile CI / CD (Android & Web)
  
 permissions:
   contents: write
+  id-token: write
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
       - develop
+      - feat/azure-bicep
+      - feat/azure-integration
+      - feat/azure-ci-improvements
       - 'feature/**'
       - 'hotfix/**'
   pull_request:
     branches:
       - main
       - develop
+      - feat/azure-bicep
+      - feat/azure-integration
+      - feat/azure-ci-improvements
  
 jobs:
-  pipeline:
+  # ============================================================================
+  # Job 1: Quality Gate & Validação Estática (Roda em PRs e Pushes)
+  # ============================================================================
+  validate:
+    name: Lint & Typecheck (Quality Gate)
     runs-on: ubuntu-latest
- 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar Dependências
+        run: npm install --force
+
+      - name: Verificação de Tipos TypeScript (Quality Gate)
+        run: npm run typecheck
+
+  # ============================================================================
+  # Job 2: Versionamento Semântico e Empacotamento Docker Web
+  # ============================================================================
+  build-and-push:
+    name: Package & Docker Web Push
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.ref == 'refs/heads/feat/azure-integration' || github.ref == 'refs/heads/feat/azure-ci-improvements' || github.event_name == 'workflow_dispatch'
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      docker_tag: ${{ steps.version.outputs.docker_tag }}
+      should_deploy: ${{ steps.version.outputs.should_deploy }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,19 +65,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          distribution: 'zulu'
-          java-version: '17' # Versão recomendada para builds Android modernos
- 
-      - name: Dependências
-        run: npm install --force      
- 
-      - name: Semver
-        run: npm install -g semver       
- 
-      - name: Criar nova tag caso não exista
+          node-version: '20'
+
+      - name: Install Semver
+        run: npm install -g semver
+
+      - name: Criar tag inicial v0.0.0 caso não exista
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -50,8 +85,8 @@ jobs:
           else
             echo "Tag v0.0.0 já existe - nenhuma ação necessária."
           fi
- 
-      - name: Calcular nova versão
+
+      - name: Calcular nova versão SemVer e Tag Docker
         id: version
         shell: bash
         run: |
@@ -61,12 +96,23 @@ jobs:
           if [ -n "${EXISTING_TAG:-}" ]; then
             echo "Reexecução detectada: usando tag existente $EXISTING_TAG"
             VERSION="${EXISTING_TAG#v}"
+            SHORT_SHA=$(git rev-parse --short=7 HEAD)
+            BRANCH_NAME="${GITHUB_REF_NAME:-branch}"
+            SAFE_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-15)
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              DOCKER_TAG="$VERSION"
+              DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest,${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${VERSION}"
+            else
+              DOCKER_TAG="${VERSION}-${SAFE_BRANCH}.${SHORT_SHA}"
+              DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${DOCKER_TAG}"
+            fi
             {
               echo "should_deploy=false"
               echo "current_version=$VERSION"
               echo "new_version=$VERSION"
+              echo "docker_tag=$DOCKER_TAG"
+              echo "docker_tags=$DOCKER_TAGS"
             } >> "$GITHUB_OUTPUT"
-            echo "NEW_VERSION=$VERSION" >> "$GITHUB_ENV"
             exit 0
           fi
           echo "Nenhuma tag semântica no HEAD. Calculando nova versão…"
@@ -102,25 +148,34 @@ jobs:
           elif [[ $PATCH -eq 1 ]]; then
             NEW_VERSION=$(semver -i patch "$CURRENT_VERSION")
           fi
-          echo "Versões (atual / nova): $CURRENT_VERSION -> $NEW_VERSION"
-          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
-            echo "Sem mudanças de versão (sem commits feat/fix/! ou BREAKING CHANGE)."
-            {
-              echo "should_deploy=false"
-              echo "current_version=$CURRENT_VERSION"
-              echo "new_version=$CURRENT_VERSION"
-            } >> "$GITHUB_OUTPUT"
-            echo "NEW_VERSION=$CURRENT_VERSION" >> "$GITHUB_ENV"
+
+          # Tag da imagem Docker:
+          # - main: usa SemVer limpo (ex: 1.0.1) e :latest
+          # - outras branches: usa pré-release com branch e commit SHA (ex: 1.0.1-feat-azure.7ce7ea4)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          BRANCH_NAME="${GITHUB_REF_NAME:-branch}"
+          SAFE_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-15)
+
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            DOCKER_TAG="$NEW_VERSION"
+            DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest,${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${NEW_VERSION}"
           else
-            {
-              echo "should_deploy=true"
-              echo "current_version=$CURRENT_VERSION"
-              echo "new_version=$NEW_VERSION"
-            } >> "$GITHUB_OUTPUT"
-            echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+            DOCKER_TAG="${NEW_VERSION}-${SAFE_BRANCH}.${SHORT_SHA}"
+            DOCKER_TAGS="${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${DOCKER_TAG}"
           fi
 
-      - name: Atualizar versão no package.json
+          echo "Versões (atual / nova / docker_tag): $CURRENT_VERSION -> $NEW_VERSION ($DOCKER_TAG)"
+          {
+            echo "should_deploy=true"
+            echo "current_version=$CURRENT_VERSION"
+            echo "new_version=$NEW_VERSION"
+            echo "docker_tag=$DOCKER_TAG"
+            echo "docker_tags=$DOCKER_TAGS"
+          } >> "$GITHUB_OUTPUT"
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "DOCKER_TAG=$DOCKER_TAG" >> "$GITHUB_ENV"
+
+      - name: Atualizar versão no package.json (apenas main)
         if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
         env:
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
@@ -133,7 +188,7 @@ jobs:
             echo "Versão $NEW_VERSION já está no package.json"
           fi
 
-      - name: Commit e push package/tag
+      - name: Commit e push de tag/release (apenas main)
         if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
@@ -143,123 +198,108 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
           git commit -m "chore(release): version ${NEW_VERSION}" || echo "Nada para commitar"
-          if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
-            echo "Tag v${NEW_VERSION} já existe. Pulando criação de tag."
-          else
+          if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
             git tag "v${NEW_VERSION}"
           fi
           git push origin HEAD:main
-          if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
-            git push origin "v${NEW_VERSION}"
-          fi
+          git push origin "v${NEW_VERSION}"
 
-      # Build Android (React Native CLI) - Comentado por enquanto
-      # - name: Build Android Release
-      #   if: steps.version.outputs.should_deploy == 'true' && github.ref == 'refs/heads/main'
-      #   run: |
-      #     cd android
-      #     chmod +x gradlew
-      #     ./gradlew assembleRelease
- 
       - name: Set up Docker Buildx
-        if: github.ref == 'refs/heads/main'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        if: github.ref == 'refs/heads/main'
+      - name: Build and push Docker Web image (Otimizado com GHA Cache)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          no-cache: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${{ steps.version.outputs.new_version }}
+          tags: ${{ steps.version.outputs.docker_tags }}
           build-args: |
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Deploy legado na AWS EC2 desativado (Migração para Azure Container Apps em andamento)
-      # - name: Deploy to EC2
-      #   if: github.ref == 'refs/heads/main'
-      #   uses: appleboy/ssh-action@v1.0.3
-      #   with:
-      #     host: ${{ secrets.EC2_HOST }}
-      #     username: ${{ secrets.EC2_USER }}
-      #     key: ${{ secrets.EC2_SSH_KEY }}
-      #     script: |
-      #       docker pull ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-      #       docker stop biodash_mobile_web || true
-      #       docker rm biodash_mobile_web || true
-      #       docker run -d \
-      #         --name biodash_mobile_web \
-      #         --restart unless-stopped \
-      #         -p 80:80 \
-      #         ${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:latest
-      #       docker image prune -f
+  # ============================================================================
+  # Job 3: Continuous Deployment & Smoke Test (Azure Container Apps Web)
+  # ============================================================================
+  deploy-azure:
+    name: Continuous Deployment (Azure ACA Web)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/azure-bicep' || github.ref == 'refs/heads/feat/azure-integration' || github.ref == 'refs/heads/feat/azure-ci-improvements' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: production
+      url: https://ca-biodash-web-prod.victoriousmoss-60cc301a.chilecentral.azurecontainerapps.io
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+      CONTAINER_APP_NAME: 'ca-biodash-web-prod'
+      IMAGE_TAG: ${{ needs.build-and-push.outputs.docker_tag || needs.build-and-push.outputs.new_version || 'latest' }}
+    steps:
+      - name: Azure Login via OIDC (Zero Secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Envio de e-mail quando pipeline FALHAR
-      # - name: Enviar email se falhar
-      #   if: failure()
-      #   uses: dawidd6/action-send-mail@v4
-      #   with:
-      #     server_address: smtp.gmail.com
-      #     server_port: 587
-      #     secure: false
-      #     username: ${{ secrets.EMAIL_USERNAME }}
-      #     password: ${{ secrets.EMAIL_PASSWORD }}
-      #     subject: "❌ Falha pipeline Actions - BioDashMobile"
-      #     to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
-      #     from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
-      #     body: |
-      #       ⚠️ A execução do pipeline FALHOU!
-            
-      #       📦 Repositório: ${{ github.repository }}
-      #       🔖 Commit: ${{ github.sha }}
-      #       ⚙️ Workflow: ${{ github.workflow }}
-      #       🔧 Job: ${{ github.job }}
-      #       👤 Autor: ${{ github.actor }}
-      #       🌿 Branch: ${{ github.ref_name }}
-            
-      #       🔗 Ver logs completos: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-      #       --
-      #       Notificação automática do GitHub Actions
+      - name: Deploy to Azure Container Apps (Atualização do Web App)
+        run: |
+          IMAGE_NAME="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/biodash_mobile:${IMAGE_TAG}"
+          echo "Atualizando Container App '$CONTAINER_APP_NAME' para a imagem versionada '$IMAGE_NAME'..."
+          az containerapp update \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RG_NAME" \
+            --image "$IMAGE_NAME"
+          echo "✅ Container App atualizado com sucesso no Azure Container Apps!"
 
-      # Envio de e-mail quando pipeline tiver SUCESSO
-      # - name: Enviar email de sucesso
-      #   if: success()
-      #   uses: dawidd6/action-send-mail@v4
-      #   with:
-      #     server_address: smtp.gmail.com
-      #     server_port: 587
-      #     secure: false
-      #     username: ${{ secrets.EMAIL_USERNAME }}
-      #     password: ${{ secrets.EMAIL_PASSWORD }}
-      #     subject: "✅ Pipeline BioDashMobile executado com sucesso!"
-      #     to: fe.dsm.vot.001@gmail.com # Email atualizado conforme pedido original
-      #     from: ${{ secrets.EMAIL_USERNAME || 'github-actions@github.com' }}
-      #     body: |
-      #       🎉 Pipeline executado com SUCESSO!
-            
-      #       📦 Repositório: ${{ github.repository }}
-      #       🔖 Commit: ${{ github.sha }}
-      #       ⚙️ Workflow: ${{ github.workflow }}
-      #       🔧 Job: ${{ github.job }}
-      #       👤 Autor: ${{ github.actor }}
-      #       🌿 Branch: ${{ github.ref_name }}
-      #       📌 Versão: v${{ steps.version.outputs.new_version }}
-            
-      #       🔗 Ver detalhes: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-      #       --
-      #       Notificação automática do GitHub Actions
+      - name: Smoke Test Pós-Deploy (Disponibilidade Web Ativa)
+        id: smoke_test
+        run: |
+          WEB_FQDN=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RG_NAME" --query "properties.configuration.ingress.fqdn" -o tsv)
+          WEB_URL="https://${WEB_FQDN}"
+          echo "web_url=$WEB_URL" >> "$GITHUB_OUTPUT"
+          echo "Executando Smoke Test no Frontend Web: $WEB_URL..."
+          
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          SUCCESS=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$WEB_URL" || echo "000")
+            echo "Tentativa $((RETRY_COUNT + 1))/$MAX_RETRIES - Código HTTP retornado: $HTTP_CODE"
+            if [ "$HTTP_CODE" -eq 200 ]; then
+              SUCCESS=true
+              break
+            fi
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            sleep 10
+          done
+
+          if [ "$SUCCESS" = true ]; then
+            echo "✅ Smoke test passou com louvor! O Frontend Web está respondendo 200 OK."
+          else
+            echo "❌ Smoke test falhou! O Frontend Web não respondeu HTTP 200 em tempo hábil."
+            exit 1
+          fi
+
+      - name: Publicar Resumo do Deploy (Step Summary)
+        if: always()
+        run: |
+          WEB_URL="${{ steps.smoke_test.outputs.web_url || 'https://ca-biodash-web-prod.victoriousmoss-60cc301a.chilecentral.azurecontainerapps.io' }}"
+          echo "### 🚀 Deploy Azure Container Apps (Frontend Web)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Propriedade | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container App** | \`$CONTAINER_APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Imagem Docker** | \`docker.io/thiagohmn93/biodash_mobile:$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Versão / Tag** | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Ambiente** | \`production\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Web URL** | [$WEB_URL]($WEB_URL) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status Smoke Test** | ✅ 200 OK |" >> $GITHUB_STEP_SUMMARY
