@@ -241,7 +241,7 @@ jobs:
           build-args: |
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
   # ============================================================================
   # Job 3: Continuous Deployment & Smoke Test (Azure Container Apps Web)
