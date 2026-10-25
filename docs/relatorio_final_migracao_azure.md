@@ -50,6 +50,7 @@ Documentação técnica apresentada como requisito parcial de avaliação na dis
    4.4. [Estrutura dos Resource Groups](#44-estrutura-dos-resource-groups)  
    4.5. [Eliminação de Custos Ocultos de Infraestrutura](#45-eliminação-de-custos-ocultos-de-infraestrutura)  
    4.6. [Projeção Operacional e Renovação de Cotas Gratuitas](#46-projeção-operacional-e-renovação-de-cotas-gratuitas)  
+5. [RESUMO DOS CUSTOS E PROGRESSO PARA CUSTO ZERO](#5-resumo-dos-custos-e-progresso-para-custo-zero)  
 
 ---
 
@@ -224,3 +225,33 @@ As capturas a seguir demonstram a ausência de componentes tarifados de rede e r
 Com a virada do mês fiscal em 1º de novembro, a cota de 180.000 vCPU-segundos e 360.000 GiB-segundos gratuitos do Azure Container Apps é integralmente restaurada.
 
 Considerando que a infraestrutura já se encontra corrigida (sem alocação de IPs públicos dedicados, sem zonas de DNS privado e com escala a zero rigorosamente ativa nos três contêineres), as operações ordinárias e manutenções do BioDash serão integralmente cobertas pela cota mensal renovada, mantendo o custo contínuo em **R$ 0,00**.
+
+---
+
+## 5. RESUMO DOS CUSTOS E PROGRESSO PARA CUSTO ZERO
+
+A trajetória de governança e engenharia de custos (*FinOps*) no Microsoft Azure durante o desenvolvimento do BioDash foi orientada pelo objetivo de manter a infraestrutura de produção sob **custo contínuo nulo (R$ 0,00)**, preservando integralmente o saldo de créditos da assinatura acadêmica *Azure for Students*.
+
+O progresso técnico percorrido pela equipe sintetiza-se nos seguintes marcos evolutivos:
+
+1. **Diagnóstico de Custos Ocultos de Rede (02 a 12 de outubro):**  
+   O acoplamento original dos contêineres a uma sub-rede dedicada na VNet acarretou o provisionamento implícito de um IP público padrão (R$ 2,03) e de uma zona DNS privada (R$ 0,26), ambos recursos tarifados sem cobertura acadêmica. Simultaneamente, a sequência inicial de testes e compilações consumiu a cota mensal de 180.000 vCPU-segundos gratuitos do Azure Container Apps, acumulando R$ 7,70 no início do mês.
+2. **Desacoplamento Arquitetural de Rede via IaC Bicep (13 de outubro):**  
+   Identificou-se que as aplicações serverless não necessitavam de subnet dedicada em VNet. Os modelos Bicep foram refatorados (commit `671d55c`) para operar o Container Apps Environment em modo gerenciado serverless. Essa intervenção eliminou a dependência de IPs dedicados e zonas DNS privadas cobradas, zerando em 100% os custos recorrentes de rede.
+3. **Calibração Rigorosa de Escala a Zero via KEDA:**  
+   Todos os microsserviços (`ca-biodash-api-prod`, `ca-biodash-web-prod` e `ca-biodash-ai-prod`) receberam regras estritas de escalonamento: `minReplicas: 0`, `maxReplicas: 1` e período de resfriamento de 300 segundos. Isso garantiu que instâncias ociosas fossem completamente desligadas, extinguindo qualquer cobrança de ociosidade (*vCPU Idle Usage*).
+4. **Adequação das Cargas Persistentes à Camada Gratuita:**  
+   O banco de dados relacional foi provisionado no **Azure Database for PostgreSQL Flexible Server** sob a computação `Standard_B1ms` (coberto pelas 750 horas mensais gratuitas). Da mesma forma, o armazenamento de arquivos no **Azure Blob Storage** e o workspace do **Log Analytics** tiveram todas as métricas rotuladas como `- Free` e valor de **R$ 0,00**.
+5. **Achatamento da Curva e Operação Permanente a Custo Zero:**  
+   A partir de 18 de outubro, a curva acumulada de custos estabilizou-se horizontalmente. O registro residual de R$ 1,91 aferido entre 14 e 23 de outubro (média de R$ 0,19/dia) correspondeu estritamente a validações pontuais pós-deploy das versões 0.19.x no GitHub Actions, após o esgotamento da cota mensal do período inicial. Com a renovação periódica das quotas gratuitas do *Azure for Students* a cada virada de mês, a infraestrutura operará em regime de custo zero contínuo.
+
+### Quadro-Resumo da Evolução Arquitetural e FinOps
+
+| Recurso / Camada | Cenário Inicial | Ação de Engenharia Realizada | Status Atual (FinOps) |
+| :--- | :--- | :--- | :--- |
+| **Azure Container Apps** | Risco de réplicas ativas ociosas e estouro de cota | Configuração de `minReplicas: 0`, `maxReplicas: 1` e cooldown de 300s via KEDA | **Escala a zero ativa** (R$ 0,00 ocioso) |
+| **Rede e Conectividade** | Alocação de IP Público Standard na VNet (R$ 2,03) | Desacoplamento da VNet nos arquivos Bicep (commit `671d55c`) | **0 IPs Públicos** (R$ 0,00) |
+| **Resolução de Nomes (DNS)** | Zona Privada do PostgreSQL tarifada (R$ 0,26) | Remoção de links de rede privada desnecessários no Bicep | **0 Zonas DNS** (R$ 0,00) |
+| **Base Relacional (PostgreSQL)** | Risco de tarifação fora do limite de computação | Provisionamento calibrado no tier `Standard_B1ms` com SSL obrigatório | **100% coberto pelo tier gratuito** (R$ 0,00) |
+| **Blob Storage e Telemetria** | Risco de operações fora da franquia | Uso de SAS tokens com cabeçalho BlockBlob e retenção calibrada | **Métricas rotuladas `- Free`** (R$ 0,00) |
+
