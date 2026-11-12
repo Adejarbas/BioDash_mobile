@@ -8,7 +8,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
-    "ai": "cd ai-service && uv run --python 3.11 --with-requirements requirements.txt uvicorn main:app --host 127.0.0.1 --port 5000"
+    "ai": "cd ai-service && uv run --python 3.11 --with-requirements requirements.txt uvicorn main:app --host 127.0.0.1 --port 5000",
+    "test": "node --test tests/*.test.cjs",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1035.0",
@@ -41,6 +43,8 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "^19.2.14",
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^9.39.5",
     "typescript": "^5.3.3"
   },
   "private": true

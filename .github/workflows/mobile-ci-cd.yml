@@ -16,7 +16,33 @@ on:
       - develop
  
 jobs:
+  tests:
+    name: Testes unitários
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - name: Instalar dependências do frontend
+        run: npm ci --force
+      - name: Verificar lint
+        run: npm run lint
+      - name: Testar frontend
+        run: npm test
+      - name: Instalar dependências do backend
+        run: npm ci --prefix backend
+      - name: Testar backend
+        run: npm test --prefix backend
+
   pipeline:
+    needs: tests
     runs-on: ubuntu-latest
  
     steps:
@@ -39,6 +65,7 @@ jobs:
         run: npm install -g semver       
  
       - name: Criar nova tag caso não exista
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

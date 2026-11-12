@@ -398,3 +398,19 @@ docker-compose up --build
 ## Rodapé
 
 ©️ 2026 BioDash. Todos os direitos reservados.
+
+### Testes unitários e integração contínua
+
+Com Node.js 20 e as dependências instaladas (`npm ci --force` na raiz e
+`npm ci --prefix backend`), execute:
+
+```bash
+npm run lint              # análise estática de JavaScript e TypeScript
+npm test                  # autenticação do frontend, com armazenamento e API simulados
+npm test --prefix backend # middleware JWT do backend, sem conexão com banco
+```
+
+O workflow `.github/workflows/mobile-ci-cd.yml` executa as duas suítes em
+pushes e pull requests configurados. A etapa existente de publicação do
+frontend só começa após os testes passarem. O lint também é executado antes da publicação. O repositório BioDashBD possui
+sua própria pipeline de testes, lint e deploy do backend Next.js.
