@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Azure-Infrastructure-Topology" id="azure-infra-topology">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="infra_title" value="&lt;b&gt;BioDash — Topologia de Infraestrutura em Nuvem Microsoft Azure&lt;/b&gt;&lt;br&gt;Isolamento de Rede, Segurança Passwordless e FinOps Custo Zero (Azure for Students)" style="text;html=1;fontSize=18;fontColor=#1e293b;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- EXTERNAL ACTORS / CLIENTS -->
+        <mxCell id="ext_clients" value="&lt;b&gt;Clientes Externos &amp;amp; DevOps&lt;/b&gt;" style="swimlane;startSize=30;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#262626;fontSize=12;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="300" height="790" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli_mobile" value="&lt;b&gt;Dispositivo Móvel&lt;/b&gt;&#xa;BioDash App (Expo / React Native)&#xa;Android / iOS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="ext_clients">
+          <mxGeometry x="30" y="60" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli_web" value="&lt;b&gt;Navegador Web&lt;/b&gt;&#xa;BioDash Web (Desktop / Mobile Web)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="ext_clients">
+          <mxGeometry x="30" y="180" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli_gh" value="&lt;b&gt;GitHub Actions CI/CD&lt;/b&gt;&#xa;Esteira de Deploy Automático&#xa;Autenticação OIDC Passwordless" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;" vertex="1" parent="ext_clients">
+          <mxGeometry x="30" y="320" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli_hub" value="&lt;b&gt;Docker Hub (Público)&lt;/b&gt;&#xa;adejarbas/biodash-api&#xa;adejarbas/biodash-frontend&#xa;(FinOps: sem custos de ACR)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="ext_clients">
+          <mxGeometry x="30" y="460" width="240" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- MAIN RESOURCE GROUP -->
+        <mxCell id="rg_box" value="&lt;b&gt;Azure Resource Group: rg-biodash-prod (Região: chilecentral)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#f0f5ff;strokeColor=#85a5ff;fontColor=#10239e;fontSize=13;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="380" y="80" width="1180" height="790" as="geometry" />
+        </mxCell>
+
+        <!-- VNET CONTAINER -->
+        <mxCell id="vnet_box" value="&lt;b&gt;Virtual Network: vnet-biodash-prod (10.0.0.0/16)&lt;/b&gt;&#xa;Network Security Group: nsg-biodash-prod (Portas 80 e 443 Inbound liberadas)" style="swimlane;startSize=35;fillColor=#f9f0ff;strokeColor=#d3adf7;fontColor=#531dab;fontSize=12;rounded=1;" vertex="1" parent="rg_box">
+          <mxGeometry x="30" y="50" width="700" height="710" as="geometry" />
+        </mxCell>
+
+        <!-- Subnet 1: Container Apps Environment -->
+        <mxCell id="snet_aca" value="&lt;b&gt;Subnet snet-aca (10.0.0.0/23) — Delegada para Microsoft.App/environments&lt;/b&gt;" style="swimlane;startSize=30;fillColor=#ffffff;strokeColor=#d3adf7;fontColor=#531dab;fontSize=11;rounded=1;" vertex="1" parent="vnet_box">
+          <mxGeometry x="20" y="50" width="660" height="380" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aca_env" value="&lt;b&gt;Container Apps Managed Environment (cae-biodash-prod)&lt;/b&gt;&#xa;Ingress Controller Externo com Terminação TLS (HTTPS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="snet_aca">
+          <mxGeometry x="30" y="40" width="600" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="app_web" value="&lt;b&gt;Container App: ca-biodash-web-prod&lt;/b&gt;&#xa;Frontend Expo Web servido via Nginx&#xa;Porta 80 • Ingress Externo&#xa;Escala a zero (minReplicas: 0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;" vertex="1" parent="snet_aca">
+          <mxGeometry x="30" y="120" width="280" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="app_api" value="&lt;b&gt;Container App: ca-biodash-api-prod&lt;/b&gt;&#xa;Backend Next.js API Routes (Node.js)&#xa;Porta 3003 • Ingress Externo com CORS&#xa;Escala a zero (minReplicas: 0) • Probes /api/health" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;" vertex="1" parent="snet_aca">
+          <mxGeometry x="350" y="120" width="280" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="app_keda" value="&lt;b&gt;Autoscaler Gerenciado KEDA&lt;/b&gt;&#xa;Regra: 50 requisições simultâneas por réplica (maxReplicas: 2) • Economia total em ociosidade" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcffe6;strokeColor=#eaff8f;fontColor=#5b8c00;" vertex="1" parent="snet_aca">
+          <mxGeometry x="30" y="240" width="600" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_aca_1" value="Roteia Web" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="snet_aca" source="aca_env" target="app_web">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_aca_2" value="Roteia API" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="snet_aca" source="aca_env" target="app_api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_aca_3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="snet_aca" source="app_api" target="app_keda">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Subnet 2: Database -->
+        <mxCell id="snet_db" value="&lt;b&gt;Subnet snet-db (10.0.4.0/24) — Delegada para PostgreSQL Flexible Servers&lt;/b&gt;" style="swimlane;startSize=30;fillColor=#ffffff;strokeColor=#d3adf7;fontColor=#531dab;fontSize=11;rounded=1;" vertex="1" parent="vnet_box">
+          <mxGeometry x="20" y="470" width="660" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="db_psql" value="&lt;b&gt;PostgreSQL Flexible Server: psql-biodash-prod&lt;/b&gt;&#xa;SKU Burstable Standard_B1ms (1 vCPU, 2 GB RAM, 32 GB Storage)&#xa;Porta 5432 • Criptografia SSL forçada (sslmode=require)&#xa;Acesso restrito à VNet • 750 horas/mês gratuitas (FinOps Custo Zero)" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;align=center;" vertex="1" parent="snet_db">
+          <mxGeometry x="60" y="50" width="540" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Internal connector between ACA API and PSQL Database -->
+        <mxCell id="edge_api_db" value="Pool Seguro TCP 5432 (SSL)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.65;entryY=0;" edge="1" parent="vnet_box" source="app_api" target="db_psql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- PAAS SERVICES CONTAINER (Storage, Identity, Monitoring) -->
+        <mxCell id="paas_box" value="&lt;b&gt;Serviços Gerenciados PaaS, Governança &amp;amp; Identidade&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#ffffff;strokeColor=#85a5ff;fontColor=#10239e;fontSize=12;rounded=1;" vertex="1" parent="rg_box">
+          <mxGeometry x="760" y="50" width="390" height="710" as="geometry" />
+        </mxCell>
+
+        <!-- Storage Account -->
+        <mxCell id="paas_storage" value="&lt;b&gt;Storage Account: stbiodashprod&lt;/b&gt;&#xa;SKU: Standard_LRS (Tier Hot)&#xa;&#xa;• Container &apos;biogen-avatars&apos; (Fotos de perfil)&#xa;• Container &apos;documents&apos;&#xa;• Regras de CORS ativas para PUT/GET&#xa;• Autenticação efêmera via SAS Tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6fffb;strokeColor=#87e8de;fontColor=#006d75;align=left;spacingLeft=15;" vertex="1" parent="paas_box">
+          <mxGeometry x="30" y="50" width="330" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- Managed Identity -->
+        <mxCell id="paas_id" value="&lt;b&gt;Managed Identity: id-biodash-prod&lt;/b&gt;&#xa;Tipo: User-Assigned Managed Identity&#xa;&#xa;• Papel RBAC: Storage Blob Data Contributor&#xa;• Autenticação sem chaves no código&#xa;• Atribuída ao Container App da API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcffe6;strokeColor=#eaff8f;fontColor=#5b8c00;align=left;spacingLeft=15;" vertex="1" parent="paas_box">
+          <mxGeometry x="30" y="220" width="330" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Monitoring: Log Analytics -->
+        <mxCell id="paas_log" value="&lt;b&gt;Log Analytics Workspace (log-biodash-prod)&lt;/b&gt;&#xa;• Ingestão centralizada de stdout dos contêineres&#xa;• Teto diário travado em 1 GB/dia (FinOps)&#xa;• Retenção econômica de 30 dias" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f6;strokeColor=#ffadd2;fontColor=#c41d7f;align=left;spacingLeft=15;" vertex="1" parent="paas_box">
+          <mxGeometry x="30" y="380" width="330" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- Monitoring: Application Insights -->
+        <mxCell id="paas_appi" value="&lt;b&gt;Application Insights (appi-biodash-prod)&lt;/b&gt;&#xa;• Instrumentação OpenTelemetry (OTel) nativa&#xa;• Live Metrics em tempo real&#xa;• Distributed Tracing de ponta a ponta&#xa;• Conectado ao Log Analytics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f6;strokeColor=#ffadd2;fontColor=#c41d7f;align=left;spacingLeft=15;" vertex="1" parent="paas_box">
+          <mxGeometry x="30" y="530" width="330" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- Cross-connections between VNet and PaaS inside rg_box -->
+        <mxCell id="edge_api_st" value="Gera SAS Token (RBAC)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="rg_box" source="app_api" target="paas_storage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_id_st" value="Atribuição RBAC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="paas_box" source="paas_id" target="paas_storage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_api_otel" value="OTel Traces &amp;amp; Logs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="rg_box" source="app_api" target="paas_appi">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1125" y="342" />
+              <mxPoint x="1125" y="725" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- External Ingress Connectors -->
+        <mxCell id="edge_ext_web" value="HTTPS 443" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cli_web" target="aca_env">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_ext_mobile" value="HTTPS / REST" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cli_mobile" target="aca_env">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_ext_upload" value="Upload Direto via SAS (PUT)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="cli_mobile" target="paas_storage">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="360" y="175" />
+              <mxPoint x="360" y="65" />
+              <mxPoint x="1305" y="65" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge_ext_cicd" value="OIDC Passwordless Deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#fa8c16;fontColor=#d46b08;" edge="1" parent="1" source="cli_gh" target="aca_env">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="360" y="435" />
+              <mxPoint x="360" y="215" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

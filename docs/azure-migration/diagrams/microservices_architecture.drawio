@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Microservices-Architecture" id="microservices-architecture">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="ms_title" value="&lt;b&gt;BioDash — Arquitetura de Microsserviços e Integração entre Componentes&lt;/b&gt;&lt;br&gt;Comunicação Frontend (Mobile/Web), Backend Core API (Next.js) e AI-Service (FastAPI/Whisper)" style="text;html=1;fontSize=18;fontColor=#1e293b;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 1: FRONTEND (BioDash_mobile) -->
+        <mxCell id="fe_box" value="&lt;b&gt;1. FRONTEND: BioDash_mobile (Expo / React Native &amp;amp; Expo Web Nginx)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;fontSize=13;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="460" height="440" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fe_screens" value="&lt;b&gt;Telas &amp;amp; Módulos de Interface&lt;/b&gt;&#xa;• Dashboard de Produção de Biogás&#xa;• Gestão de Incidentes &amp;amp; Métricas&#xa;• Perfil da Empresa (Company Profile)&#xa;• Interface Conversacional do Chatbot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="fe_box">
+          <mxGeometry x="30" y="55" width="400" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fe_storage_client" value="&lt;b&gt;Cliente Universal de Storage (src/lib/storage.ts)&lt;/b&gt;&#xa;• Solicita URL assinada à API Backend&#xa;• Injeta cabeçalho obrigatório x-ms-blob-type: BlockBlob&#xa;• Upload e Download binário direto no Azure Blob Storage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6fffb;strokeColor=#87e8de;fontColor=#006d75;" vertex="1" parent="fe_box">
+          <mxGeometry x="30" y="170" width="400" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fe_api_client" value="&lt;b&gt;Cliente HTTP REST (Axios / Fetch)&lt;/b&gt;&#xa;• Endereço único parametrizado via EXPO_PUBLIC_API_URL&#xa;• Autenticação JWT via Bearer Token em todas as rotas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;" vertex="1" parent="fe_box">
+          <mxGeometry x="30" y="280" width="400" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fe_runtime" value="&lt;b&gt;Ambiente de Execução:&lt;/b&gt; Azure Container App (ca-biodash-web-prod) ou Expo Go Mobile" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#595959;" vertex="1" parent="fe_box">
+          <mxGeometry x="30" y="370" width="400" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_fe_1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="fe_box" source="fe_screens" target="fe_storage_client">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_fe_2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="fe_box" source="fe_screens" target="fe_api_client">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="485" y="177" />
+              <mxPoint x="485" y="392" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- CONTAINER 2: BACKEND CORE (BioDashBD) -->
+        <mxCell id="be_box" value="&lt;b&gt;2. BACKEND API CORE: BioDashBD (Next.js App Router / Node.js)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;fontSize=13;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="80" width="520" height="440" as="geometry" />
+        </mxCell>
+
+        <mxCell id="be_routes" value="&lt;b&gt;Rotas REST API (/api/*)&lt;/b&gt;&#xa;• /api/biodigesters (CRUD e sensores)&#xa;• /api/metrics (Histórico e telemetria)&#xa;• /api/alerts (Gestão de incidentes)&#xa;• /api/auth &amp;amp; /api/profile (Controle de acesso)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="be_box">
+          <mxGeometry x="30" y="55" width="460" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="be_storage_ports" value="&lt;b&gt;Ports &amp;amp; Adapters de Storage (lib/storage/)&lt;/b&gt;&#xa;• IFileStoragePort (Interface universal)&#xa;• AzureBlobStorageAdapter (@azure/storage-blob)&#xa;• Emissão dinâmica de SAS Tokens para upload e download&#xa;• Fallback: AwsS3StorageAdapter (Legado de referência)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6fffb;strokeColor=#87e8de;fontColor=#006d75;" vertex="1" parent="be_box">
+          <mxGeometry x="30" y="160" width="460" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="be_pool" value="&lt;b&gt;Pool de Conexão Relacional (pg / SSL)&lt;/b&gt;&#xa;Consultas SQL parametrizadas ao PostgreSQL Flexible Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="be_box">
+          <mxGeometry x="30" y="270" width="460" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="be_runtime" value="&lt;b&gt;Ambiente de Execução:&lt;/b&gt; Azure Container App (ca-biodash-api-prod) • Porta 3003 • minReplicas: 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#595959;" vertex="1" parent="be_box">
+          <mxGeometry x="30" y="350" width="460" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_be_1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="be_box" source="be_routes" target="be_storage_ports">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_be_2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="be_box" source="be_routes" target="be_pool">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1045" y="177" />
+              <mxPoint x="1045" y="375" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- CONTAINER 3: AI SERVICE (BioDash_ai-service) -->
+        <mxCell id="ai_box" value="&lt;b&gt;3. AI-SERVICE: BioDash_ai-service (FastAPI / Faster-Whisper / LLM)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#fffbe6;strokeColor=#ffe58f;fontColor=#d46b08;fontSize=13;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="80" width="460" height="440" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ai_routes" value="&lt;b&gt;Endpoints REST FastAPI (Porta 5000)&lt;/b&gt;&#xa;• POST /api/chat (Conversação assistida com contexto)&#xa;• POST /api/transcribe (Transcrição de áudio via Whisper)&#xa;• GET /docs (Documentação interativa Swagger)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="ai_box">
+          <mxGeometry x="30" y="55" width="400" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ai_whisper" value="&lt;b&gt;Motor Faster-Whisper (Transcrição de Voz)&lt;/b&gt;&#xa;• Modelo otimizado para CPU: WHISPER_MODEL=small&#xa;• Computação: int8 • Baixo consumo de memória" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7e6;strokeColor=#ffd591;fontColor=#873800;" vertex="1" parent="ai_box">
+          <mxGeometry x="30" y="165" width="400" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ai_rag" value="&lt;b&gt;RAG / LangChain Context Manager&lt;/b&gt;&#xa;• Ingestão de métricas e limites críticos de biodigestores&#xa;• Respostas estruturadas em linguagem natural" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbe6;strokeColor=#ffe58f;fontColor=#614700;" vertex="1" parent="ai_box">
+          <mxGeometry x="30" y="260" width="400" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ai_runtime" value="&lt;b&gt;Empacotamento:&lt;/b&gt; Docker Hub mathgueff/biodash_ai-service:latest (gerenciado via uv)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#595959;" vertex="1" parent="ai_box">
+          <mxGeometry x="30" y="355" width="400" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_ai_1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="ai_box" source="ai_routes" target="ai_whisper">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_ai_2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="ai_box" source="ai_routes" target="ai_rag">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1545" y="177" />
+              <mxPoint x="1545" y="375" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- CONTAINER 4: PERSISTÊNCIA, SERVIÇOS EXTERNOS E OBSERVABILIDADE -->
+        <mxCell id="data_box" value="&lt;b&gt;4. Camada de Persistência, Armazenamento &amp;amp; Observabilidade&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#262626;fontSize=13;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="1520" height="310" as="geometry" />
+        </mxCell>
+
+        <mxCell id="data_psql" value="&lt;b&gt;Azure Database for PostgreSQL&lt;/b&gt;&#xa;Flexible Server (psql-biodash-prod)&#xa;SKU Burstable Standard_B1ms&#xa;Schema relacional de biodigestores" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;align=center;" vertex="1" parent="data_box">
+          <mxGeometry x="40" y="60" width="300" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="data_blob" value="&lt;b&gt;Azure Blob Storage&lt;/b&gt;&#xa;stbiodashprod / biogen-avatars&#xa;Upload direto via SAS Token&#xa;Permissões efêmeras controladas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6fffb;strokeColor=#87e8de;fontColor=#006d75;align=center;" vertex="1" parent="data_box">
+          <mxGeometry x="420" y="60" width="310" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="data_supa" value="&lt;b&gt;Supabase (Auth &amp;amp; Context)&lt;/b&gt;&#xa;Autenticação de Usuários&#xa;Fallback e Sincronização&#xa;Consumido por Frontend e AI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;align=center;" vertex="1" parent="data_box">
+          <mxGeometry x="810" y="60" width="310" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="data_otel" value="&lt;b&gt;Azure Application Insights&lt;/b&gt;&#xa;appi-biodash-prod + Log Analytics&#xa;Rastreamento Distribuído OpenTelemetry&#xa;Live Metrics e Monitoramento de Falhas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f6;strokeColor=#ffadd2;fontColor=#c41d7f;align=center;" vertex="1" parent="data_box">
+          <mxGeometry x="1190" y="60" width="290" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Direct Connectors between Microsserviços -->
+        <mxCell id="edge_fe_be" value="Chamadas REST (HTTPS / JWT)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#1890ff;fontColor=#0050b3;" edge="1" parent="1" source="fe_api_client" target="be_routes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_fe_ai" value="Proxy / Chamada Direta de Chat e Áudio" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#fa8c16;fontColor=#d46b08;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="be_routes" target="ai_routes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Downward Connectors to Persistence and Observability -->
+        <mxCell id="edge_be_db" value="Queries SQL 5432" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#1890ff;fontColor=#0050b3;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="be_pool" target="data_psql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_fe_blob" value="Upload Direto (PUT com x-ms-blob-type)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#52c41a;fontColor=#237804;exitX=0.5;exitY=1;entryX=0.35;entryY=0;" edge="1" parent="1" source="fe_storage_client" target="data_blob">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_be_blob" value="Gera SAS Token (RBAC)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#13c2c2;fontColor=#006d75;exitX=0.5;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="1" source="be_storage_ports" target="data_blob">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_ai_supa" value="Contexto de Dados" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#52c41a;fontColor=#237804;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="ai_rag" target="data_supa">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_be_otel" value="OTel Spans &amp;amp; Logs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#eb2f96;fontColor=#c41d7f;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="be_runtime" target="data_otel">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1080" y="453" />
+              <mxPoint x="1080" y="550" />
+              <mxPoint x="1335" y="550" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

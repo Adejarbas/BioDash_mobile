@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Instala as dependências
-RUN npm ci
+RUN npm install --legacy-peer-deps
 
 # Copia o restante dos arquivos da aplicação
 COPY . .
@@ -20,6 +20,9 @@ RUN npm run build:web
 
 # Estágio de produção
 FROM nginx:stable-alpine
+
+ARG EXPO_PUBLIC_API_URL
+LABEL expo_api_url="${EXPO_PUBLIC_API_URL}"
 
 # Configuração para SPA com fallback para index.html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

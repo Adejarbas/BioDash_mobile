@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Migracao-AWS-Azure" id="migration-aws-azure">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;BioDash — Diagrama de Transição Arquitetural: AWS ➔ Microsoft Azure&lt;/b&gt;&lt;br&gt;Desacoplamento Arquitetural, FinOps Custo Zero e Modernização Serverless" style="text;html=1;fontSize=18;fontColor=#1e293b;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="850" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 1: AWS LEGADO -->
+        <mxCell id="aws_box" value="&lt;b&gt;ARQUITETURA ORIGINAL: AWS (Legada)&lt;/b&gt;&#xa;Monolito em VMs EC2 • Alto Acoplamento • Custo Contínuo (~US$ 71/mês)" style="swimlane;startSize=40;fillColor=#fff1f0;strokeColor=#ff7875;fontColor=#a8071a;fontSize=13;rounded=1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="560" height="740" as="geometry" />
+        </mxCell>
+
+        <!-- AWS Nodes inside container (coordinates relative to aws_box) -->
+        <mxCell id="aws_client" value="&lt;b&gt;Mobile &amp;amp; Web Clients&lt;/b&gt;&#xa;React Native / Expo Web&#xa;(IPs e URLs hardcoded)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="aws_box">
+          <mxGeometry x="180" y="60" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_ec2_front" value="&lt;b&gt;Amazon EC2 (Frontend)&lt;/b&gt;&#xa;VM t3.small (24/7)&#xa;Expo Web servido via Nginx (Porta 80)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe6;strokeColor=#ff7875;fontColor=#434343;" vertex="1" parent="aws_box">
+          <mxGeometry x="40" y="170" width="220" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_ec2_back" value="&lt;b&gt;Amazon EC2 (Backend API)&lt;/b&gt;&#xa;VM t3.medium (24/7)&#xa;Express REST (Porta 3003)&#xa;Acoplado ao @aws-sdk/client-s3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe6;strokeColor=#ff7875;fontColor=#434343;" vertex="1" parent="aws_box">
+          <mxGeometry x="300" y="170" width="220" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_ec2_mongo" value="&lt;b&gt;Amazon EC2 (MongoDB Host)&lt;/b&gt;&#xa;Instância auto-hospedada&#xa;Porta 27017 (Marcadores de mapa)" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#bfbfbf;fontColor=#595959;" vertex="1" parent="aws_box">
+          <mxGeometry x="40" y="290" width="220" height="75" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_rds" value="&lt;b&gt;Amazon RDS (PostgreSQL)&lt;/b&gt;&#xa;Instância db.t3.micro (5432)&#xa;IP aberto com regras de SG&#xa;Schemas de biodigestores" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffebe6;strokeColor=#ff7875;fontColor=#434343;" vertex="1" parent="aws_box">
+          <mxGeometry x="300" y="290" width="220" height="75" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_s3" value="&lt;b&gt;Amazon S3 (biogen-s3)&lt;/b&gt;&#xa;Bucket em us-east-1&#xa;Presigned URLs com SDK proprietário&#xa;URLs amarradas a amazonaws.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2e8;strokeColor=#ffbb96;fontColor=#871400;" vertex="1" parent="aws_box">
+          <mxGeometry x="170" y="420" width="230" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_iam" value="&lt;b&gt;IAM &amp;amp; Credenciais Estáticas&lt;/b&gt;&#xa;Instance Profile na VM EC2&#xa;Access Keys estáticas em arquivos .env" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbe6;strokeColor=#ffe58f;fontColor=#614700;" vertex="1" parent="aws_box">
+          <mxGeometry x="40" y="530" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_deploy" value="&lt;b&gt;Deploy Imperativo via SSH&lt;/b&gt;&#xa;Chave SSH fixa EC2_SSH_KEY&#xa;docker pull e docker restart manuais" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;" vertex="1" parent="aws_box">
+          <mxGeometry x="300" y="530" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aws_obs" value="&lt;b&gt;Observabilidade Proprietária&lt;/b&gt;&#xa;CloudWatch Logs e Métricas de VM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#d9d9d9;fontColor=#595959;" vertex="1" parent="aws_box">
+          <mxGeometry x="170" y="630" width="230" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- AWS internal connectors -->
+        <mxCell id="edge_aws_1" value="HTTP 80" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="aws_box" source="aws_client" target="aws_ec2_front">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_aws_2" value="HTTP 3003" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="aws_box" source="aws_client" target="aws_ec2_back">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_aws_3" value="TCP 27017" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="aws_box" source="aws_ec2_back" target="aws_ec2_mongo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_aws_4" value="SQL 5432" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="aws_box" source="aws_ec2_back" target="aws_rds">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_aws_5" value="AWS SDK" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="aws_box" source="aws_ec2_back" target="aws_s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CENTRAL MIGRATION PILLARS (Framework 6 R's & Drivers) -->
+        <mxCell id="mig_trans" value="&lt;b&gt;ESTRATÉGIA DE TRANSIÇÃO (6 R&apos;s)&lt;/b&gt;&#xa;&#xa;✦ &lt;b&gt;Refactor (Storage):&lt;/b&gt;&#xa;Ports &amp;amp; Adapters (IFileStorage)&#xa;&#xa;✦ &lt;b&gt;Replatform (Compute):&lt;/b&gt;&#xa;VMs ➔ Azure Container Apps&#xa;Scale-to-Zero (minReplicas: 0)&#xa;&#xa;✦ &lt;b&gt;Replatform (Banco):&lt;/b&gt;&#xa;RDS ➔ PostgreSQL Flexible B1ms&#xa;&#xa;✦ &lt;b&gt;Refactor (DevOps &amp;amp; IAM):&lt;/b&gt;&#xa;SSH ➔ OIDC Passwordless (Zero Secrets)&#xa;&#xa;✦ &lt;b&gt;Refactor (Observabilidade):&lt;/b&gt;&#xa;CloudWatch ➔ OpenTelemetry OTel&#xa;&#xa;✦ &lt;b&gt;FinOps Custo Zero:&lt;/b&gt;&#xa;Docker Hub / GHCR (Proibido ACR/AKS)" style="swimlane;startSize=30;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;fontSize=11;rounded=1;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="630" y="190" width="280" height="490" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 2: AZURE ALVO -->
+        <mxCell id="az_box" value="&lt;b&gt;ARQUITETURA ALVO: MICROSOFT AZURE (Modernizada)&lt;/b&gt;&#xa;Serverless • Ports &amp;amp; Adapters • FinOps Custo Zero (Azure for Students)" style="swimlane;startSize=40;fillColor=#f0f5ff;strokeColor=#85a5ff;fontColor=#10239e;fontSize=13;rounded=1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="940" y="90" width="620" height="740" as="geometry" />
+        </mxCell>
+
+        <!-- Azure Nodes inside container (coordinates relative to az_box) -->
+        <mxCell id="az_client" value="&lt;b&gt;Mobile &amp;amp; Web Clients&lt;/b&gt;&#xa;Universal Storage Client&#xa;Zero credenciais de nuvem" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="az_box">
+          <mxGeometry x="210" y="60" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_vnet" value="&lt;b&gt;Virtual Network: vnet-biodash-prod (10.0.0.0/16)&lt;/b&gt;&#xa;Protegida por NSG restritivo na região chilecentral" style="swimlane;startSize=30;fillColor=#f9f0ff;strokeColor=#d3adf7;fontColor=#531dab;fontSize=11;rounded=1;" vertex="1" parent="az_box">
+          <mxGeometry x="30" y="150" width="560" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_aca_front" value="&lt;b&gt;ACA Frontend Web&lt;/b&gt;&#xa;Expo Web (Nginx / Porta 80)&#xa;Scale-to-zero (min: 0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="az_vnet">
+          <mxGeometry x="30" y="50" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_aca_api" value="&lt;b&gt;ACA Backend API&lt;/b&gt;&#xa;Next.js API (Porta 3003)&#xa;Adapter Azure Blob + SAS Tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="az_vnet">
+          <mxGeometry x="300" y="50" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_psql" value="&lt;b&gt;PostgreSQL Flexible Server&lt;/b&gt;&#xa;psql-biodash-prod (B1ms Burstable)&#xa;Isolado em snet-db (10.0.4.0/24) com SSL" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="az_vnet">
+          <mxGeometry x="300" y="160" width="230" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_storage" value="&lt;b&gt;Azure Blob Storage (stbiodashprod)&lt;/b&gt;&#xa;Container biogen-avatars com regras de CORS&#xa;Upload e download direto via SAS Tokens efêmeros" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6fffb;strokeColor=#87e8de;fontColor=#006d75;" vertex="1" parent="az_box">
+          <mxGeometry x="40" y="460" width="310" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_identity" value="&lt;b&gt;Managed Identity (id-biodash-prod)&lt;/b&gt;&#xa;User-Assigned Identity sem credenciais&#xa;Papel RBAC Storage Blob Data Contributor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcffe6;strokeColor=#eaff8f;fontColor=#5b8c00;" vertex="1" parent="az_box">
+          <mxGeometry x="370" y="460" width="220" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_otel" value="&lt;b&gt;Observabilidade OpenTelemetry (OTel)&lt;/b&gt;&#xa;Log Analytics Workspace + Application Insights&#xa;Rastreamento distribuído e logs estruturados em JSON" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f6;strokeColor=#ffadd2;fontColor=#c41d7f;" vertex="1" parent="az_box">
+          <mxGeometry x="40" y="550" width="550" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="az_cicd" value="&lt;b&gt;GitHub Actions CI/CD via OIDC Passwordless&lt;/b&gt;&#xa;Credenciais Federadas no Entra ID • azure/arm-deploy@v2 • Zero Segredos Estáticos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;" vertex="1" parent="az_box">
+          <mxGeometry x="40" y="640" width="550" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Azure internal connectors -->
+        <mxCell id="edge_az_1" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="az_box" source="az_client" target="az_aca_front">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_az_2" value="HTTPS / REST" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="az_box" source="az_client" target="az_aca_api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_az_3" value="PUT/GET (SAS Token)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="az_box" source="az_client" target="az_storage">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1000" y="180" />
+              <mxPoint x="1000" y="530" />
+              <mxPoint x="1135" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge_az_4" value="Pool PostgreSQL (SSL)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="az_box" source="az_aca_api" target="az_psql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_az_5" value="RBAC Access" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="az_box" source="az_aca_api" target="az_identity">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_az_6" value="OTel Traces &amp;amp; Logs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="az_box" source="az_aca_api" target="az_otel">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Bridging Migration Arrows -->
+        <mxCell id="bridge_1" value="Transição para Serverless" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#52c41a;fontColor=#237804;" edge="1" parent="1" source="aws_box" target="mig_trans">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bridge_2" value="Provisionamento IaC Bicep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#1890ff;fontColor=#0050b3;" edge="1" parent="1" source="mig_trans" target="az_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
