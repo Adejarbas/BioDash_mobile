@@ -2961,10 +2961,7 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
 
         const sId = sensorType === 'temperatura' ? 'SN-TMP-01' : sensorType === 'pressao' ? 'SN-PRS-02' : sensorType === 'ph' ? 'SN-PH-01' : 'SN-H2S-01';
 
-        let bdId: number | null = null;
-        if (activeBiodigester?.id && !isNaN(Number(activeBiodigester.id))) {
-            bdId = Number(activeBiodigester.id);
-        }
+        const bdId = activeBiodigester?.id ? String(activeBiodigester.id) : null;
 
         try {
             const res = await alertsApi.create({
