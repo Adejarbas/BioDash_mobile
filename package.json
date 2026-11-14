@@ -8,6 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
+    "prepare": "git config core.hooksPath .githooks || true",
     "typecheck": "tsc --noEmit",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
