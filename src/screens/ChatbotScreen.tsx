@@ -75,6 +75,10 @@ interface FlowState {
 
 // ─── Constantes e Helpers de Parsing ─────────────────────────────────────────
 const TAB_BAR_HEIGHT = 86
+const MAX_VOICE_DURATION_SEC = 12
+const VOICE_WARNING_SEC = 9
+const MAX_AUDIO_BYTES = 400 * 1024
+const VOICE_RECORDER_BITRATE = 64000
 
 const MONTH_NAMES = [
     'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
@@ -300,6 +304,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const [isListening, setIsListening] = useState(false)
     const [isTranscribing, setIsTranscribing] = useState(false)
     const [voiceInputMode, setVoiceInputMode] = useState<VoiceInputMode>(null)
+    const [recordingSeconds, setRecordingSeconds] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState<any[]>([])
     const [isSearching, setIsSearching] = useState(false)
@@ -325,6 +330,24 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const webMediaStreamRef = useRef<MediaStream | null>(null)
     const webAudioChunksRef = useRef<Blob[]>([])
     const ignoreNextMicPressRef = useRef(false)
+    const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const recordingLimitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const recordingStartedAtRef = useRef<number>(0)
+    const stopVoiceRecognitionRef = useRef<() => void>(() => {})
+
+    const clearRecordingTimers = useCallback((resetSeconds = true) => {
+        if (recordingIntervalRef.current) {
+            clearInterval(recordingIntervalRef.current)
+            recordingIntervalRef.current = null
+        }
+        if (recordingLimitTimeoutRef.current) {
+            clearTimeout(recordingLimitTimeoutRef.current)
+            recordingLimitTimeoutRef.current = null
+        }
+        if (resetSeconds) {
+            setRecordingSeconds(0)
+        }
+    }, [])
 
     const updateVoiceMode = useCallback((mode: VoiceInputMode) => {
         voiceInputModeRef.current = mode
@@ -334,8 +357,26 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const updateListeningState = useCallback((listening: boolean) => {
         isListeningRef.current = listening
         setIsListening(listening)
-        if (!listening) updateVoiceMode(null)
-    }, [updateVoiceMode])
+        if (listening) {
+            clearRecordingTimers()
+            recordingStartedAtRef.current = Date.now()
+            recordingIntervalRef.current = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000)
+                setRecordingSeconds(Math.min(MAX_VOICE_DURATION_SEC, elapsed))
+            }, 1000)
+            recordingLimitTimeoutRef.current = setTimeout(() => {
+                if (!isListeningRef.current) return
+                stopVoiceRecognitionRef.current()
+                Alert.alert(
+                    'Tempo limite atingido',
+                    'A gravação foi encerrada automaticamente ao atingir o máximo de 12 segundos.'
+                )
+            }, MAX_VOICE_DURATION_SEC * 1000)
+        } else {
+            clearRecordingTimers()
+            updateVoiceMode(null)
+        }
+    }, [clearRecordingTimers, updateVoiceMode])
 
     // ─── Carrega dados do usuário (marcadores + indicadores) ─────────────────
     const loadUserData = useCallback(async () => {
@@ -382,6 +423,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     // ─── Cleanup do reconhecimento de voz ao desmontar ───────────────────────
     useEffect(() => {
         return () => {
+            clearRecordingTimers(false)
+            recordingStartedAtRef.current = 0
             if (Platform.OS === 'web') {
                 webShouldKeepListeningRef.current = false
                 webManualStopRef.current = false
@@ -400,7 +443,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 ExpoSpeechRecognitionModule?.abort?.()
             }
         }
-    }, [])
+    }, [clearRecordingTimers])
 
     // ─── Handlers nativos do expo-speech-recognition ─────────────────────────
 
@@ -496,7 +539,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     const mimeType = preferredTypes.find(type => MediaRecorderAPI.isTypeSupported(type))
                     const recorderOptions = {
                         ...(mimeType ? { mimeType } : {}),
-                        audioBitsPerSecond: 128000,
+                        audioBitsPerSecond: VOICE_RECORDER_BITRATE,
                     }
                     const recorder: MediaRecorder = new MediaRecorderAPI(stream, recorderOptions)
 
@@ -507,9 +550,16 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     setInputText('')
 
                     recorder.ondataavailable = event => {
-                        if (event.data.size > 0) webAudioChunksRef.current.push(event.data)
+                        if (event.data.size > 0) {
+                            webAudioChunksRef.current.push(event.data)
+                            const totalBytes = webAudioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0)
+                            if (totalBytes > MAX_AUDIO_BYTES && recorder.state !== 'inactive') {
+                                recorder.stop()
+                            }
+                        }
                     }
                     recorder.onerror = () => {
+                        recordingStartedAtRef.current = 0
                         updateListeningState(false)
                         stream.getTracks().forEach(track => track.stop())
                         webMediaStreamRef.current = null
@@ -520,6 +570,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         const chunks = webAudioChunksRef.current
                         const type = recorder.mimeType || chunks[0]?.type || 'audio/webm'
                         const extension = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm'
+                        const durationSec = recordingStartedAtRef.current
+                            ? (Date.now() - recordingStartedAtRef.current) / 1000
+                            : 0
+                        recordingStartedAtRef.current = 0
                         webAudioChunksRef.current = []
                         webMediaRecorderRef.current = null
                         stream.getTracks().forEach(track => track.stop())
@@ -529,9 +583,17 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         const audio = new Blob(chunks, { type })
                         if (!audio.size) return
 
+                        if (audio.size > MAX_AUDIO_BYTES) {
+                            Alert.alert(
+                                'Áudio muito longo',
+                                'O áudio excedeu o limite máximo de 12 segundos (400 KB). Por favor, envie comandos mais curtos.'
+                            )
+                            return
+                        }
+
                         setIsTranscribing(true)
                         try {
-                            const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`)
+                            const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`, durationSec)
                             const transcript = response.data?.text?.trim()
                             if (!response.success || !transcript) {
                                 throw new Error(response.error || 'Nenhuma fala foi reconhecida.')
@@ -750,6 +812,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         updateListeningState(false)
         if (hadActiveSession) ExpoSpeechRecognitionModule?.stop?.()
     }
+
+    stopVoiceRecognitionRef.current = stopVoiceRecognition
 
     const handleMicPress = () => {
         if (ignoreNextMicPressRef.current) {
@@ -1537,6 +1601,9 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     ]
 
     // ─── Render ───────────────────────────────────────────────────────────────
+    const isNearLimit = recordingSeconds >= VOICE_WARNING_SEC
+    const statusColor = isNearLimit ? '#f59e0b' : '#ef4444'
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.background, paddingBottom: TAB_BAR_HEIGHT }}>
         <KeyboardAvoidingView
@@ -1667,11 +1734,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             }]}>
                 {isListening && (
                     <View style={styles.micStatusRow}>
-                        <View style={styles.micStatusDot} />
-                        <Text style={styles.micStatusText}>
-                            {voiceInputMode === 'hold'
-                                ? 'Gravando — solte para concluir'
-                                : 'Gravando — toque no microfone para concluir'}
+                        <View style={[styles.micStatusDot, { backgroundColor: statusColor }]} />
+                        <Text style={[styles.micStatusText, { color: statusColor }]}>
+                            {`Gravando 00:${padDate(recordingSeconds)} / 00:${padDate(MAX_VOICE_DURATION_SEC)} — ${
+                                voiceInputMode === 'hold'
+                                    ? 'solte para concluir'
+                                    : 'toque no microfone para concluir'
+                            }${isNearLimit ? ' • tempo quase acabando' : ''}`}
                         </Text>
                     </View>
                 )}
