@@ -257,6 +257,9 @@ export interface QuickSuggestionPayload {
   value: string;
 }
 
+export const MAX_CHATBOT_AUDIO_BYTES = 400 * 1024;
+export const MAX_CHATBOT_AUDIO_DURATION_SEC = 12;
+
 export const chatbotApi = {
   send: (data: {
     message: string;
@@ -267,9 +270,24 @@ export const chatbotApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  transcribeAudio: (audio: Blob, filename = "voice-message.webm") => {
+  transcribeAudio: async (
+    audio: Blob,
+    filename = "voice-message.webm",
+    durationSeconds?: number,
+  ): Promise<ApiResponse<{ text: string }>> => {
+    if (audio.size > MAX_CHATBOT_AUDIO_BYTES) {
+      return {
+        success: false,
+        error: "O áudio excede o tamanho máximo de 400 KB (12 segundos).",
+      };
+    }
+
     const formData = new FormData();
     formData.append("audio", audio, filename);
+    if (durationSeconds !== undefined && Number.isFinite(durationSeconds)) {
+      formData.append("durationSeconds", String(Math.round(durationSeconds * 10) / 10));
+    }
+
     return authRequest<{ text: string }>(`${API_BASE_URL}/chatbot/transcribe`, {
       method: "POST",
       body: formData,

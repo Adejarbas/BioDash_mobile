@@ -432,7 +432,7 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'WHISPER_MODEL'
-              value: 'small'
+              value: 'base'
             }
             {
               name: 'WHISPER_DEVICE'
@@ -441,6 +441,14 @@ resource aiApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'WHISPER_COMPUTE_TYPE'
               value: 'int8'
+            }
+            {
+              name: 'MAX_AUDIO_BYTES'
+              value: '512000'
+            }
+            {
+              name: 'MAX_AUDIO_DURATION_SECONDS'
+              value: '12'
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
