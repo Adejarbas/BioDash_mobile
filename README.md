@@ -519,3 +519,17 @@ az deployment group create \
 ## Rodapé
 
 ©️ 2026 BioDash. Todos os direitos reservados.
+
+### Testes unitários e integração contínua
+
+Com Node.js 20 e as dependências instaladas (`npm ci --force` na raiz), execute:
+
+```bash
+npm run lint              # análise estática de JavaScript e TypeScript com ESLint
+npm run typecheck         # verificação estática de tipos com TypeScript
+npm test                  # autenticação do frontend, com armazenamento e API simulados
+```
+
+O workflow `.github/workflows/mobile-ci-cd.yml` executa a validação de lint, tipos e testes em
+pushes e pull requests configurados como Quality Gate antes do empacotamento e deploy. O repositório BioDashBD possui
+sua própria pipeline de testes, lint e deploy do backend Next.js.

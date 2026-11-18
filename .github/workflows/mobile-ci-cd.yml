@@ -90,7 +90,7 @@ jobs:
           echo "Todos os commits seguem o padrao com sucesso!"
 
   validate:
-    name: Lint & Typecheck (Quality Gate)
+    name: Lint, Typecheck & Tests (Quality Gate)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -107,6 +107,12 @@ jobs:
 
       - name: Verificação de Tipos TypeScript (Quality Gate)
         run: npm run typecheck
+
+      - name: Análise Estática ESLint (Quality Gate)
+        run: npm run lint
+
+      - name: Testes Unitários (Quality Gate)
+        run: npm test
 
   # ============================================================================
   # Versionamento Semântico e Empacotamento Docker Web
@@ -359,7 +365,7 @@ jobs:
           WEB_URL="https://${WEB_FQDN}"
           echo "web_url=$WEB_URL" >> "$GITHUB_OUTPUT"
           echo "Executando Smoke Test no Frontend Web: $WEB_URL..."
-          
+
           MAX_RETRIES=5
           RETRY_COUNT=0
           SUCCESS=false

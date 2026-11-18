@@ -10,6 +10,8 @@
     "build:web": "expo export --platform web",
     "prepare": "git config core.hooksPath .githooks || true",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node --test tests/*.test.cjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:build": "docker compose up -d --build",
@@ -39,6 +41,8 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "^19.2.14",
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^9.39.5",
     "typescript": "^5.3.3"
   },
   "private": true
