@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="IaC-Architecture-Bicep" id="iac-architecture-bicep">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="iac_title" value="&lt;b&gt;BioDash — Arquitetura de Infraestrutura como Código (IaC) com Azure Bicep&lt;/b&gt;&lt;br&gt;Orquestração Hub &amp;amp; Spoke, Autenticação OIDC Passwordless e Módulos Declarativos" style="text;html=1;fontSize=18;fontColor=#1e293b;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 1: GITHUB ACTIONS -->
+        <mxCell id="gh_box" value="&lt;b&gt;1. Esteira CI/CD: GitHub Actions (.github/workflows/infra-deploy.yml)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;fontSize=12;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="460" height="230" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gh_trigger" value="&lt;b&gt;Git Push / Pull Request&lt;/b&gt;&#xa;Branches: main, feat/azure-integration&#xa;Path: infra/**" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="gh_box">
+          <mxGeometry x="30" y="50" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gh_validate" value="&lt;b&gt;Job 1: validate&lt;/b&gt;&#xa;• az bicep build (Linter)&#xa;• az deployment validate&#xa;• az deployment what-if" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;" vertex="1" parent="gh_box">
+          <mxGeometry x="250" y="50" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gh_deploy" value="&lt;b&gt;Job 2: deploy (Automático)&lt;/b&gt;&#xa;• azure/login@v2 (OIDC)&#xa;• azure/arm-deploy@v2&#xa;• Publicação em Step Summary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;" vertex="1" parent="gh_box">
+          <mxGeometry x="250" y="140" width="180" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_gh_1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="gh_box" source="gh_trigger" target="gh_validate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_gh_2" value="Sucesso" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="gh_box" source="gh_validate" target="gh_deploy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 2: OIDC TOKEN EXCHANGE (ENTRA ID) -->
+        <mxCell id="entra_box" value="&lt;b&gt;2. Autenticação Passwordless: Microsoft Entra ID (OIDC)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;fontSize=12;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="80" width="460" height="230" as="geometry" />
+        </mxCell>
+
+        <mxCell id="entra_app" value="&lt;b&gt;App Registration / Service Principal&lt;/b&gt;&#xa;Papel RBAC Contributor no RG&#xa;id: AZURE_CLIENT_ID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="entra_box">
+          <mxGeometry x="30" y="50" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="entra_fed" value="&lt;b&gt;Federated Identity Credentials&lt;/b&gt;&#xa;• gh-branch-main&#xa;• gh-branch-feat-azure-integration&#xa;• gh-pull-requests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;" vertex="1" parent="entra_box">
+          <mxGeometry x="250" y="50" width="190" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="entra_token" value="&lt;b&gt;Token Exchange (Zero Secrets)&lt;/b&gt;&#xa;Valida claim sub do GitHub Actions&#xa;Emite Azure Access Token efêmero (1h)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcffe6;strokeColor=#eaff8f;fontColor=#5b8c00;" vertex="1" parent="entra_box">
+          <mxGeometry x="120" y="150" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_entra_1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="entra_box" source="entra_app" target="entra_token">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_entra_2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="entra_box" source="entra_fed" target="entra_token">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 3: ORQUESTRAÇÃO BICEP (HUB) -->
+        <mxCell id="hub_box" value="&lt;b&gt;3. Camada de Orquestração Bicep (Hub &amp;amp; Spoke)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#fffbe6;strokeColor=#ffe58f;fontColor=#d46b08;fontSize=12;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="80" width="520" height="230" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bicep_sub" value="&lt;b&gt;subscription.bicep&lt;/b&gt;&#xa;Escopo: Assinatura&#xa;Provisiona rg-biodash-prod" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d9d9d9;fontColor=#262626;" vertex="1" parent="hub_box">
+          <mxGeometry x="30" y="50" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bicep_main" value="&lt;b&gt;main.bicep (Mestre)&lt;/b&gt;&#xa;Escopo: Resource Group&#xa;uniqueString + Tags de Governança&#xa;Orquestração de submódulos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe7ba;strokeColor=#ffd591;fontColor=#873800;" vertex="1" parent="hub_box">
+          <mxGeometry x="250" y="50" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bicep_params" value="&lt;b&gt;main.parameters.json&lt;/b&gt;&#xa;Ambiente: prod&#xa;Região: chilecentral&#xa;Imagens Docker Hub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#595959;" vertex="1" parent="hub_box">
+          <mxGeometry x="250" y="150" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_hub_1" value="Chama" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="hub_box" source="bicep_sub" target="bicep_main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_hub_2" value="Injeta" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="hub_box" source="bicep_params" target="bicep_main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CONTAINER 4: MÓDULOS DECLARATIVOS (SPOKES) -->
+        <mxCell id="modules_box" value="&lt;b&gt;4. Módulos Especializados de Infraestrutura (infra/modules/)&lt;/b&gt;" style="swimlane;startSize=35;fillColor=#fafafa;strokeColor=#d9d9d9;fontColor=#262626;fontSize=13;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="370" width="1520" height="490" as="geometry" />
+        </mxCell>
+
+        <!-- Module 1: Network -->
+        <mxCell id="mod_net" value="&lt;b&gt;network.bicep&lt;/b&gt;&#xa;&#xa;• VNet (10.0.0.0/16)&#xa;• Subnet snet-aca (/23)&#xa;• Subnet snet-db (/24)&#xa;• NSG: Ingress 80/443" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9f0ff;strokeColor=#d3adf7;fontColor=#531dab;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="30" y="60" width="180" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Module 2: Identity -->
+        <mxCell id="mod_id" value="&lt;b&gt;identity.bicep&lt;/b&gt;&#xa;&#xa;• Managed Identity&#xa;  (id-biodash-prod)&#xa;• User-Assigned&#xa;• Sem credenciais em código" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcffe6;strokeColor=#eaff8f;fontColor=#5b8c00;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="250" y="60" width="180" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Module 3: Monitoring -->
+        <mxCell id="mod_mon" value="&lt;b&gt;monitoring.bicep&lt;/b&gt;&#xa;&#xa;• Log Analytics Workspace&#xa;  (Cap: 1 GB/dia FinOps)&#xa;• Application Insights&#xa;• OpenTelemetry Native" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff0f6;strokeColor=#ffadd2;fontColor=#c41d7f;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="470" y="60" width="190" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Module 4: Storage -->
+        <mxCell id="mod_st" value="&lt;b&gt;storage.bicep&lt;/b&gt;&#xa;&#xa;• Storage Account (LRS Hot)&#xa;• Container &apos;avatars&apos;&#xa;• CORS liberado para PUT&#xa;• RBAC: Blob Contributor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6fffb;strokeColor=#87e8de;fontColor=#006d75;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="700" y="60" width="190" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Module 5: Database -->
+        <mxCell id="mod_db" value="&lt;b&gt;database.bicep&lt;/b&gt;&#xa;&#xa;• PostgreSQL Flexible Server&#xa;• SKU Standard_B1ms&#xa;• Integrado à snet-db&#xa;• Extensões PGCRYPTO / UUID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#91d5ff;fontColor=#0050b3;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="930" y="60" width="200" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Module 6: Container Apps Env -->
+        <mxCell id="mod_cae" value="&lt;b&gt;container-apps-env.bicep&lt;/b&gt;&#xa;&#xa;• Managed Environment&#xa;• Vinculado à snet-aca&#xa;• Logs integrados ao Workspace&#xa;• Suporte nativo a KEDA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f5ff;strokeColor=#adc6ff;fontColor=#1d39c4;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="1170" y="60" width="200" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Module 7: Container Apps Workloads (Bottom of modules) -->
+        <mxCell id="mod_ca" value="&lt;b&gt;container-apps.bicep (Cargas de Trabalho Ativas)&lt;/b&gt;&#xa;&#xa;&lt;b&gt;1. ca-biodash-api-prod:&lt;/b&gt; Backend Next.js API (Porta 3003) • Injeção Segura de Secrets • minReplicas: 0 (Scale-to-Zero)&#xa;&lt;b&gt;2. ca-biodash-web-prod:&lt;/b&gt; Frontend Expo Web Nginx (Porta 80) • Ingress Externo HTTPS • Probes de Readiness/Liveness" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f7ff;strokeColor=#69c0ff;fontColor=#003a8c;align=left;spacingLeft=20;" vertex="1" parent="modules_box">
+          <mxGeometry x="30" y="270" width="1340" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Output node inside modules box -->
+        <mxCell id="mod_outputs" value="&lt;b&gt;Outputs do main.bicep:&lt;/b&gt; FQDN da API • FQDN do Frontend • Storage Account Name • Endpoints e Connection Strings exportados ao CI/CD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6ffed;strokeColor=#b7eb8f;fontColor=#237804;align=center;" vertex="1" parent="modules_box">
+          <mxGeometry x="30" y="390" width="1340" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Connectors between modules inside modules_box -->
+        <mxCell id="edge_mod_1" value="Subnet delegada" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.15;entryY=0;" edge="1" parent="modules_box" source="mod_net" target="mod_ca">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_mod_2" value="RBAC Contributor" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="modules_box" source="mod_id" target="mod_st">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="380" y="610" />
+              <mxPoint x="835" y="610" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge_mod_3" value="Telemetry Sink" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.45;entryY=0;" edge="1" parent="modules_box" source="mod_mon" target="mod_ca">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_mod_4" value="Pool Connection" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="modules_box" source="mod_db" target="mod_ca">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_mod_5" value="Hospeda Apps" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.92;entryY=0;" edge="1" parent="modules_box" source="mod_cae" target="mod_ca">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_mod_6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="modules_box" source="mod_ca" target="mod_outputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Inter-container bridging connectors -->
+        <mxCell id="bridge_ci_entra" value="Token Exchange (JWT)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#1890ff;fontColor=#0050b3;" edge="1" parent="1" source="gh_deploy" target="entra_token">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bridge_entra_arm" value="Azure Access Token" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#52c41a;fontColor=#237804;" edge="1" parent="1" source="entra_token" target="bicep_main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bridge_main_modules" value="Dispara Orquestração Declarativa de Todos os Módulos" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#fa8c16;fontColor=#d46b08;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="bicep_main" target="modules_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

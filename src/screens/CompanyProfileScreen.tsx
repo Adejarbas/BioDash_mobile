@@ -20,7 +20,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { authLib } from '../lib/auth';
 import { profileApi } from '../lib/api';
-import { uploadImageToS3, getImageFromS3 } from '../lib/aws-s3';
+import { uploadFile, getDownloadUrl } from '../lib/storage';
 
 // ─── Funções de máscara ────────────────────────────────────────────
 const maskCNPJ = (value: string): string => {
@@ -47,6 +47,14 @@ const maskPhone = (value: string): string => {
 const maskCEP = (value: string): string => {
     const digits = value.replace(/\D/g, '').slice(0, 8);
     return digits.replace(/(\d{5})(\d)/, '$1-$2');
+};
+
+const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`${title}: ${message}`);
+    } else {
+        Alert.alert(title, message);
+    }
 };
 
 const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
@@ -157,11 +165,18 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                 const profile = res.data;
 
                 if (profile?.avatar_url) {
-                    const key = profile.avatar_url.includes('amazonaws.com/')
-                        ? profile.avatar_url.split('amazonaws.com/')[1]
-                        : profile.avatar_url;
-                    const base64 = await getImageFromS3(key);
-                    if (base64) setAvatarUri(base64);
+                    let key = profile.avatar_url;
+                    if (key.startsWith('http://') || key.startsWith('https://')) {
+                        try {
+                            const urlObj = new URL(key);
+                            const parts = urlObj.pathname.split('/').filter(Boolean);
+                            key = parts.length > 1 ? parts.slice(1).join('/') : (parts[0] || key);
+                        } catch {
+                            // Mantém a key como está caso não seja URL completa válida
+                        }
+                    }
+                    const downloadUrl = await getDownloadUrl(key);
+                    if (downloadUrl) setAvatarUri(downloadUrl);
                 }
 
                 setFormData({
@@ -208,23 +223,38 @@ export default function CompanyProfileScreen({ onBack }: Props) {
         }
     };
 
-        const handleChangePassword = async () => {
-        if (passwordData.nova !== passwordData.confirmar) {
-            Alert.alert('Erro', 'As senhas novas não coincidem.');
+    const handleChangePassword = async () => {
+        console.log('[DEBUG] Botão Alterar Senha clicado!', {
+            atual: passwordData.atual ? '***' : '(vazio)',
+            nova: passwordData.nova ? '***' : '(vazio)',
+            confirmar: passwordData.confirmar ? '***' : '(vazio)',
+            tamanhoNova: passwordData.nova?.length || 0,
+        });
+
+        if (!passwordData.nova && !passwordData.confirmar) {
+            showAlert('Aviso', 'Por favor, digite a nova senha e confirme-a.');
             return;
         }
+
+        if (passwordData.nova !== passwordData.confirmar) {
+            showAlert('Erro', 'As senhas novas não coincidem.');
+            return;
+        }
+
         if (passwordData.nova.length < 6) {
-            Alert.alert('Erro', 'A senha deve ter pelo menos 6 caracteres.');
+            showAlert('Erro', 'A senha deve ter pelo menos 6 caracteres.');
             return;
         }
 
         setLoading(true);
         try {
+            console.log('[DEBUG] Enviando requisição de alteração de senha...');
             await authLib.updatePassword(passwordData.nova);
-            Alert.alert('Sucesso', 'Senha alterada com segurança.');
+            showAlert('Sucesso', 'Senha alterada com sucesso!');
             setPasswordData({ atual: '', nova: '', confirmar: '' });
         } catch (e: any) {
-            Alert.alert('Erro', e.message || 'Falha ao alterar senha.');
+            console.error('[DEBUG] Falha ao alterar senha:', e);
+            showAlert('Erro', e.message || 'Falha ao alterar senha.');
         } finally {
             setLoading(false);
         }
@@ -244,7 +274,7 @@ export default function CompanyProfileScreen({ onBack }: Props) {
 
             if (Platform.OS === 'web') {
                 // Na web, expo-file-system não funciona.
-                // Convertemos o blob URI para base64 via FileReader e enviamos ao S3.
+                // Convertemos o blob URI para base64 via FileReader e enviamos ao storage.
                 const response = await fetch(uri);
                 const blob = await response.blob();
                 const base64String: string = await new Promise((resolve, reject) => {
@@ -254,16 +284,16 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     reader.readAsDataURL(blob);
                 });
                 // base64String já é "data:image/jpeg;base64,XXXX" — precisamos só do conteúdo
-                const s3Key = await uploadImageToS3(uri, fileName);
-                await profileApi.update({ avatarUrl: s3Key });
-                const downloadUrl = await getImageFromS3(s3Key);
+                const storageKey = await uploadFile(uri, fileName);
+                await profileApi.update({ avatarUrl: storageKey });
+                const downloadUrl = await getDownloadUrl(storageKey);
                 if (downloadUrl) setAvatarUri(downloadUrl);
-                // Exibe preview imediato enquanto aguarda a URL do S3
+                // Exibe preview imediato enquanto aguarda a URL do storage
                 setAvatarUri(base64String);
             } else {
-                const s3Key = await uploadImageToS3(uri, fileName);
-                await profileApi.update({ avatarUrl: s3Key });
-                const downloadUrl = await getImageFromS3(s3Key);
+                const storageKey = await uploadFile(uri, fileName);
+                await profileApi.update({ avatarUrl: storageKey });
+                const downloadUrl = await getDownloadUrl(storageKey);
                 if (downloadUrl) setAvatarUri(downloadUrl);
             }
 

@@ -1,14 +1,16 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// Helper para normalizar a URL da API garantindo o sufixo /api
+const normalizeApiUrl = (url?: string) => {
+  if (!url) return "http://localhost:3003/api";
+  const clean = url.trim().replace(/\/+$/, '');
+  return clean.endsWith('/api') ? clean : `${clean}/api`;
+};
+
 // API única do BioDash. No desenvolvimento, o Next.js roda na porta 3003.
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://biodash-api.duckdns.org:3003/api";
+const API_BASE_URL = normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL);
 
-// URL base do Next.js (BioDashBD) na porta 80
-const NEXT_API_BASE_URL =
-  process.env.EXPO_PUBLIC_NEXT_API_URL || "http://biodash-api.duckdns.org/api";
-
-// Endpoint de geolocalização (conectado ao MongoDB na EC2 via backend)
+// Endpoint de geolocalização (conectado ao MongoDB via backend)
 const MARKERS_URL = `${API_BASE_URL}/markers`;
 
 export interface ApiResponse<T = any> {
@@ -152,14 +154,70 @@ export const maintenanceApi = {
 };
 
 // ==========================================
-// alertsApi — Alertas de Sensores (PostgreSQL)
+// alertsApi — Alertas e Histórico de Ocorrências (PostgreSQL)
 // ==========================================
+export interface AlertFilters {
+  biodigesterId?: string;
+  sensorType?: string;
+  level?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface CreateAlertPayload {
+  biodigesterId?: string | number | null;
+  biodigesterName?: string;
+  sensorId?: string;
+  sensorType?: string;
+  readingValue?: number;
+  thresholdValue?: number;
+  unit?: string;
+  alertLevel?: string;
+  message?: string;
+  status?: string;
+}
+
 export const alertsApi = {
-  fetch: () => authRequest(`${API_BASE_URL}/alerts`, { method: "GET" }),
-  create: (data: { alertLevel: string; message: string }) =>
+  fetch: (filters?: AlertFilters) => {
+    let url = `${API_BASE_URL}/alerts`;
+    if (filters) {
+      const q = new URLSearchParams();
+      if (filters.biodigesterId) q.append("biodigesterId", filters.biodigesterId);
+      if (filters.sensorType) q.append("sensorType", filters.sensorType);
+      if (filters.level) q.append("level", filters.level);
+      if (filters.status) q.append("status", filters.status);
+      if (filters.startDate) q.append("startDate", filters.startDate);
+      if (filters.endDate) q.append("endDate", filters.endDate);
+      if (filters.page) q.append("page", String(filters.page));
+      if (filters.limit) q.append("limit", String(filters.limit));
+      const qs = q.toString();
+      if (qs) url += `?${qs}`;
+    }
+    return authRequest(url, { method: "GET" });
+  },
+  create: (data: CreateAlertPayload) =>
     authRequest(`${API_BASE_URL}/alerts`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+  resolve: async (id: string, notes?: string) => {
+    const body = JSON.stringify({ status: "resolved", resolutionNotes: notes });
+    const res = await authRequest(`${API_BASE_URL}/alerts/${id}`, {
+      method: "PATCH",
+      body,
+    });
+    if (res.success) return res;
+    return authRequest(`${API_BASE_URL}/alerts/${id}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  delete: (id: string) =>
+    authRequest(`${API_BASE_URL}/alerts/${id}`, {
+      method: "DELETE",
     }),
 };
 
@@ -179,15 +237,57 @@ export const profileApi = {
 // Assistente de IA. O frontend conversa somente com a API autenticada do
 // BioDash; o backend injeta os dados do usuário e chama o serviço Python.
 // ==========================================
+export interface ChatMessagePayload {
+  role: 'user' | 'bot';
+  text: string;
+}
+
+export interface ChatContextPayload {
+  last_intent?: string;
+  last_topic?: string;
+  last_operational_topic?: string;
+  last_question_type?: string;
+  selected_biodigestor?: string;
+  period?: string;
+}
+
+export interface QuickSuggestionPayload {
+  label: string;
+  action_type: 'message' | 'action';
+  value: string;
+}
+
+export const MAX_CHATBOT_AUDIO_BYTES = 400 * 1024;
+export const MAX_CHATBOT_AUDIO_DURATION_SEC = 12;
+
 export const chatbotApi = {
-  send: (data: { message: string }) =>
+  send: (data: {
+    message: string;
+    history?: ChatMessagePayload[];
+    context?: ChatContextPayload;
+  }) =>
     authRequest(`${API_BASE_URL}/chatbot`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  transcribeAudio: (audio: Blob, filename = "voice-message.webm") => {
+  transcribeAudio: async (
+    audio: Blob,
+    filename = "voice-message.webm",
+    durationSeconds?: number,
+  ): Promise<ApiResponse<{ text: string }>> => {
+    if (audio.size > MAX_CHATBOT_AUDIO_BYTES) {
+      return {
+        success: false,
+        error: "O áudio excede o tamanho máximo de 400 KB (12 segundos).",
+      };
+    }
+
     const formData = new FormData();
     formData.append("audio", audio, filename);
+    if (durationSeconds !== undefined && Number.isFinite(durationSeconds)) {
+      formData.append("durationSeconds", String(Math.round(durationSeconds * 10) / 10));
+    }
+
     return authRequest<{ text: string }>(`${API_BASE_URL}/chatbot/transcribe`, {
       method: "POST",
       body: formData,
@@ -204,8 +304,7 @@ export const semanticSearchApi = {
 };
 
 // ==========================================
-// biodigestoresApi — Busca diretamente do Supabase via AI Service
-// Permite ao chatbot consultar endereços sem depender do payload do frontend
+// biodigestoresApi — Busca via API autenticada
 // ==========================================
 export const biodigestoresApi = {
   fetch: (userId: string) =>

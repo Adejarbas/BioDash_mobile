@@ -27,11 +27,15 @@ import {
     Alert,
     Animated,
     Keyboard,
+    Linking,
+    Image,
+    Modal,
+    ScrollView,
 } from 'react-native'
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '../context/ThemeContext'
-import { chatbotApi, semanticSearchApi } from '../lib/api'
+import { chatbotApi, semanticSearchApi, ChatMessagePayload, ChatContextPayload, QuickSuggestionPayload } from '../lib/api'
 import { indicatorsApi, markersApi, maintenanceApi } from '../lib/api'
 import { authLib } from '../lib/auth'
 import * as Print from 'expo-print'
@@ -40,7 +44,8 @@ import * as FileSystem from 'expo-file-system/legacy'
 import {
     ExpoSpeechRecognitionModule,
     useSpeechRecognitionEvent,
-} from 'expo-speech-recognition'
+    isSpeechRecognitionAvailable,
+} from '../services/speechRecognition'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +55,7 @@ interface Message {
     text: string
     timestamp: Date
     action?: string | null
+    suggestions?: QuickSuggestionPayload[]
 }
 
 interface ChatbotScreenProps {
@@ -68,7 +74,11 @@ interface FlowState {
 }
 
 // ─── Constantes e Helpers de Parsing ─────────────────────────────────────────
-const TAB_BAR_HEIGHT = 62
+const TAB_BAR_HEIGHT = 86
+const MAX_VOICE_DURATION_SEC = 12
+const VOICE_WARNING_SEC = 9
+const MAX_AUDIO_BYTES = 400 * 1024
+const VOICE_RECORDER_BITRATE = 64000
 
 const MONTH_NAMES = [
     'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
@@ -106,10 +116,93 @@ const parseNumber = (text: string): number | null => {
 }
 
 const parsePriority = (text: string): string | null => {
-    const n = normalizeStr(text)
-    if (['alta','urgente','critica','importante'].some(w => n.includes(w))) return 'high'
-    if (['media','moderada','normal'].some(w => n.includes(w))) return 'medium'
-    if (['baixa','leve','pequena'].some(w => n.includes(w))) return 'low'
+    const n = normalizeStr(text).trim()
+    if (n === '1' || ['alta', 'alto', 'urgente', 'urgencia', 'critica', 'critico', 'importante'].some(w => n.includes(w))) return 'high'
+    if (n === '2' || ['media', 'medio', 'moderada', 'moderado', 'normal', 'intermediaria', 'padrao'].some(w => n.includes(w))) return 'medium'
+    if (n === '3' || ['baixa', 'baixo', 'leve', 'pequena', 'pequeno', 'tranquila', 'tranquilo'].some(w => n.includes(w))) return 'low'
+    return null
+}
+
+const parseDate = (text: string): { date: Date; label: string } | null => {
+    const norm = normalizeStr(text).trim()
+    const now = new Date()
+
+    // 1. Termos relativos diretos
+    if (norm === 'hoje' || norm === 'para hoje' || norm === 'de hoje' || norm === 'pra hoje') {
+        return {
+            date: now,
+            label: `${padDate(now.getDate())}/${padDate(now.getMonth() + 1)}/${now.getFullYear()}`,
+        }
+    }
+    if (norm === 'amanha' || norm === 'para amanha' || norm === 'de amanha' || norm === 'pra amanha') {
+        const tomorrow = new Date(now)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        return {
+            date: tomorrow,
+            label: `${padDate(tomorrow.getDate())}/${padDate(tomorrow.getMonth() + 1)}/${tomorrow.getFullYear()}`,
+        }
+    }
+    if (norm === 'depois de amanha' || norm === 'para depois de amanha' || norm === 'pra depois de amanha') {
+        const afterTomorrow = new Date(now)
+        afterTomorrow.setDate(afterTomorrow.getDate() + 2)
+        return {
+            date: afterTomorrow,
+            label: `${padDate(afterTomorrow.getDate())}/${padDate(afterTomorrow.getMonth() + 1)}/${afterTomorrow.getFullYear()}`,
+        }
+    }
+    if (norm === 'ontem' || norm === 'de ontem' || norm === 'pra ontem') {
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        return {
+            date: yesterday,
+            label: `${padDate(yesterday.getDate())}/${padDate(yesterday.getMonth() + 1)}/${yesterday.getFullYear()}`,
+        }
+    }
+
+    // 2. Formato numérico: DD/MM/AAAA, DD/MM/AA ou DD/MM
+    const dm = text.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/)
+    if (dm) {
+        const day = parseInt(dm[1], 10)
+        const month = parseInt(dm[2], 10) - 1
+        let year = dm[3] ? parseInt(dm[3], 10) : now.getFullYear()
+        if (year < 100) year += 2000
+
+        const candidate = new Date(year, month, day)
+        if (
+            candidate.getFullYear() === year &&
+            candidate.getMonth() === month &&
+            candidate.getDate() === day
+        ) {
+            return {
+                date: candidate,
+                label: `${padDate(day)}/${padDate(month + 1)}/${year}`,
+            }
+        }
+        return null
+    }
+
+    // 3. Formato textual: ex "25 de outubro de 2025", "25 de outubro", "dia 5 de maio"
+    const month = parseMonth(text)
+    if (month !== null) {
+        const year = parseYear(text) ?? now.getFullYear()
+        const textWithoutYear = text.replace(/\b20\d{2}\b/, '')
+        const dayMatch = textWithoutYear.match(/\b([1-9]|[12]\d|3[01])\b/)
+        if (dayMatch) {
+            const day = parseInt(dayMatch[1], 10)
+            const candidate = new Date(year, month, day)
+            if (
+                candidate.getFullYear() === year &&
+                candidate.getMonth() === month &&
+                candidate.getDate() === day
+            ) {
+                return {
+                    date: candidate,
+                    label: `${padDate(day)}/${padDate(month + 1)}/${year}`,
+                }
+            }
+        }
+    }
+
     return null
 }
 
@@ -132,10 +225,62 @@ const isCancel = (text: string): boolean =>
 
 const padDate = (n: number) => String(n).padStart(2, '0')
 
+// ─── Componente de Animação de Digitação (Typing Dots) ─────────────────────
+function TypingDots({ color }: { color: string }) {
+    const dot1 = useRef(new Animated.Value(0)).current
+    const dot2 = useRef(new Animated.Value(0)).current
+    const dot3 = useRef(new Animated.Value(0)).current
+
+    useEffect(() => {
+        const createBounce = (anim: Animated.Value, delay: number) => {
+            return Animated.sequence([
+                Animated.delay(delay),
+                Animated.loop(
+                    Animated.sequence([
+                        Animated.timing(anim, {
+                            toValue: -4,
+                            duration: 320,
+                            useNativeDriver: true,
+                        }),
+                        Animated.timing(anim, {
+                            toValue: 0,
+                            duration: 320,
+                            useNativeDriver: true,
+                        }),
+                        Animated.delay(260),
+                    ])
+                ),
+            ])
+        }
+
+        const a1 = createBounce(dot1, 0)
+        const a2 = createBounce(dot2, 160)
+        const a3 = createBounce(dot3, 320)
+
+        a1.start()
+        a2.start()
+        a3.start()
+
+        return () => {
+            a1.stop()
+            a2.stop()
+            a3.stop()
+        }
+    }, [dot1, dot2, dot3])
+
+    return (
+        <View style={styles.typingDotsRow}>
+            <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot1 }] }]} />
+            <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot2 }] }]} />
+            <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot3 }] }]} />
+        </View>
+    )
+}
+
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
-    const { colors } = useTheme()
+    const { colors, theme } = useTheme()
     const insets = useSafeAreaInsets()
     const flatListRef = useRef<FlatList>(null)
 
@@ -143,19 +288,28 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         {
             id: '0',
             role: 'bot',
-            text: 'Olá! Em que posso ajudar você hoje? 😊\n\nPosso informar:\n• Endereço dos seus biodigestores\n• Métricas de resíduos e energia\n• Gerar relatórios (PDF, CSV ou Excel)',
+            text: 'Olá! Em que posso ajudar você hoje? 😊\n\nPosso orientar sobre:\n• ⚙️ Dúvidas operacionais (pH, H2S, pressão e temperatura)\n• 📊 Métricas de resíduos e energia\n• 📍 Endereços dos seus biodigestores\n• 🛠️ Agendamento de manutenções\n• 📄 Geração de relatórios (PDF, CSV ou Excel)',
             timestamp: new Date(),
+            suggestions: [
+                { label: '⚙️ Operação', action_type: 'message', value: 'Como funciona a operação do biodigestor?' },
+                { label: '⚡ Energia', action_type: 'message', value: 'Quanta energia foi gerada?' },
+                { label: '♻️ Resíduos', action_type: 'message', value: 'Quantos resíduos foram processados?' },
+                { label: '📍 Onde Fica?', action_type: 'message', value: 'Qual o endereço do biodigestor?' },
+            ],
         }
     ])
+    const [conversationContext, setConversationContext] = useState<ChatContextPayload>({})
     const [inputText, setInputText] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [isListening, setIsListening] = useState(false)
     const [isTranscribing, setIsTranscribing] = useState(false)
     const [voiceInputMode, setVoiceInputMode] = useState<VoiceInputMode>(null)
+    const [recordingSeconds, setRecordingSeconds] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState<any[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const [showSearch, setShowSearch] = useState(false)
+    const [showActionsModal, setShowActionsModal] = useState(false)
     const [activeFlow, setActiveFlow] = useState<FlowState | null>(null)
 
     // Dados em cache para evitar múltiplas requisições
@@ -176,6 +330,24 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const webMediaStreamRef = useRef<MediaStream | null>(null)
     const webAudioChunksRef = useRef<Blob[]>([])
     const ignoreNextMicPressRef = useRef(false)
+    const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const recordingLimitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const recordingStartedAtRef = useRef<number>(0)
+    const stopVoiceRecognitionRef = useRef<() => void>(() => {})
+
+    const clearRecordingTimers = useCallback((resetSeconds = true) => {
+        if (recordingIntervalRef.current) {
+            clearInterval(recordingIntervalRef.current)
+            recordingIntervalRef.current = null
+        }
+        if (recordingLimitTimeoutRef.current) {
+            clearTimeout(recordingLimitTimeoutRef.current)
+            recordingLimitTimeoutRef.current = null
+        }
+        if (resetSeconds) {
+            setRecordingSeconds(0)
+        }
+    }, [])
 
     const updateVoiceMode = useCallback((mode: VoiceInputMode) => {
         voiceInputModeRef.current = mode
@@ -185,8 +357,26 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const updateListeningState = useCallback((listening: boolean) => {
         isListeningRef.current = listening
         setIsListening(listening)
-        if (!listening) updateVoiceMode(null)
-    }, [updateVoiceMode])
+        if (listening) {
+            clearRecordingTimers()
+            recordingStartedAtRef.current = Date.now()
+            recordingIntervalRef.current = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000)
+                setRecordingSeconds(Math.min(MAX_VOICE_DURATION_SEC, elapsed))
+            }, 1000)
+            recordingLimitTimeoutRef.current = setTimeout(() => {
+                if (!isListeningRef.current) return
+                stopVoiceRecognitionRef.current()
+                Alert.alert(
+                    'Tempo limite atingido',
+                    'A gravação foi encerrada automaticamente ao atingir o máximo de 12 segundos.'
+                )
+            }, MAX_VOICE_DURATION_SEC * 1000)
+        } else {
+            clearRecordingTimers()
+            updateVoiceMode(null)
+        }
+    }, [clearRecordingTimers, updateVoiceMode])
 
     // ─── Carrega dados do usuário (marcadores + indicadores) ─────────────────
     const loadUserData = useCallback(async () => {
@@ -233,6 +423,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     // ─── Cleanup do reconhecimento de voz ao desmontar ───────────────────────
     useEffect(() => {
         return () => {
+            clearRecordingTimers(false)
+            recordingStartedAtRef.current = 0
             if (Platform.OS === 'web') {
                 webShouldKeepListeningRef.current = false
                 webManualStopRef.current = false
@@ -248,10 +440,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 webMediaStreamRef.current = null
                 webAudioChunksRef.current = []
             } else {
-                ExpoSpeechRecognitionModule.abort()
+                ExpoSpeechRecognitionModule?.abort?.()
             }
         }
-    }, [])
+    }, [clearRecordingTimers])
 
     // ─── Handlers nativos do expo-speech-recognition ─────────────────────────
 
@@ -347,7 +539,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     const mimeType = preferredTypes.find(type => MediaRecorderAPI.isTypeSupported(type))
                     const recorderOptions = {
                         ...(mimeType ? { mimeType } : {}),
-                        audioBitsPerSecond: 128000,
+                        audioBitsPerSecond: VOICE_RECORDER_BITRATE,
                     }
                     const recorder: MediaRecorder = new MediaRecorderAPI(stream, recorderOptions)
 
@@ -358,9 +550,16 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     setInputText('')
 
                     recorder.ondataavailable = event => {
-                        if (event.data.size > 0) webAudioChunksRef.current.push(event.data)
+                        if (event.data.size > 0) {
+                            webAudioChunksRef.current.push(event.data)
+                            const totalBytes = webAudioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0)
+                            if (totalBytes > MAX_AUDIO_BYTES && recorder.state !== 'inactive') {
+                                recorder.stop()
+                            }
+                        }
                     }
                     recorder.onerror = () => {
+                        recordingStartedAtRef.current = 0
                         updateListeningState(false)
                         stream.getTracks().forEach(track => track.stop())
                         webMediaStreamRef.current = null
@@ -371,6 +570,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         const chunks = webAudioChunksRef.current
                         const type = recorder.mimeType || chunks[0]?.type || 'audio/webm'
                         const extension = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm'
+                        const durationSec = recordingStartedAtRef.current
+                            ? (Date.now() - recordingStartedAtRef.current) / 1000
+                            : 0
+                        recordingStartedAtRef.current = 0
                         webAudioChunksRef.current = []
                         webMediaRecorderRef.current = null
                         stream.getTracks().forEach(track => track.stop())
@@ -380,9 +583,17 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         const audio = new Blob(chunks, { type })
                         if (!audio.size) return
 
+                        if (audio.size > MAX_AUDIO_BYTES) {
+                            Alert.alert(
+                                'Áudio muito longo',
+                                'O áudio excedeu o limite máximo de 12 segundos (400 KB). Por favor, envie comandos mais curtos.'
+                            )
+                            return
+                        }
+
                         setIsTranscribing(true)
                         try {
-                            const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`)
+                            const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`, durationSec)
                             const transcript = response.data?.text?.trim()
                             if (!response.success || !transcript) {
                                 throw new Error(response.error || 'Nenhuma fala foi reconhecida.')
@@ -520,6 +731,15 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
 
         // ── Nativo (iOS / Android) via expo-speech-recognition ─────────────
+        if (!isSpeechRecognitionAvailable || !ExpoSpeechRecognitionModule) {
+            updateVoiceMode(null)
+            Alert.alert(
+                'Reconhecimento de Voz',
+                'O reconhecimento de voz nativo requer uma Development Build (APK de desenvolvimento) e não é suportado no Expo Go padrão.\n\nPara utilizar o microfone no celular, gere a build de desenvolvimento com:\nnpx expo run:android\n\nNo Expo Go, você pode utilizar o chat normalmente digitando mensagens.'
+            )
+            return
+        }
+
         // Solicita permissão de microfone
         const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
         if (!result.granted) {
@@ -590,8 +810,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
 
         updateListeningState(false)
-        if (hadActiveSession) ExpoSpeechRecognitionModule.stop()
+        if (hadActiveSession) ExpoSpeechRecognitionModule?.stop?.()
     }
+
+    stopVoiceRecognitionRef.current = stopVoiceRecognition
 
     const handleMicPress = () => {
         if (ignoreNextMicPressRef.current) {
@@ -630,6 +852,20 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         if (action === 'start_flow_endereco') { setActiveFlow({ type: 'adicionar_endereco', step: 'nome', data: {} }); return }
         if (action === 'start_flow_relatorio') { setActiveFlow({ type: 'relatorio_periodo', step: 'periodo_inicio', data: {} }); return }
         if (action === 'cancel_flow') { setActiveFlow(null); return }
+
+        // Ações de direcionamento operacional
+        if (action === 'view_alerts') {
+            Alert.alert(
+                '🚨 Alertas Operacionais',
+                'Consulte os sensores e alertas de H2S, temperatura e pressão em tempo real na aba Painel do aplicativo.',
+                [{ text: 'OK' }]
+            )
+            return
+        }
+        if (action === 'contact_support') {
+            Linking.openURL('mailto:suporte@biodash.com?subject=Suporte%20Operacional%20BioDash&body=Olá,%20preciso%20de%20apoio%20técnico%20com%20a%20operação%20do%20biodigestor.')
+            return
+        }
 
         try {
             const indicators = indicatorsOverride ?? cachedIndicators.current
@@ -748,28 +984,85 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const processManutencaoStep = async (text: string) => {
         const flow = activeFlow!; const data = { ...flow.data }
         if (flow.step === 'nome') {
-            data.name = text.trim(); setActiveFlow({ ...flow, step: 'prioridade', data })
-            addBotMessage(`📋 Nome: *${data.name}*\n\nQual a **prioridade**?\n• alta (urgente)\n• média\n• baixa`); return
+            const name = text.trim()
+            if (!name) {
+                addBotMessage('⚠️ Por favor, informe um nome ou descrição para a manutenção.')
+                return
+            }
+            data.name = name; setActiveFlow({ ...flow, step: 'prioridade', data })
+            addBotMessage(
+                `📋 Nome: *${data.name}*\n\nQual a **prioridade**?\n• alta (urgente)\n• média\n• baixa`,
+                [
+                    { label: '🔴 Alta', action_type: 'message', value: 'alta' },
+                    { label: '🟡 Média', action_type: 'message', value: 'média' },
+                    { label: '🟢 Baixa', action_type: 'message', value: 'baixa' },
+                ]
+            ); return
         }
         if (flow.step === 'prioridade') {
-            const p = parsePriority(text) || 'medium'; data.priority = p; setActiveFlow({ ...flow, step: 'data', data })
-            addBotMessage(`${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/2025 ou "25 de outubro de 2025")`); return
+            const p = parsePriority(text)
+            if (!p) {
+                addBotMessage(
+                    '⚠️ Prioridade não reconhecida. Por favor, escolha uma das opções válidas:\n• **alta** (urgente)\n• **média**\n• **baixa**',
+                    [
+                        { label: '🔴 Alta', action_type: 'message', value: 'alta' },
+                        { label: '🟡 Média', action_type: 'message', value: 'média' },
+                        { label: '🟢 Baixa', action_type: 'message', value: 'baixa' },
+                    ]
+                )
+                return
+            }
+            data.priority = p; setActiveFlow({ ...flow, step: 'data', data })
+            const currentYear = new Date().getFullYear()
+            addBotMessage(
+                `${PRIORITY_LABELS[p]} registrada.\n\nPara qual **data**?\n(ex: 25/10/${currentYear}, "25 de outubro" ou "hoje")`,
+                [
+                    { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                    { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                ]
+            ); return
         }
         if (flow.step === 'data') {
-            let day = 1, month = new Date().getMonth(), year = new Date().getFullYear()
-            const dm = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
-            if (dm) {
-                day = parseInt(dm[1]); month = parseInt(dm[2]) - 1
-                if (dm[3]) { year = parseInt(dm[3]); if (year < 100) year += 2000 }
-            } else {
-                const m = parseMonth(text); const y = parseYear(text); const dayM = text.match(/\b(\d{1,2})\b/)
-                if (m !== null) month = m; if (y !== null) year = y
-                if (dayM) { const d = parseInt(dayM[1]); if (d >= 1 && d <= 31) day = d }
+            const parsed = parseDate(text)
+            const currentYear = new Date().getFullYear()
+            if (!parsed) {
+                addBotMessage(
+                    `⚠️ Data não reconhecida ou inválida. Por favor, informe uma data válida:\n• Formato numérico: **25/10/${currentYear}**\n• Por extenso: **25 de outubro de ${currentYear}**\n• Ou termos como **hoje** ou **amanhã**.`,
+                    [
+                        { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                        { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                    ]
+                )
+                return
             }
-            data.scheduledDate = new Date(year, month, day).toISOString()
-            data.dateLabel = `${padDate(day)}/${padDate(month+1)}/${year}`
+
+            // Não permite agendamento em datas passadas
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            const targetDate = new Date(parsed.date)
+            targetDate.setHours(0, 0, 0, 0)
+
+            if (targetDate.getTime() < today.getTime()) {
+                addBotMessage(
+                    `⚠️ Não é possível agendar manutenção em datas que já passaram (*${parsed.label}*). Por favor, informe uma data a partir de **hoje**:`,
+                    [
+                        { label: '📅 Hoje', action_type: 'message', value: 'hoje' },
+                        { label: '📅 Amanhã', action_type: 'message', value: 'amanhã' },
+                    ]
+                )
+                return
+            }
+
+            data.scheduledDate = parsed.date.toISOString()
+            data.dateLabel = parsed.label
             setActiveFlow({ ...flow, step: 'confirmar', data })
-            addBotMessage(`✅ Pronto para confirmar:\n\n• Nome: *${data.name}*\n• Prioridade: *${PRIORITY_LABELS[data.priority]}*\n• Data: *${data.dateLabel}*\n\nResponda **sim** ou **não**.`); return
+            addBotMessage(
+                `✅ Pronto para confirmar:\n\n• Nome: *${data.name}*\n• Prioridade: *${PRIORITY_LABELS[data.priority]}*\n• Data: *${data.dateLabel}*\n\nResponda **sim** ou **não**.`,
+                [
+                    { label: '✅ Sim', action_type: 'message', value: 'sim' },
+                    { label: '❌ Não', action_type: 'message', value: 'não' },
+                ]
+            ); return
         }
         if (flow.step === 'confirmar') {
             if (isConfirm(text)) {
@@ -780,7 +1073,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     addBotMessage(`✅ Manutenção *"${data.name}"* agendada para *${data.dateLabel}*!\n\nVisível na aba Manutenção do Dashboard.`)
                 } catch { addBotMessage('❌ Erro ao agendar. Tente novamente.'); setActiveFlow(null) }
             } else {
-                addBotMessage('⚠️ Não entendi a confirmação. Responda **sim** para agendar ou **não** para cancelar.')
+                addBotMessage(
+                    '⚠️ Não entendi a confirmação. Responda **sim** para agendar ou **não** para cancelar.',
+                    [
+                        { label: '✅ Sim', action_type: 'message', value: 'sim' },
+                        { label: '❌ Não', action_type: 'message', value: 'não' },
+                    ]
+                )
             }
         }
     }
@@ -928,13 +1227,33 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             const m = parseMonth(text); const y = parseYear(text) ?? new Date().getFullYear()
             if (m === null) { addBotMessage('⚠️ Não entendi. Ex: "junho 2025"'); return }
             data.endMonth = m; data.endYear = y; setActiveFlow({ ...flow, step: 'formato', data })
-            addBotMessage(`📅 Fim: *${MONTH_NAMES[m]} ${y}*\n\nQual o **formato**?\n• PDF\n• CSV\n• Excel`); return
+            addBotMessage(
+                `📅 Fim: *${MONTH_NAMES[m]} ${y}*\n\nQual o **formato**?\n• PDF\n• CSV\n• Excel`,
+                [
+                    { label: '📄 PDF', action_type: 'message', value: 'PDF' },
+                    { label: '📊 CSV', action_type: 'message', value: 'CSV' },
+                    { label: '📑 Excel', action_type: 'message', value: 'Excel' },
+                ]
+            ); return
         }
         if (flow.step === 'formato') {
-            const lower = text.toLowerCase()
-            let fmt = 'pdf'
+            const lower = text.toLowerCase().trim()
+            let fmt: string | null = null
             if (lower.includes('csv')) fmt = 'csv'
             else if (lower.includes('excel') || lower.includes('xlsx')) fmt = 'excel'
+            else if (lower.includes('pdf')) fmt = 'pdf'
+
+            if (!fmt) {
+                addBotMessage(
+                    '⚠️ Formato não reconhecido. Por favor, escolha uma das opções válidas:\n• **PDF**\n• **CSV**\n• **Excel**',
+                    [
+                        { label: '📄 PDF', action_type: 'message', value: 'PDF' },
+                        { label: '📊 CSV', action_type: 'message', value: 'CSV' },
+                        { label: '📑 Excel', action_type: 'message', value: 'Excel' },
+                    ]
+                )
+                return
+            }
             const filtered = cachedIndicators.current.filter((ind: any) => {
                 const d = new Date(ind.measured_at); const im = d.getMonth(); const iy = d.getFullYear()
                 return (iy > data.startYear || (iy === data.startYear && im >= data.startMonth)) &&
@@ -949,10 +1268,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
     }
 
+    const isSendingRef = useRef(false)
+
     // ─── Enviar mensagem para o chatbot ─────────────────────────────────────
     const sendMessage = async (text?: string) => {
         const messageText = (text || inputText).trim()
-        if (!messageText) return
+        if (!messageText || isSendingRef.current) return
+        isSendingRef.current = true
         Keyboard.dismiss()
 
         // Se há um fluxo ativo, a mensagem alimenta o wizard (não vai ao chatbot)
@@ -964,6 +1286,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             scrollToBottom()
             await processFlowStep(messageText)
             setIsLoading(false)
+            isSendingRef.current = false
             return
         }
 
@@ -981,17 +1304,26 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
         try {
             await loadUserData()
+            const historyPayload: ChatMessagePayload[] = messages.slice(-5).map(m => ({
+                role: m.role,
+                text: m.text,
+            }))
+
             const res = await chatbotApi.send({
                 message: messageText,
+                history: historyPayload,
+                context: conversationContext,
             })
 
             // apiRequest retorna: { success, data, error }
-            // data pode ser o objeto inteiro { intent, response, confidence, action }
-            // ou pode estar aninhado, dependendo da versão do servidor
-            const responseText =
-                res.data?.response ||            // caso normal
-                (res.data as any)?.data?.response || // caso aninhado
-                (res.success ? null : res.error)    // caso de erro com mensagem
+            const responseData = res.data?.data || res.data
+            const responseText = responseData?.response || (res.success ? null : res.error)
+            const suggestions = responseData?.suggestions || []
+            const updatedContext = responseData?.context
+
+            if (updatedContext) {
+                setConversationContext(prev => ({ ...prev, ...updatedContext }))
+            }
 
             console.log('[Chatbot] API result:', JSON.stringify(res).slice(0, 300))
 
@@ -1004,7 +1336,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         ? `Erro: ${res.error}`
                         : 'Desculpe, não consegui processar sua mensagem. Verifique o serviço do assistente.',
                 timestamp: new Date(),
-                action: res.data?.action || (res.data as any)?.data?.action,
+                action: responseData?.action,
+                suggestions: suggestions,
             }
 
             setMessages(prev => [...prev, botMsg])
@@ -1025,6 +1358,98 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         } finally {
             setIsLoading(false)
             scrollToBottom()
+            isSendingRef.current = false
+        }
+    }
+
+    // ─── Animação de Typing no Placeholder ──────────────────────────────────
+    const TYPING_PLACEHOLDERS = [
+        'Digite sua mensagem...',
+        'Pergunte: qual a faixa ideal de pH?',
+        'Pergunte: o que fazer se a pressão subir?',
+        'Consulte: qual a temperatura ideal?',
+        'Dúvidas sobre H2S e purga de biogás...',
+    ]
+    const [placeholderIndex, setPlaceholderIndex] = useState(0)
+    const [animatedPlaceholder, setAnimatedPlaceholder] = useState(TYPING_PLACEHOLDERS[0])
+    const [isDeletingPlaceholder, setIsDeletingPlaceholder] = useState(false)
+    const [isInputFocused, setIsInputFocused] = useState(false)
+
+    useEffect(() => {
+        if (inputText || isListening || isInputFocused) return
+
+        const currentWord = TYPING_PLACEHOLDERS[placeholderIndex]
+        let timer: ReturnType<typeof setTimeout>
+
+        if (!isDeletingPlaceholder) {
+            if (animatedPlaceholder.length < currentWord.length) {
+                timer = setTimeout(() => {
+                    setAnimatedPlaceholder(currentWord.slice(0, animatedPlaceholder.length + 1))
+                }, 60)
+            } else {
+                timer = setTimeout(() => {
+                    setIsDeletingPlaceholder(true)
+                }, 2200)
+            }
+        } else {
+            if (animatedPlaceholder.length > 0) {
+                timer = setTimeout(() => {
+                    setAnimatedPlaceholder(currentWord.slice(0, animatedPlaceholder.length - 1))
+                }, 30)
+            } else {
+                setIsDeletingPlaceholder(false)
+                setPlaceholderIndex((prev) => (prev + 1) % TYPING_PLACEHOLDERS.length)
+            }
+        }
+
+        return () => clearTimeout(timer)
+    }, [animatedPlaceholder, isDeletingPlaceholder, placeholderIndex, inputText, isListening, isInputFocused])
+
+    const getPlaceholder = () => {
+        if (isListening) return '🔴 Ouvindo... fale agora'
+        if (isTranscribing) return 'Transcrevendo áudio...'
+        if (isInputFocused) return 'Digite sua mensagem...'
+        return animatedPlaceholder || 'Digite sua mensagem...'
+    }
+
+    // ─── Animação de Borda Ativa no Input ───────────────────────────────────
+    const inputBorderAnim = useRef(new Animated.Value(0)).current
+
+    useEffect(() => {
+        Animated.timing(inputBorderAnim, {
+            toValue: isInputFocused || inputText.length > 0 ? 1 : 0,
+            duration: 200,
+            useNativeDriver: false,
+        }).start()
+    }, [isInputFocused, inputText, inputBorderAnim])
+
+    const animatedBorderColor = inputBorderAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [colors.border, colors.primary],
+    })
+
+    // ─── Handler de Teclado (Enter para enviar, Ctrl+Enter pula linha) ───────
+    const handleKeyPress = (e: any) => {
+        const key = e.nativeEvent?.key || e.key
+        if (key === 'Enter') {
+            const hasModifier =
+                e.nativeEvent?.ctrlKey ||
+                e.nativeEvent?.shiftKey ||
+                e.nativeEvent?.metaKey ||
+                e.ctrlKey ||
+                e.shiftKey ||
+                e.metaKey
+
+            if (hasModifier) {
+                return
+            }
+
+            if (e.preventDefault) e.preventDefault()
+            if (e.nativeEvent?.preventDefault) e.nativeEvent.preventDefault()
+
+            if (inputText.trim() && !isLoading) {
+                sendMessage()
+            }
         }
     }
 
@@ -1050,12 +1475,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
     }
 
-    const addBotMessage = (text: string) => {
+    const addBotMessage = (text: string, suggestions?: QuickSuggestionPayload[]) => {
         setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'bot',
             text,
             timestamp: new Date(),
+            suggestions,
         }])
         scrollToBottom()
     }
@@ -1064,51 +1490,120 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const renderMessage = ({ item }: { item: Message }) => {
         const isUser = item.role === 'user'
         return (
-            <View style={[
-                styles.messageBubbleWrapper,
-                isUser ? styles.userWrapper : styles.botWrapper
-            ]}>
-                {!isUser && (
-                    <View style={[styles.botAvatar, { backgroundColor: '#16a34a' }]}>
-                        <Text style={{ fontSize: 14 }}>🌿</Text>
+            <View style={{ marginBottom: 12 }}>
+                <View style={[
+                    styles.messageBubbleWrapper,
+                    isUser ? styles.userWrapper : styles.botWrapper
+                ]}>
+                    {!isUser && (
+                        <View style={styles.botAvatar}>
+                            <Image
+                            source={require('../../assets/biodash-assistent.png')}
+                            style={styles.botAvatarImage}
+                            resizeMode="cover"
+                        />
+                        </View>
+                    )}
+                    <View style={[
+                        styles.bubble,
+                        isUser
+                            ? [styles.userBubble, { backgroundColor: colors.primary }]
+                            : [styles.botBubble, { backgroundColor: colors.cardBackground, borderColor: colors.border }]
+                    ]}>
+                        <Text style={[
+                            styles.bubbleText,
+                            { color: isUser ? '#fff' : colors.text }
+                        ]}>{item.text}</Text>
+                        <Text style={[
+                            styles.bubbleTime,
+                            { color: isUser ? 'rgba(255,255,255,0.6)' : colors.textMuted }
+                        ]}>
+                            {item.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Sugestões interativas contextuais do bot */}
+                {!isUser && item.suggestions && item.suggestions.length > 0 && (
+                    <View style={styles.inlineSuggestionsContainer}>
+                        <View style={styles.inlineSuggestionsHeader}>
+                            <MaterialIcons name="auto-awesome" size={13} color={colors.primary} />
+                            <Text style={[styles.inlineSuggestionsTitle, { color: colors.primary }]}>
+                                Sugestões
+                            </Text>
+                        </View>
+                        <View style={styles.inlineSuggestionsList}>
+                            {item.suggestions.map((sug, idx) => (
+                                <TouchableOpacity
+                                    key={idx}
+                                    style={[
+                                        styles.inlineSuggestionBtn,
+                                        {
+                                            borderColor: theme === 'dark' ? 'rgba(74, 222, 128, 0.35)' : 'rgba(22, 163, 74, 0.25)',
+                                            backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.15)' : '#f0fdf4',
+                                        }
+                                    ]}
+                                    disabled={isLoading}
+                                    onPress={() => {
+                                        if (sug.action_type === 'action') {
+                                            handleChatAction(sug.value)
+                                        } else {
+                                            sendMessage(sug.value)
+                                        }
+                                    }}
+                                >
+                                    <Text style={[styles.inlineSuggestionText, { color: theme === 'dark' ? '#4ade80' : '#15803d' }]}>
+                                        {sug.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
                     </View>
                 )}
-                <View style={[
-                    styles.bubble,
-                    isUser
-                        ? [styles.userBubble, { backgroundColor: colors.primary }]
-                        : [styles.botBubble, { backgroundColor: colors.cardBackground, borderColor: colors.border }]
-                ]}>
-                    <Text style={[
-                        styles.bubbleText,
-                        { color: isUser ? '#fff' : colors.text }
-                    ]}>{item.text}</Text>
-                    <Text style={[
-                        styles.bubbleTime,
-                        { color: isUser ? 'rgba(255,255,255,0.6)' : colors.textMuted }
-                    ]}>
-                        {item.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                </View>
             </View>
         )
     }
 
-    // ─── Atalhos rápidos ─────────────────────────────────────────────────────
-    const quickReplies = [
-        { label: '📍 Endereço', text: 'Qual o endereço do biodigestor?' },
-        { label: '⚡ Energia', text: 'Quanta energia foi gerada?' },
-        { label: '♻️ Resíduos', text: 'Quantos resíduos foram processados?' },
-        { label: '📊 Métricas', text: 'Quais são as métricas do biodigestor?' },
-        { label: '🔧 Manutenção', text: 'Agendar manutenção' },
-        { label: '📈 Registrar', text: 'Adicionar métricas' },
-        { label: '📍 Novo BD', text: 'Adicionar biodigestor' },
-        { label: '📅 Por Período', text: 'Relatório por período' },
-        { label: '📄 PDF', text: 'Gera um relatório em PDF' },
-        { label: '📋 Excel', text: 'Exportar Excel' },
+    // ─── Categorias de Atalhos Rápidos (Menu de Ajuda) ────────────────────────
+    const quickActionCategories = [
+        {
+            title: '⚙️ Consultas Operacionais',
+            items: [
+                { icon: 'settings', label: 'Operação', text: 'Como funciona a operação do biodigestor?' },
+                { icon: 'bolt', label: 'Energia Gerada', text: 'Quanta energia foi gerada?' },
+                { icon: 'recycling', label: 'Resíduos Processados', text: 'Quantos resíduos foram processados?' },
+                { icon: 'insert-chart', label: 'Métricas Gerais', text: 'Quais são as métricas do biodigestor?' },
+                { icon: 'location-on', label: 'Localização / Endereço', text: 'Qual o endereço do biodigestor?' },
+            ]
+        },
+        {
+            title: '🛠️ Ações e Registros',
+            items: [
+                { icon: 'build', label: 'Agendar Manutenção', text: 'Agendar manutenção' },
+                { icon: 'edit', label: 'Registrar Métrica', text: 'Adicionar métricas' },
+                { icon: 'add-location', label: 'Novo Biodigestor', text: 'Adicionar biodigestor' },
+            ]
+        },
+        {
+            title: '📄 Relatórios e Exportação',
+            items: [
+                { icon: 'picture-as-pdf', label: 'Relatório em PDF', text: 'Gera um relatório em PDF' },
+                { icon: 'table-chart', label: 'Exportar para Excel', text: 'Exportar Excel' },
+                { icon: 'date-range', label: 'Relatório por Período', text: 'Relatório por período' },
+            ]
+        },
+        {
+            title: '📞 Suporte',
+            items: [
+                { icon: 'support-agent', label: 'Suporte Técnico', text: 'Como entro em contato com o suporte?' },
+            ]
+        }
     ]
 
     // ─── Render ───────────────────────────────────────────────────────────────
+    const isNearLimit = recordingSeconds >= VOICE_WARNING_SEC
+    const statusColor = isNearLimit ? '#f59e0b' : '#ef4444'
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.background, paddingBottom: TAB_BAR_HEIGHT }}>
         <KeyboardAvoidingView
@@ -1129,7 +1624,11 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 )}
                 <View style={styles.headerInfo}>
                     <View style={styles.avatarContainer}>
-                        <Text style={{ fontSize: 22 }}>🌿</Text>
+                        <Image
+                            source={require('../../assets/biodash-assistent.png')}
+                            style={styles.avatarImage}
+                            resizeMode="cover"
+                        />
                     </View>
                     <View>
                         <Text style={[styles.headerTitle, { color: colors.text }]}>Assistente BioDash</Text>
@@ -1139,13 +1638,23 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         </View>
                     </View>
                 </View>
-                <TouchableOpacity
-                    onPress={() => setShowSearch(!showSearch)}
-                    style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
-                    id="chatbot-search-toggle"
-                >
-                    <MaterialIcons name="search" size={20} color={colors.text} />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                        onPress={() => setShowActionsModal(true)}
+                        style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
+                        id="chatbot-actions-header-button"
+                        accessibilityLabel="Menu de ações rápidas"
+                    >
+                        <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setShowSearch(!showSearch)}
+                        style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
+                        id="chatbot-search-toggle"
+                    >
+                        <MaterialIcons name="search" size={20} color={colors.text} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Busca Semântica (colapsável) */}
@@ -1213,30 +1722,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             {/* Indicador de digitando */}
             {isLoading && (
                 <View style={[styles.typingIndicator, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <ActivityIndicator size="small" color={colors.primary} />
+                    <TypingDots color={colors.primary} />
                     <Text style={[styles.typingText, { color: colors.textMuted }]}>Assistente digitando...</Text>
                 </View>
             )}
-
-            {/* Atalhos Rápidos */}
-            <View style={styles.quickRepliesContainer}>
-                <FlatList
-                    horizontal
-                    data={quickReplies}
-                    keyExtractor={(item) => item.label}
-                    renderItem={({ item }) => (
-                        <TouchableOpacity
-                            style={[styles.quickReply, { borderColor: colors.primary, backgroundColor: colors.cardBackground }]}
-                            onPress={() => sendMessage(item.text)}
-                            id={`quick-reply-${item.label.replace(/[^a-zA-Z0-9]/g, '-')}`}
-                        >
-                            <Text style={[styles.quickReplyText, { color: colors.primary }]}>{item.label}</Text>
-                        </TouchableOpacity>
-                    )}
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingHorizontal: 12 }}
-                />
-            </View>
 
             {/* Input de Mensagem */}
             <View style={[styles.inputContainer, {
@@ -1245,11 +1734,13 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             }]}>
                 {isListening && (
                     <View style={styles.micStatusRow}>
-                        <View style={styles.micStatusDot} />
-                        <Text style={styles.micStatusText}>
-                            {voiceInputMode === 'hold'
-                                ? 'Gravando — solte para concluir'
-                                : 'Gravando — toque no microfone para concluir'}
+                        <View style={[styles.micStatusDot, { backgroundColor: statusColor }]} />
+                        <Text style={[styles.micStatusText, { color: statusColor }]}>
+                            {`Gravando 00:${padDate(recordingSeconds)} / 00:${padDate(MAX_VOICE_DURATION_SEC)} — ${
+                                voiceInputMode === 'hold'
+                                    ? 'solte para concluir'
+                                    : 'toque no microfone para concluir'
+                            }${isNearLimit ? ' • tempo quase acabando' : ''}`}
                         </Text>
                     </View>
                 )}
@@ -1259,20 +1750,34 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         <Text style={[styles.micStatusText, { color: colors.primary }]}>Transcrevendo áudio...</Text>
                     </View>
                 )}
-                <View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                <Animated.View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: animatedBorderColor }]}>
+                    {/* Botão de Menu de Ações Rápidas */}
+                    <TouchableOpacity
+                        style={[styles.actionMenuBtn, { backgroundColor: colors.iconBg }]}
+                        onPress={() => setShowActionsModal(true)}
+                        id="chatbot-actions-input-button"
+                        accessibilityLabel="Menu de ações rápidas"
+                    >
+                        <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+
                     <TextInput
                         style={[
                             styles.textInput,
                             { color: colors.text },
                             isListening && { color: '#ef4444' }
                         ]}
-                        placeholder={isListening ? '🔴 Ouvindo... fale agora' : isTranscribing ? 'Transcrevendo áudio...' : 'Digite sua mensagem...'}
+                        placeholder={getPlaceholder()}
                         placeholderTextColor={isListening ? '#ef4444' : colors.textMuted}
                         value={inputText}
                         onChangeText={setInputText}
+                        onFocus={() => setIsInputFocused(true)}
+                        onBlur={() => setIsInputFocused(false)}
+                        onKeyPress={handleKeyPress}
+                        {...(Platform.OS === 'web' ? { onKeyDown: handleKeyPress } : {})}
                         multiline
+                        blurOnSubmit={false}
                         maxLength={500}
-                        onSubmitEditing={() => sendMessage()}
                         editable={!isTranscribing}
                         id="chatbot-message-input"
                     />
@@ -1312,9 +1817,91 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     >
                         <MaterialIcons name="send" size={18} color="#fff" />
                     </TouchableOpacity>
-                </View>
+                </Animated.View>
             </View>
         </KeyboardAvoidingView>
+
+        {/* Modal de Ajuda & Opções do Assistente */}
+        <Modal
+            visible={showActionsModal}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setShowActionsModal(false)}
+        >
+            <TouchableOpacity
+                style={styles.modalBackdrop}
+                activeOpacity={1}
+                onPress={() => setShowActionsModal(false)}
+            >
+                <TouchableOpacity
+                    activeOpacity={1}
+                    style={[
+                        styles.modalContent,
+                        {
+                            backgroundColor: colors.cardBackground,
+                            borderTopColor: colors.border,
+                        }
+                    ]}
+                >
+                    {/* Drag Handle */}
+                    <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+
+                    {/* Header do Modal */}
+                    <View style={styles.modalHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={[styles.modalHeaderIcon, { backgroundColor: colors.iconBg }]}>
+                                <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                            </View>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Menu de Ações Rápidas</Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => setShowActionsModal(false)}
+                            style={[styles.modalCloseBtn, { backgroundColor: colors.iconBg }]}
+                        >
+                            <MaterialIcons name="close" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ paddingBottom: 28 }}
+                    >
+                        {quickActionCategories.map((category, catIdx) => (
+                            <View key={catIdx} style={styles.categorySection}>
+                                <Text style={[styles.categoryTitle, { color: colors.textMuted }]}>
+                                    {category.title}
+                                </Text>
+                                <View style={styles.categoryGrid}>
+                                    {category.items.map((action, actIdx) => (
+                                        <TouchableOpacity
+                                            key={actIdx}
+                                            style={[
+                                                styles.actionCard,
+                                                {
+                                                    backgroundColor: colors.background,
+                                                    borderColor: colors.border,
+                                                }
+                                            ]}
+                                            onPress={() => {
+                                                setShowActionsModal(false)
+                                                sendMessage(action.text)
+                                            }}
+                                        >
+                                            <View style={[styles.actionIconContainer, { backgroundColor: colors.iconBg }]}>
+                                                <MaterialIcons name={action.icon as any} size={18} color={colors.primary} />
+                                            </View>
+                                            <Text style={[styles.actionCardText, { color: colors.text }]}>
+                                                {action.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+                        ))}
+                    </ScrollView>
+                </TouchableOpacity>
+            </TouchableOpacity>
+        </Modal>
         </View>
     )
 }
@@ -1350,6 +1937,12 @@ const styles = StyleSheet.create({
         backgroundColor: '#dcfce7',
         alignItems: 'center',
         justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    avatarImage: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
     },
     headerTitle: {
         fontSize: 16,
@@ -1452,6 +2045,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 2,
+        overflow: 'hidden',
+    },
+    botAvatarImage: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
     },
     bubble: {
         borderRadius: 16,
@@ -1475,6 +2074,17 @@ const styles = StyleSheet.create({
         marginTop: 4,
         alignSelf: 'flex-end',
     },
+    typingDotsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 2,
+    },
+    typingDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
     typingIndicator: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1482,32 +2092,26 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         paddingHorizontal: 14,
         paddingVertical: 10,
-        borderRadius: 12,
+        borderRadius: 16,
         borderWidth: 1,
-        gap: 8,
+        gap: 10,
         alignSelf: 'flex-start',
     },
     typingText: {
         fontSize: 12,
+        fontWeight: '500',
     },
-    quickRepliesContainer: {
-        paddingVertical: 8,
-    },
-    quickReply: {
-        borderWidth: 1,
-        borderRadius: 20,
-        paddingHorizontal: 14,
-        paddingVertical: 7,
-        marginRight: 8,
-    },
-    quickReplyText: {
-        fontSize: 12,
-        fontWeight: '600',
+    actionMenuBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     inputContainer: {
-        paddingHorizontal: 12,
+        paddingHorizontal: 16,
         paddingTop: 10,
-        paddingBottom: 10,
+        paddingBottom: Platform.OS === 'ios' ? 24 : 12,
         borderTopWidth: 1,
     },
     micStatusRow: {
@@ -1530,32 +2134,146 @@ const styles = StyleSheet.create({
     },
     inputRow: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        borderWidth: 1,
-        borderRadius: 24,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        gap: 8,
+        alignItems: 'center',
+        borderWidth: 1.5,
+        borderRadius: 26,
+        paddingHorizontal: 10,
+        paddingVertical: Platform.OS === 'web' ? 6 : (Platform.OS === 'ios' ? 8 : 4),
+        minHeight: 52,
+        gap: 6,
     },
     textInput: {
         flex: 1,
-        fontSize: 14,
-        maxHeight: 100,
-        paddingTop: 4,
-        paddingBottom: 4,
+        fontSize: 15,
+        lineHeight: 20,
+        maxHeight: 120,
+        paddingHorizontal: 6,
+        paddingVertical: Platform.OS === 'web' ? 8 : 6,
+        ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
     },
     micBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         alignItems: 'center',
         justifyContent: 'center',
     },
     sendBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    inlineSuggestionsContainer: {
+        marginTop: 8,
+        marginLeft: 40,
+        marginRight: 16,
+    },
+    inlineSuggestionsHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 6,
+    },
+    inlineSuggestionsTitle: {
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    inlineSuggestionsList: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+    },
+    inlineSuggestionBtn: {
+        borderWidth: 1,
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    inlineSuggestionText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderTopWidth: 1,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        maxHeight: '75%',
+    },
+    modalHandle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: 14,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 16,
+    },
+    modalHeaderIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    modalCloseBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    categorySection: {
+        marginBottom: 18,
+    },
+    categoryTitle: {
+        fontSize: 12,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 10,
+    },
+    categoryGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    actionCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        gap: 8,
+    },
+    actionIconContainer: {
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    actionCardText: {
+        fontSize: 13,
+        fontWeight: '600',
     },
 })

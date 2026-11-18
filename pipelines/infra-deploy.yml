@@ -1,0 +1,141 @@
+# ==============================================================================
+# Pipeline de Provisionamento Automático de Infraestrutura Azure via Bicep
+# Marco 4: Governança Cloud, FinOps e Automação CI/CD
+# Responsável: Cloud Azure & IaC Bicep
+# Localização de Execução: .github/workflows/infra-deploy.yml
+# ==============================================================================
+
+name: Infrastructure CI/CD (Azure Bicep)
+
+on:
+  push:
+    branches:
+      - main
+      - feat/azure-bicep
+      - feat/azure-integration
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente de destino (dev, staging, prod)'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      dryRun:
+        description: 'Executar apenas validação e What-If (sem alterar recursos)?'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    name: Lint & Pre-flight Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Azure CLI
+        run: az version
+
+      - name: Bicep Syntax Lint
+        run: |
+          echo "Compilando e validando sintaxe Bicep..."
+          az bicep build --file ./infra/main.bicep
+          az bicep build --file ./infra/subscription.bicep
+          echo "Sintaxe Bicep 100% válida e sem violações."
+
+      - name: Azure Login via OIDC (Passwordless)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Azure Resource Manager Pre-Flight Validation
+        if: env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+        run: |
+          az deployment group validate \
+            --resource-group "$RG_NAME" \
+            --template-file ./infra/main.bicep \
+            --parameters ./infra/main.parameters.json
+
+      - name: Azure Bicep What-If Preview
+        if: env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+        run: |
+          az deployment group what-if \
+            --resource-group "$RG_NAME" \
+            --template-file ./infra/main.bicep \
+            --parameters ./infra/main.parameters.json
+
+  deploy:
+    name: Deploy Infrastructure (IaC)
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && inputs.dryRun != true
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login via OIDC (Zero Secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure Target Resource Group Exists
+        env:
+          RG_NAME: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+          LOCATION: ${{ vars.AZURE_LOCATION || 'brazilsouth' }}
+        run: |
+          az group create --name "$RG_NAME" --location "$LOCATION" \
+            --tags Project=BioDash FinOps=CostZero ManagedBy=Bicep-IaC
+
+      - name: Deploy Azure Infrastructure via arm-deploy
+        id: arm_deploy
+        uses: azure/arm-deploy@v2
+        with:
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP_NAME || 'rg-biodash-prod' }}
+          template: ./infra/main.bicep
+          parameters: ./infra/main.parameters.json
+          deploymentMode: Incremental
+          failOnStdErr: false
+
+      - name: Publish Deployment Summary
+        run: |
+          echo "### 🚀 Infraestrutura Azure Provisionada com Sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "| Recurso | Detalhes |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Responsável Técnico** | Cloud Azure & IaC Bicep |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Governança / FinOps** | Custo Zero (minReplicas: 0 / Azure for Students) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Backend API URL** | \`${{ steps.arm_deploy.outputs.backendApiUrl }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Frontend Web URL** | \`${{ steps.arm_deploy.outputs.frontendWebUrl }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Storage Account** | \`${{ steps.arm_deploy.outputs.storageAccountName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container Fotos** | \`${{ steps.arm_deploy.outputs.avatarsContainerName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **VNet & NSG** | \`${{ steps.arm_deploy.outputs.vnetName }}\` / \`${{ steps.arm_deploy.outputs.nsgName }}\` |" >> $GITHUB_STEP_SUMMARY

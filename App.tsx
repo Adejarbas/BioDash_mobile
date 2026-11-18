@@ -36,6 +36,17 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
           <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
         </View>
 
+        <TouchableOpacity
+          onPress={() => {
+            setActiveTab('settings');
+            setCurrentSubScreen('notifications');
+          }}
+          style={[styles.themeBtn, { backgroundColor: colors.iconBg, marginRight: 8 }]}
+          accessibilityLabel="Histórico de Alertas"
+        >
+          <MaterialCommunityIcons name="bell-outline" size={22} color={colors.text} />
+        </TouchableOpacity>
+
         <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
           <MaterialCommunityIcons name={theme === 'light' ? 'weather-night' : 'white-balance-sunny'} size={22} color={colors.text} />
         </TouchableOpacity>
@@ -44,7 +55,12 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
       {/* Tela Ativa */}
       <View style={{ flex: 1 }}>
         {activeTab === 'home' ? (
-          <DashboardScreen />
+          <DashboardScreen
+            onNavigateNotifications={() => {
+              setActiveTab('settings');
+              setCurrentSubScreen('notifications');
+            }}
+          />
         ) : activeTab === 'chatbot' ? (
           <ChatbotScreen />
         ) : currentSubScreen === 'profile' ? (

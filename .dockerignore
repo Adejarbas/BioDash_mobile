@@ -8,8 +8,12 @@ npm-debug.log
 *.mobileprovision
 *.orig
 web-build
+dist
 .git
 .github
 .vscode
 .env
 .env.*
+backend
+ai-service
+
