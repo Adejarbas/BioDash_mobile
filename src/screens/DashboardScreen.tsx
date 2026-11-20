@@ -7,15 +7,15 @@ import {
     TouchableOpacity,
     RefreshControl,
     ActivityIndicator,
-    Alert,
+    AccessibilityInfo,
     Modal,
     TextInput,
     Animated,
-    Dimensions,
-    FlatList,
+    KeyboardAvoidingView,
     LayoutAnimation,
     Platform,
-    UIManager
+    Pressable,
+    useWindowDimensions,
 } from 'react-native'
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -30,6 +30,8 @@ import * as FileSystem from 'expo-file-system/legacy'
 import { useTheme } from '../context/ThemeContext'
 import { useFadeInUp } from '../hooks/useFadeInUp'
 import { classifySensorReading, getCriticalityBadgeInfo } from '../lib/anomalyClassifier'
+import { showAlert, showConfirm } from '../lib/feedback'
+import { selectMostRecentIndicator } from '../lib/indicators'
 
 interface MetricData {
     value: number
@@ -73,14 +75,15 @@ type CardKey = 'waste' | 'energy' | 'tax' | 'efficiency'
 const DEFAULT_CARD_ORDER: CardKey[] = ['waste', 'energy', 'tax', 'efficiency']
 
 const colorToMetric: Record<CardKey, string> = {
-    'waste': '#2563eb', // Emerald (Cool Green)
-    'energy': '#d97706', // Cool Blue
-    'tax': '#e11d48', // Rose (Cooler Red)
-    'efficiency': '#10b981',  // Amber (Cooler Yellow/Orange)
+    'waste': '#15803d',
+    'energy': '#a16207',
+    'tax': '#1d4ed8',
+    'efficiency': '#047857',
 }
 
 export default function DashboardScreen({ onNavigateNotifications }: { onNavigateNotifications?: () => void } = {}) {
-    const isSmallScreen = Dimensions.get('window').width < 420;
+    const { width: windowWidth } = useWindowDimensions();
+    const isSmallScreen = windowWidth < 420;
     const insets = useSafeAreaInsets()
     const chartRef = useRef<ViewShot>(null)
     const telemetryRef = useRef<any>(null)
@@ -92,6 +95,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
     const [markerComplement, setMarkerComplement] = useState('')
     const [markerEditingId, setMarkerEditingId] = useState<string | null>(null)
     const [cepLoading, setCepLoading] = useState(false)
+    const [savingMarker, setSavingMarker] = useState(false)
     const [chartData, setChartData] = useState<ChartPoint[]>([])
 
 
@@ -111,41 +115,47 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
 
     const [incidentResolveModalVisible, setIncidentResolveModalVisible] = useState(false);
     const [incidentResolveMessage, setIncidentResolveMessage] = useState('');
+    const [resolvingIncident, setResolvingIncident] = useState(false);
     const [archivedModalVisible, setArchivedModalVisible] = useState(false);
     const [archivedMaintenances, setArchivedMaintenances] = useState<MaintenanceItem[]>([]);
+    const [archivedLoading, setArchivedLoading] = useState(false);
 
     const handleResolveIncident = async () => {
         if (!incidentResolveMessage.trim()) {
-            Alert.alert("Erro", "Por favor, digite uma mensagem.");
+            showAlert("Erro", "Por favor, digite uma mensagem.");
             return;
         }
+        setResolvingIncident(true);
         try {
-            const res = await maintenanceApi.resolveIncident(incidentResolveMessage);
+            const res = await maintenanceApi.resolveIncident(incidentResolveMessage.trim());
             if (!res.success) throw new Error(res.error);
-            
-            Alert.alert("Sucesso", "Alerta resolvido com sucesso!");
+
+            showAlert("Sucesso", "Alerta resolvido com sucesso!");
             setIncidentResolveModalVisible(false);
             setIncidentResolveMessage('');
             loadDashboardData();
         } catch (err: any) {
-            Alert.alert("Erro", "Não foi possível resolver o alerta: " + err.message);
+            showAlert("Erro", "Não foi possível resolver o alerta: " + err.message);
+        } finally {
+            setResolvingIncident(false);
         }
     }
 
     const handleArchiveMaintenance = async (id: string) => {
         try {
-            const res = await maintenanceApi.updateSchedule(id, 'archived');
+            const res = await maintenanceApi.updateSchedule(id, 'cancelled');
             if (!res.success) throw new Error(res.error);
-            
-            Alert.alert("Sucesso", "Manutenção arquivada com sucesso!");
+
+            showAlert("Sucesso", "Manutenção arquivada com sucesso!");
             setActionModalVisible(false);
             loadDashboardData();
         } catch (err: any) {
-            Alert.alert("Erro", "Não foi possível arquivar: " + err.message);
+            showAlert("Erro", "Não foi possível arquivar: " + err.message);
         }
     }
 
     const fetchArchivedMaintenances = async () => {
+        setArchivedLoading(true);
         try {
             const res = await maintenanceApi.fetchSchedules();
             if (!res.success) throw new Error(res.error);
@@ -154,11 +164,11 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 const trintaDiasAtras = new Date();
                 trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
 
-                const archived = res.data.filter((m: any) => 
-                    m.status === 'archived' && 
+                const archived = res.data.filter((m: any) =>
+                    m.status === 'cancelled' &&
                     new Date(m.created_at || m.scheduled_date) >= trintaDiasAtras
                 );
-                
+
                 const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
                 setArchivedMaintenances(archived.map((m: any) => ({
                     id: m.id,
@@ -170,40 +180,42 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             }
         } catch (err) {
             console.error("Erro ao buscar arquivadas", err);
+            showAlert("Erro", "Não foi possível carregar as manutenções arquivadas.");
+        } finally {
+            setArchivedLoading(false);
         }
     }
 
     const handleMarkAsDone = async (id: string) => {
         try {
-            console.log("Marking as done:", id);
-            const res = await maintenanceApi.updateSchedule(id, 'done');
+            const res = await maintenanceApi.updateSchedule(id, 'completed');
             if (!res.success) throw new Error(res.error);
-            console.log("Update success");
-            Alert.alert("Sucesso", "Manutenção concluída!", [{ text: "OK", onPress: () => loadDashboardData() }]);
+            showAlert("Sucesso", "Manutenção concluída!");
+            loadDashboardData();
         } catch (err: any) {
-            Alert.alert("Erro", "Não foi possível atualizar: " + err.message);
+            showAlert("Erro", "Não foi possível atualizar: " + err.message);
             console.error(err);
         }
     }
 
     const handleDelete = async (id: string) => {
-        Alert.alert("Confirmar", "Tem certeza que deseja apagar essa manutenção?", [
-            { text: "Cancelar", style: "cancel" },
-            {
-                text: "Apagar", style: "destructive", onPress: async () => {
-                    try {
-                        console.log("Deleting maintenance:", id);
-                        const res = await maintenanceApi.deleteSchedule(id);
-                        if (!res.success) throw new Error(res.error);
-                        console.log("Delete success");
-                        Alert.alert("Sucesso", "Manutenção apagada com sucesso!", [{ text: "OK", onPress: () => loadDashboardData() }]);
-                    } catch (err: any) {
-                        Alert.alert("Erro", "Não foi possível apagar: " + err.message);
-                        console.error(err);
-                    }
+        showConfirm(
+            "Confirmar",
+            "Tem certeza que deseja apagar essa manutenção?",
+            async () => {
+                try {
+                    const res = await maintenanceApi.deleteSchedule(id);
+                    if (!res.success) throw new Error(res.error);
+                    showAlert("Sucesso", "Manutenção apagada com sucesso!");
+                    loadDashboardData();
+                } catch (err: any) {
+                    showAlert("Erro", "Não foi possível apagar: " + err.message);
+                    console.error(err);
                 }
-            }
-        ]);
+            },
+            "Apagar",
+            true
+        );
     }
 
         const fetchMapMarkers = async (focusId?: string) => {
@@ -304,7 +316,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             } else {
                 // Reverter caso o salvamento falhe
                 setMapMarkers(prev => prev.map(x => x.id === id ? { ...x, description: m.description, latitude: m.latitude, longitude: m.longitude } : x));
-                Alert.alert("Erro", "Não foi possível salvar a nova posição.");
+                showAlert("Erro", "Não foi possível salvar a nova posição.");
             }
         } catch (e) {
             console.error("Erro ao arrastar marcador:", e);
@@ -314,16 +326,17 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
     };
 
     const handleDeleteMarker = (id: string, name: string) => {
-        Alert.alert("Excluir Marcador", `Deseja remover "${name}"?`, [
-            { text: "Cancelar", style: "cancel" },
-            {
-                text: "Excluir", style: "destructive", onPress: async () => {
-                    const res = await markersApi.delete(id);
-                    if (!res.success) Alert.alert("Erro", "Não foi possível excluir");
-                    else fetchMapMarkers();
-                }
-            }
-        ]);
+        showConfirm(
+            "Excluir Marcador",
+            `Deseja remover "${name}"?`,
+            async () => {
+                const res = await markersApi.delete(id);
+                if (!res.success) showAlert("Erro", "Não foi possível excluir");
+                else fetchMapMarkers();
+            },
+            "Excluir",
+            true
+        );
     };
 
     const handleEditMarker = (m: any) => {
@@ -358,12 +371,14 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
             const cepData = await res.json();
             if (!cepData.erro) {
-                setMarkerAddress(`${cepData.logradouro}, ${cepData.bairro} - ${cepData.localidade}/${cepData.uf}`);
+                const streetPart = [cepData.logradouro, cepData.bairro].filter(Boolean).join(', ');
+                const cityPart = [cepData.localidade, cepData.uf].filter(Boolean).join('/');
+                setMarkerAddress([streetPart, cityPart].filter(Boolean).join(' - '));
             } else {
-                Alert.alert("Aviso", "O CEP informado não foi encontrado.");
+                showAlert("Aviso", "O CEP informado não foi encontrado.");
             }
-        } catch (err) {
-            Alert.alert("Erro", "Falha de conexão ao consultar viaCEP.");
+        } catch {
+            showAlert("Erro", "Falha de conexão ao consultar viaCEP.");
         } finally {
             setCepLoading(false);
         }
@@ -376,7 +391,10 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
         efficiency: { value: 0, changePercent: '0%', increasing: true, color: colorToMetric['efficiency'] },
     })
     const [loading, setLoading] = useState(true)
+    const [dashboardError, setDashboardError] = useState<string | null>(null)
     const [refreshing, setRefreshing] = useState(false)
+    const [metricsLoading, setMetricsLoading] = useState(false)
+    const [savingMetrics, setSavingMetrics] = useState(false)
     const [userEmail, setUserEmail] = useState('')
     const [selectedTab, setSelectedTab] = useState<'all' | 'waste' | 'energy' | 'tax'>('all')
     const [metricsModalVisible, setMetricsModalVisible] = useState(false)
@@ -496,6 +514,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
     }, [manualMetrics.month, manualMetrics.year, metricsModalVisible]);
 
     const fetchMonthlyMetrics = async (m: string, y: string) => {
+        setMetricsLoading(true);
         try {
             const monthIdx = parseInt(m);
             const yearVal = parseInt(y);
@@ -519,20 +538,24 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             } else {
                 setManualMetrics(prev => ({ ...prev, waste: "", energy: "", tax: "" }));
             }
-        } catch (e) {
+        } catch {
             setManualMetrics(prev => ({ ...prev, waste: "", energy: "", tax: "" }));
+        } finally {
+            setMetricsLoading(false);
         }
     };
 
     const handleSaveManualMetrics = async () => {
+        setSavingMetrics(true);
         try {
             const monthIdx = parseInt(manualMetrics.month)
             const yearVal = parseInt(manualMetrics.year)
+            const parseDecimal = (raw: string) => parseFloat(raw.replace(',', '.')) || 0
 
             const res = await indicatorsApi.save({
-                wasteProcessed: parseFloat(manualMetrics.waste) || 0,
-                energyGenerated: parseFloat(manualMetrics.energy) || 0,
-                taxSavings: parseFloat(manualMetrics.tax) || 0,
+                wasteProcessed: parseDecimal(manualMetrics.waste),
+                energyGenerated: parseDecimal(manualMetrics.energy),
+                taxSavings: parseDecimal(manualMetrics.tax),
                 month: manualMetrics.month,
                 year: manualMetrics.year,
             })
@@ -545,11 +568,13 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             }));
 
             setMetricsModalVisible(false)
-            Alert.alert("Sucesso", `Métricas de ${months[monthIdx].label}/${yearVal} salvas!`)
+            showAlert("Sucesso", `Métricas de ${months[monthIdx].label}/${yearVal} salvas!`)
             loadDashboardData()
         } catch (err) {
             console.error('Save metrics error:', err)
-            Alert.alert("Erro", "Não foi possível salvar as métricas no sistema.")
+            showAlert("Erro", "Não foi possível salvar as métricas no sistema.")
+        } finally {
+            setSavingMetrics(false)
         }
     }
 
@@ -620,11 +645,11 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             setOrderModalVisible(false)
             const changed = changedOrder(oldOrder, newOrder)
             if (changed) {
-                Alert.alert("Sucesso", "Sua visão geral foi reordenada com sucesso")
+                showAlert("Sucesso", "Sua visão geral foi reordenada com sucesso")
             }
         } catch (e) {
             console.error('Error saving order', e)
-            Alert.alert('Erro', 'Não foi possível salvar a ordenação.')
+            showAlert('Erro', 'Não foi possível salvar a ordenação.')
         }
     }
 
@@ -644,7 +669,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             setCardOrder(DEFAULT_CARD_ORDER)
             setTempOrder(DEFAULT_CARD_ORDER)
             setOrderModalVisible(false)
-            Alert.alert("Sucesso", "Ordenamento restaurado ao padrão")
+            showAlert("Sucesso", "Ordenamento restaurado ao padrão")
         } catch (e) {
             console.error('Error resetting order', e)
         }
@@ -686,11 +711,15 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
     }
 
         const loadDashboardData = async () => {
+        setDashboardError(null)
         fetchMapMarkers()
         try {
             const IDEAL_RATIO = 0.8;
 
             const res = await indicatorsApi.fetch();
+            if (!res.success && !res.data) {
+                throw new Error(res.error || 'Não foi possível carregar os indicadores.');
+            }
             const allRows: any[] = res.data || [];
 
             const lastEditedStr = await AsyncStorage.getItem('@biodash_last_edited');
@@ -727,7 +756,9 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                     return d.getMonth() === lastEdited.month && d.getFullYear() === lastEdited.year;
                 });
             }
-            if (!current && allRows.length > 0) current = allRows[0];
+            if (!current && allRows.length > 0) {
+                current = selectMostRecentIndicator(allRows);
+            }
 
             // Pega o registro anterior para comparação (o próximo na lista descendente)
                         const currentIndex = allRows.indexOf(current);
@@ -801,7 +832,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             const maintRes = await maintenanceApi.fetchSchedules();
             if (maintRes.success && maintRes.data && maintRes.data.length > 0) {
                 const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
-                const activeSchedules = maintRes.data.filter((m: any) => m.status !== 'archived');
+                const activeSchedules = maintRes.data.filter((m: any) => m.status !== 'cancelled');
                 setMaintenances(activeSchedules.slice(0, 5).map((m: any) => {
                     const prLevel = ptMap[m.priority] || m.priority.split(' - ')[0];
                     return {
@@ -824,8 +855,9 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 setActiveIncident(null);
             }
 
-        } catch (err) {
+        } catch (err: any) {
             console.error('Error loading dashboard data:', err)
+            setDashboardError(err?.message || 'Não foi possível carregar os dados do painel.')
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -1040,7 +1072,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             }
         } catch (error: any) {
             console.error("Erro PDF:", error);
-            Alert.alert('Erro', 'Não foi possível gerar o PDF: ' + (error.message || String(error)));
+            showAlert('Erro', 'Não foi possível gerar o PDF: ' + (error.message || String(error)));
         } finally {
             setExportLoading(false);
         }
@@ -1085,7 +1117,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             }
         } catch (error: any) {
             console.error("Erro Excel:", error);
-            Alert.alert('Erro', 'Não foi possível gerar a planilha: ' + (error.message || String(error)));
+            showAlert('Erro', 'Não foi possível gerar a planilha: ' + (error.message || String(error)));
         } finally {
             setExportLoading(false);
         }
@@ -1128,7 +1160,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             }
         } catch (error: any) {
             console.error("Erro CSV:", error);
-            Alert.alert('Erro', 'Não foi possível gerar o CSV: ' + (error.message || String(error)));
+            showAlert('Erro', 'Não foi possível gerar o CSV: ' + (error.message || String(error)));
         } finally {
             setExportLoading(false);
         }
@@ -1136,8 +1168,13 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
 
     if (loading) {
         return (
-            <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
+            <View
+                style={[styles.loadingContainer, { backgroundColor: colors.background }]}
+                accessible
+                accessibilityLiveRegion="polite"
+                accessibilityLabel="Coletando sensores"
+            >
+                <ActivityIndicator size="large" color={colors.primary} accessibilityLabel="Coletando sensores" />
                 <Text style={[styles.loadingText, { color: colors.primary }]}>Coletando sensores...</Text>
             </View>
         )
@@ -1167,6 +1204,9 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
         return ['100%', '75%', '50%', '25%', '0%'];
     })();
 
+    const selectedChartPoint = selectedChartIndex !== null ? chartData[selectedChartIndex] : null;
+    const isDark = theme === 'dark';
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.background }}>
             <ScrollView
@@ -1175,25 +1215,67 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
                 <Animated.View style={fadeInStyle}>
+                    {dashboardError ? (
+                        <View
+                            style={{
+                                backgroundColor: colors.dangerBg,
+                                borderColor: colors.dangerBorder,
+                                borderWidth: 1,
+                                borderRadius: 12,
+                                padding: 14,
+                                marginBottom: 16,
+                                gap: 8,
+                            }}
+                            accessibilityRole="alert"
+                            accessibilityLiveRegion="assertive"
+                        >
+                            <Text style={{ color: colors.danger, fontWeight: '700', fontSize: 14 }}>
+                                Erro ao carregar dados do painel
+                            </Text>
+                            <Text style={{ color: colors.text, fontSize: 13 }}>{dashboardError}</Text>
+                            <TouchableOpacity
+                                onPress={() => void loadDashboardData()}
+                                style={{
+                                    alignSelf: 'flex-start',
+                                    backgroundColor: colors.primary,
+                                    paddingHorizontal: 14,
+                                    minHeight: 44,
+                                    justifyContent: 'center',
+                                    borderRadius: 8,
+                                }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Tentar carregar painel novamente"
+                            >
+                                <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 13 }}>
+                                    Tentar novamente
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : null}
+
                     {/* Header movido pro MainTabs App.tsx, então exibimos apenas um título local */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                         <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Dashboard</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]} accessibilityRole="header">Dashboard</Text>
                             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Visão geral do biodigestor.</Text>
                         </View>
                         <View style={{ flexDirection: 'row', gap: 8 }}>
                             <TouchableOpacity
-                                style={{ backgroundColor: colors.cardBackground, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' }}
+                                style={{ backgroundColor: colors.cardBackground, minWidth: 44, minHeight: 44, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' }}
                                 onPress={openOrderModal}
+                                accessibilityRole="button"
+                                accessibilityLabel="Reordenar cartões do painel"
                             >
-                                <MaterialCommunityIcons name="sort-variant" size={20} color={colors.text} />
+                                <MaterialCommunityIcons name="sort-variant" size={20} color={colors.text} importantForAccessibility="no" />
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={{ backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                                style={{ backgroundColor: colors.primary, minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
                                 onPress={() => setMetricsModalVisible(true)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Atualizar métricas manualmente"
                             >
-                                <MaterialCommunityIcons name="pencil-outline" size={14} color="#fff" />
-                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Atualizar</Text>
+                                <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.onPrimary} importantForAccessibility="no" />
+                                <Text style={{ color: colors.onPrimary, fontSize: 13, fontWeight: 'bold' }}>Atualizar</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1203,16 +1285,27 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                             onPress={() => setShowMonthPicker(true)}
                             activeOpacity={0.7}
                             style={{
-                                marginBottom: 12, paddingHorizontal: 10, paddingVertical: 8,
-                                flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
-                                borderRadius: 8, borderWidth: 1, borderColor: colors.primary,
+                                marginBottom: 12,
+                                minHeight: 44,
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                alignSelf: 'flex-start',
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: colors.primary,
+                                backgroundColor: colors.cardBackground,
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Dados referentes a ${referenceDate}. Toque para alterar o mês.`}
+                            accessibilityState={{ expanded: showMonthPicker }}
                         >
-                            <MaterialCommunityIcons name="calendar-month" size={14} color={colors.primary} />
+                            <MaterialCommunityIcons name="calendar-month" size={16} color={colors.primary} importantForAccessibility="no" />
                             <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13, marginLeft: 6 }}>
                                 Dados referentes a {referenceDate}
                             </Text>
-                            <MaterialCommunityIcons name="chevron-down" size={18} color={colors.primary} style={{ marginLeft: 4 }} />
+                            <MaterialCommunityIcons name="chevron-down" size={18} color={colors.primary} style={{ marginLeft: 4 }} importantForAccessibility="no" />
                         </TouchableOpacity>
                     ) : null}
 
@@ -1220,13 +1313,13 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         {cardOrder.map((key) => {
                             switch (key) {
                                 case 'waste':
-                                    return <StatCard key="waste" title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" iconProvider="MaterialCommunityIcons" color="#22c55e" bgColor="#dcfce7" />
+                                    return <StatCard key="waste" title="Resíduos" value={data.waste.value.toFixed(1)} unit="kg" changePercent={data.waste.changePercent} increasing={data.waste.increasing} iconName="water-outline" color={isDark ? '#4ade80' : '#15803d'} bgColor="#dcfce7" />
                                 case 'energy':
-                                    return <StatCard key="energy" title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" iconProvider="MaterialCommunityIcons" color="#eab308" bgColor="#fef9c3" />
+                                    return <StatCard key="energy" title="Energia" value={data.energy.value.toFixed(1)} unit="kWh" changePercent={data.energy.changePercent} increasing={data.energy.increasing} iconName="lightning-bolt" color={isDark ? '#facc15' : '#a16207'} bgColor="#fef9c3" />
                                 case 'tax':
-                                    return <StatCard key="tax" title="Benefícios Aplicáveis" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" iconProvider="MaterialCommunityIcons" color="#3b82f6" bgColor="#dbeafe" />
+                                    return <StatCard key="tax" title="Benefícios Aplicáveis" value={`R$ ${data.tax.value.toFixed(0)}`} unit="" changePercent={data.tax.changePercent} increasing={data.tax.increasing} iconName="currency-usd" color={isDark ? '#60a5fa' : '#1d4ed8'} bgColor="#dbeafe" />
                                 case 'efficiency':
-                                    return <StatCard key="efficiency" title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" iconProvider="MaterialCommunityIcons" color="#16a34a" bgColor="#bbf7d0" />
+                                    return <StatCard key="efficiency" title="Eficiência" value={data.efficiency.value.toFixed(1)} unit="%" changePercent={data.efficiency.changePercent} increasing={data.efficiency.increasing} iconName="leaf" color={isDark ? '#34d399' : '#047857'} bgColor="#bbf7d0" />
                                 default:
                                     return null
                             }
@@ -1234,46 +1327,68 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                     </View>
 
                     {/* Visão Geral (Múltiplas Métricas) */}
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Visão Geral de Desempenho</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]} accessibilityRole="header">
+                        Visão Geral de Desempenho
+                    </Text>
                     <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Comparativo de Energia, Resíduos e Benefícios Aplicáveis.</Text>
 
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
-                        <TouchableOpacity style={[styles.tab, isHighlight('all') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('all')}>
-                            <Text style={[styles.tabText, isHighlight('all') ? { color: '#fff' } : { color: colors.textMuted }]}>Todas Métricas</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer} accessibilityRole="tablist">
+                        <TouchableOpacity
+                            style={[styles.tab, { backgroundColor: isHighlight('all') ? colors.primary : colors.iconBg }]}
+                            onPress={() => setSelectedTab('all')}
+                            accessibilityRole="tab"
+                            accessibilityLabel="Todas Métricas"
+                            accessibilityState={{ selected: isHighlight('all') }}
+                        >
+                            <Text style={[styles.tabText, { color: isHighlight('all') ? colors.onPrimary : colors.text }]}>Todas Métricas</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={[styles.tab, isHighlight('waste') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('waste')}>
-                            <Text style={[styles.tabText, isHighlight('waste') ? { color: '#fff' } : { color: colors.textMuted }]}>Resíduos</Text>
+                        <TouchableOpacity
+                            style={[styles.tab, { backgroundColor: isHighlight('waste') ? colors.primary : colors.iconBg }]}
+                            onPress={() => setSelectedTab('waste')}
+                            accessibilityRole="tab"
+                            accessibilityLabel="Resíduos"
+                            accessibilityState={{ selected: isHighlight('waste') }}
+                        >
+                            <Text style={[styles.tabText, { color: isHighlight('waste') ? colors.onPrimary : colors.text }]}>Resíduos</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={[styles.tab, isHighlight('energy') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('energy')}>
-                            <Text style={[styles.tabText, isHighlight('energy') ? { color: '#fff' } : { color: colors.textMuted }]}>Energia</Text>
+                        <TouchableOpacity
+                            style={[styles.tab, { backgroundColor: isHighlight('energy') ? colors.primary : colors.iconBg }]}
+                            onPress={() => setSelectedTab('energy')}
+                            accessibilityRole="tab"
+                            accessibilityLabel="Energia"
+                            accessibilityState={{ selected: isHighlight('energy') }}
+                        >
+                            <Text style={[styles.tabText, { color: isHighlight('energy') ? colors.onPrimary : colors.text }]}>Energia</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={[styles.tab, isHighlight('tax') && { backgroundColor: colors.primary }]} onPress={() => setSelectedTab('tax')}>
-                            <Text style={[styles.tabText, isHighlight('tax') ? { color: '#fff' } : { color: colors.textMuted }]}>Benefícios Aplicáveis</Text>
+                        <TouchableOpacity
+                            style={[styles.tab, { backgroundColor: isHighlight('tax') ? colors.primary : colors.iconBg }]}
+                            onPress={() => setSelectedTab('tax')}
+                            accessibilityRole="tab"
+                            accessibilityLabel="Benefícios Aplicáveis"
+                            accessibilityState={{ selected: isHighlight('tax') }}
+                        >
+                            <Text style={[styles.tabText, { color: isHighlight('tax') ? colors.onPrimary : colors.text }]}>Benefícios Aplicáveis</Text>
                         </TouchableOpacity>
                     </ScrollView>
 
                     <View style={[styles.card, { backgroundColor: colors.cardBackground, marginTop: 16 }]}>
                         {selectedTab === 'all' && (
                             <View style={styles.legendRow}>
-                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#eab308' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Energia</Text></View>
-                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#22c55e' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Resíduos</Text></View>
-                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: '#3b82f6' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Benefícios Aplicáveis</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: isDark ? '#facc15' : '#ca8a04' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Energia</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: isDark ? '#4ade80' : '#15803d' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Resíduos</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendColor, { backgroundColor: isDark ? '#60a5fa' : '#1d4ed8' }]} /><Text style={[styles.legendText, { color: colors.textMuted }]}>Benefícios Aplicáveis</Text></View>
                             </View>
                         )}
 
                         <ViewShot ref={chartRef} options={{ format: "jpg", quality: 0.9, result: 'base64' }}>
-                            <TouchableOpacity
-                                activeOpacity={1}
-                                onPress={() => setSelectedChartIndex(null)}
-                                style={[styles.chartMockup, { backgroundColor: colors.cardBackground, paddingLeft: 36, position: 'relative' }]}
-                            >
+                            <View style={[styles.chartMockup, { backgroundColor: colors.cardBackground, paddingLeft: 36, position: 'relative' }]}>
                                 {/* Grid Horizontal com Valores (Eixo Y) e Linhas Verticais */}
                                 {chartData.length > 0 && (
-                                    <View style={{ position: 'absolute', top: 0, bottom: 20, left: 4, right: 4, zIndex: 0 }} pointerEvents="none">
+                                    <View style={{ position: 'absolute', top: 0, bottom: 20, left: 4, right: 4, zIndex: 0 }} pointerEvents="none" importantForAccessibility="no-hide-descendants">
                                         <View style={{ flex: 1, justifyContent: 'space-between' }}>
                                             {chartAxisLabels.map((valStr, idx) => (
                                                 <View key={idx} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                    <Text style={{ width: 26, fontSize: 9, color: colors.textMuted, textAlign: 'right', marginRight: 4 }} numberOfLines={1}>{valStr}</Text>
+                                                    <Text style={{ width: 28, fontSize: 10, color: colors.textMuted, textAlign: 'right', marginRight: 4 }} numberOfLines={1}>{valStr}</Text>
                                                     <View style={{ flex: 1, height: 1, backgroundColor: colors.border, opacity: 0.3 }} />
                                                 </View>
                                             ))}
@@ -1292,9 +1407,6 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                     </View>
                                 ) : (
                                     chartData.map((point, index) => {
-                                        // Vamos calcular proporções para a altura da barra ser pelo menos visível.
-                                        // Isso é uma simplificação para fins visuais no RN, usando um "teto" flexível
-                                        // igual fizemos no mock anterior, limitando a 100% de altura para não quebrar o layout.
                                         const hEnergy = Math.min(Math.max((point.energyGenerated / currentMaxEnergy) * 100, 5), 100);
                                         const hWaste = Math.min(Math.max((point.wasteProcessed / currentMaxWaste) * 100, 5), 100);
                                         const hTax = Math.min(Math.max((point.taxDeduction / currentMaxTax) * 100, 5), 100);
@@ -1317,34 +1429,77 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         );
                                     })
                                 )}
-                            </TouchableOpacity>
+                            </View>
                         </ViewShot>
+
+                        {selectedChartPoint && (
+                            <View
+                                style={{
+                                    marginTop: 12,
+                                    padding: 10,
+                                    borderRadius: 10,
+                                    backgroundColor: colors.background,
+                                    borderWidth: 1,
+                                    borderColor: colors.border,
+                                    flexDirection: 'row',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                    gap: 8,
+                                }}
+                                accessibilityLiveRegion="polite"
+                            >
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>
+                                    {selectedChartPoint.name}:
+                                </Text>
+                                {(selectedTab === 'all' || selectedTab === 'energy') && (
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#facc15' : '#a16207' }}>
+                                        Energia {selectedChartPoint.energyGenerated} kWh
+                                    </Text>
+                                )}
+                                {(selectedTab === 'all' || selectedTab === 'waste') && (
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#4ade80' : '#15803d' }}>
+                                        Resíduos {selectedChartPoint.wasteProcessed} kg
+                                    </Text>
+                                )}
+                                {(selectedTab === 'all' || selectedTab === 'tax') && (
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#60a5fa' : '#1d4ed8' }}>
+                                        Benefícios R$ {selectedChartPoint.taxDeduction}
+                                    </Text>
+                                )}
+                            </View>
+                        )}
                     </View>
 
                     {/* Incidentes de Manutenção */}
                     {activeIncident && (
-                        <View style={{ backgroundColor: '#fef2f2', borderColor: '#ef4444', borderWidth: 1, padding: 16, borderRadius: 12, marginBottom: 24, flexDirection: 'row', alignItems: 'flex-start', marginTop: 16 }}>
-                            <MaterialCommunityIcons name="alert-circle" size={28} color="#ef4444" style={{ marginRight: 12, marginTop: 2 }} />
+                        <View
+                            style={{ backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder, borderWidth: 1, padding: 16, borderRadius: 12, marginBottom: 24, flexDirection: 'row', alignItems: 'flex-start', marginTop: 16 }}
+                            accessibilityRole="alert"
+                        >
+                            <MaterialCommunityIcons name="alert-circle" size={28} color={colors.danger} style={{ marginRight: 12, marginTop: 2 }} importantForAccessibility="no" />
                             <View style={{ flex: 1 }}>
-                                <Text style={{ color: '#991b1b', fontWeight: 'bold', fontSize: 15, marginBottom: 4 }}>
+                                <Text style={{ color: colors.danger, fontWeight: 'bold', fontSize: 15, marginBottom: 4 }} accessibilityRole="header">
                                     Incidente Operacional Detectado
                                 </Text>
-                                <Text style={{ color: '#b91c1c', fontSize: 13, lineHeight: 18 }}>
+                                <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
                                     Foi detectado {activeIncident.notifications_sent || 'múltiplos'} alertas críticos de temperatura. Uma inspeção técnica é fortemente recomendada.
                                 </Text>
                                 {activeIncident.first_alert_at && (
-                                    <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700', marginTop: 8 }}>
+                                    <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700', marginTop: 8 }}>
                                         Primeiro alerta: {new Date(activeIncident.first_alert_at).toLocaleString('pt-BR')}
                                     </Text>
                                 )}
                                 {activeIncident.last_alert_at && (
-                                    <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700', marginTop: 8 }}>
+                                    <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700', marginTop: 4 }}>
                                         Último alerta: {new Date(activeIncident.last_alert_at).toLocaleString('pt-BR')}
                                     </Text>
                                 )}
-                                <TouchableOpacity 
-                                    style={{ marginTop: 12, backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, alignItems: 'center' }}
+                                <TouchableOpacity
+                                    style={{ marginTop: 12, backgroundColor: '#b91c1c', minHeight: 44, justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, alignItems: 'center' }}
                                     onPress={() => setIncidentResolveModalVisible(true)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Marcar alerta como resolvido"
                                 >
                                     <Text style={{ color: '#fff', fontWeight: 'bold' }}>Marcar alerta como resolvido</Text>
                                 </TouchableOpacity>
@@ -1363,7 +1518,9 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         }}
                     >
                         <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 0 }]}>Manutenções Agendadas</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 0 }]} accessibilityRole="header">
+                                Manutenções Agendadas
+                            </Text>
                             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Desempenho operacional em tempo real.</Text>
                         </View>
                         <TouchableOpacity
@@ -1373,7 +1530,8 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                             }}
                             style={{
                                 backgroundColor: colors.cardBackground,
-                                paddingHorizontal: 12,
+                                minHeight: 44,
+                                paddingHorizontal: 14,
                                 paddingVertical: 8,
                                 borderRadius: 8,
                                 borderWidth: 1,
@@ -1383,70 +1541,123 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                 alignItems: 'center',
                                 justifyContent: 'center',
                             }}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Exibir manutenções arquivadas"
                         >
-                            <Text style={{ color: colors.primary, fontSize: 12, fontWeight: 'bold' }} numberOfLines={1}>Exibir arquivadas</Text>
+                            <Text style={{ color: colors.primary, fontSize: 13, fontWeight: 'bold' }} numberOfLines={1}>Exibir arquivadas</Text>
                         </TouchableOpacity>
                     </View>
                     <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
-                        {maintenances.map((item, index) => (
-                            <React.Fragment key={item.id}>
-                                <TouchableOpacity
-                                    style={styles.maintenanceItem}
-                                    activeOpacity={0.7}
-                                    onLongPress={() => {
-                                        setSelectedMaintenance(item);
-                                        setActionModalVisible(true);
-                                    }}
-                                    delayLongPress={250}
-                                >
-                                    <View style={[styles.maintenanceDot, item.status === 'done' && { backgroundColor: '#16a34a' }]} />
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
-                                        <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>{item.date}</Text>
+                        {maintenances.length === 0 ? (
+                            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 12 }}>
+                                Nenhuma manutenção agendada.
+                            </Text>
+                        ) : (
+                            maintenances.map((item, index) => (
+                                <React.Fragment key={item.id}>
+                                    <View style={styles.maintenanceItem}>
+                                        <TouchableOpacity
+                                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 44 }}
+                                            activeOpacity={0.7}
+                                            onPress={() => {
+                                                setSelectedMaintenance(item);
+                                                setActionModalVisible(true);
+                                            }}
+                                            onLongPress={() => {
+                                                setSelectedMaintenance(item);
+                                                setActionModalVisible(true);
+                                            }}
+                                            delayLongPress={250}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`${item.title}, agendada para ${item.date}, status ${item.status === 'pending' ? 'Pendente' : 'Concluído'}`}
+                                            accessibilityHint="Toque para abrir opções de edição, conclusão ou exclusão"
+                                        >
+                                            <View style={[styles.maintenanceDot, item.status === 'completed' && { backgroundColor: '#15803d' }]} importantForAccessibility="no" />
+                                            <View style={{ flex: 1, marginRight: 8 }}>
+                                                <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
+                                                <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>{item.date}</Text>
+                                            </View>
+                                            <Text style={item.status === 'pending' ? styles.statusPending : [styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>
+                                                {item.status === 'pending' ? 'Pendente' : 'Concluído'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginLeft: 4 }}
+                                            onPress={() => {
+                                                setSelectedMaintenance(item);
+                                                setActionModalVisible(true);
+                                            }}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`Opções para ${item.title}`}
+                                        >
+                                            <MaterialCommunityIcons name="dots-vertical" size={20} color={colors.textMuted} importantForAccessibility="no" />
+                                        </TouchableOpacity>
                                     </View>
-                                    <Text style={item.status === 'pending' ? styles.statusPending : [styles.statusDone, { backgroundColor: colors.primaryLight, color: colors.primaryDark }]}>
-                                        {item.status === 'pending' ? 'Pendente' : 'Concluído'}
-                                    </Text>
-                                </TouchableOpacity>
-                                {index < maintenances.length - 1 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
-                            </React.Fragment>
-                        ))}
+                                    {index < maintenances.length - 1 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
+                                </React.Fragment>
+                            ))
+                        )}
                     </View>
 
                     {/* Exportar Relatórios (Movido para antes do mapa) */}
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]}>Exportar Relatórios</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 32 }]} accessibilityRole="header">
+                        Exportar Relatórios
+                    </Text>
                     <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Gere métricas oficiais para análise externa.</Text>
                     <View style={[styles.gridExport, { marginBottom: 12 }]}>
                         <TouchableOpacity
-                            style={[styles.exportCard, { borderColor: '#fca5a5', backgroundColor: '#fef2f2' }]}
+                            style={[
+                                styles.exportCard,
+                                {
+                                    borderColor: isDark ? '#991b1b' : '#fca5a5',
+                                    backgroundColor: isDark ? '#450a0a' : '#fef2f2',
+                                },
+                            ]}
                             onPress={() => {
                                 setPendingExportType("pdf");
                                 setExportModalVisible(true);
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Gerar relatório em PDF"
                         >
-                            <MaterialCommunityIcons name="file-pdf-box" size={28} color="#dc2626" style={{ marginBottom: 8 }} />
-                            <Text style={[styles.exportText, { color: '#dc2626' }]}>Gerar PDF</Text>
+                            <MaterialCommunityIcons name="file-pdf-box" size={28} color={isDark ? '#fca5a5' : '#b91c1c'} style={{ marginBottom: 8 }} importantForAccessibility="no" />
+                            <Text style={[styles.exportText, { color: isDark ? '#fca5a5' : '#b91c1c' }]}>Gerar PDF</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.exportCard, { borderColor: '#86efac', backgroundColor: '#f0fdf4' }]}
+                            style={[
+                                styles.exportCard,
+                                {
+                                    borderColor: isDark ? '#166534' : '#86efac',
+                                    backgroundColor: isDark ? '#052e16' : '#f0fdf4',
+                                },
+                            ]}
                             onPress={() => {
                                 setPendingExportType("excel");
                                 setExportModalVisible(true);
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Gerar relatório em Excel"
                         >
-                            <MaterialCommunityIcons name="file-excel-box" size={28} color="#16a34a" style={{ marginBottom: 8 }} />
-                            <Text style={[styles.exportText, { color: '#16a34a' }]}>Gerar Excel</Text>
+                            <MaterialCommunityIcons name="file-excel-box" size={28} color={isDark ? '#86efac' : '#15803d'} style={{ marginBottom: 8 }} importantForAccessibility="no" />
+                            <Text style={[styles.exportText, { color: isDark ? '#86efac' : '#15803d' }]}>Gerar Excel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.exportCard, { borderColor: '#93c5fd', backgroundColor: '#eff6ff' }]}
+                            style={[
+                                styles.exportCard,
+                                {
+                                    borderColor: isDark ? '#1e40af' : '#93c5fd',
+                                    backgroundColor: isDark ? '#082f49' : '#eff6ff',
+                                },
+                            ]}
                             onPress={() => {
                                 setPendingExportType("csv");
                                 setExportModalVisible(true);
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Gerar relatório em CSV"
                         >
-                            <MaterialCommunityIcons name="file-delimited" size={28} color="#2563eb" style={{ marginBottom: 8 }} />
-                            <Text style={[styles.exportText, { color: '#2563eb' }]}>Gerar CSV</Text>
+                            <MaterialCommunityIcons name="file-delimited" size={28} color={isDark ? '#7dd3fc' : '#1d4ed8'} style={{ marginBottom: 8 }} importantForAccessibility="no" />
+                            <Text style={[styles.exportText, { color: isDark ? '#7dd3fc' : '#1d4ed8' }]}>Gerar CSV</Text>
                         </TouchableOpacity>
                     </View>
 
@@ -1460,7 +1671,9 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         }}
                     >
                         <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Localização da Empresa</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]} accessibilityRole="header">
+                                Localização da Empresa
+                            </Text>
                             <Text style={[styles.sectionSub, { color: colors.textMuted }]}>Unidade ativa do biodigestor.</Text>
                         </View>
                         <View
@@ -1477,6 +1690,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                             <TouchableOpacity
                                 style={{
                                     backgroundColor: colors.primary,
+                                    minHeight: 44,
                                     paddingHorizontal: 12,
                                     paddingVertical: 8,
                                     borderRadius: 8,
@@ -1487,14 +1701,16 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                     justifyContent: 'center',
                                 }}
                                 onPress={() => handleOpenDistanceModal()}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Calcular distância entre biodigestores"
                             >
-                                <MaterialCommunityIcons name="ruler" size={16} color="#fff" />
-                                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }} numberOfLines={1}>Calcular distância</Text>
+                                <MaterialCommunityIcons name="ruler" size={16} color={colors.onPrimary} importantForAccessibility="no" />
+                                <Text style={{ color: colors.onPrimary, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>Calcular distância</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={{
-                                    backgroundColor: '#16a34a',
+                                    backgroundColor: colors.primary,
+                                    minHeight: 44,
                                     paddingHorizontal: 12,
                                     paddingVertical: 8,
                                     borderRadius: 8,
@@ -1513,178 +1729,258 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                     setMarkerComplement('');
                                     setMapModalVisible(true);
                                 }}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Adicionar marcador no mapa"
                             >
-                                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
+                                <Text style={{ color: colors.onPrimary, fontSize: 13, fontWeight: '600' }}>+ Adicionar</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 </Animated.View>
 
                 {/* Map Add Modal */}
-                <Modal visible={isMapModalVisible} transparent animationType="fade">
-                    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
-                        <View style={{ backgroundColor: colors.cardBackground, width: '90%', padding: 24, borderRadius: 16 }}>
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Novo Marcador de Instalação</Text>
-                            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>Busque pelo CEP ou preencha o local do equipamento.</Text>
-
-                            <View style={{ marginBottom: 16 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nome do Equipamento / Cliente</Text>
-                                <TextInput
-                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
-                                    placeholder="Ex: Unidade Sul"
-                                    placeholderTextColor={colors.textMuted}
-                                    value={markerName}
-                                    onChangeText={setMarkerName}
-                                />
-                            </View>
-
-                            <View style={{ marginBottom: 16 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>CEP</Text>
-                                    {cepLoading && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />}
+                <Modal
+                    visible={isMapModalVisible}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => {
+                        if (savingMarker) return;
+                        setMapModalVisible(false);
+                        setMarkerEditingId(null);
+                    }}
+                >
+                    <KeyboardAvoidingView
+                        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 }}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    >
+                        <View
+                            accessibilityViewIsModal
+                            style={{ backgroundColor: colors.cardBackground, width: '100%', maxWidth: 440, maxHeight: '90%', padding: 24, borderRadius: 16 }}
+                        >
+                            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                                <View style={styles.modalHeader}>
+                                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, flex: 1 }} accessibilityRole="header">
+                                        {markerEditingId ? 'Editar Marcador' : 'Novo Marcador de Instalação'}
+                                    </Text>
+                                    <TouchableOpacity
+                                        style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                        onPress={() => {
+                                            if (savingMarker) return;
+                                            setMapModalVisible(false);
+                                            setMarkerEditingId(null);
+                                        }}
+                                        disabled={savingMarker}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Fechar formulário de marcador"
+                                    >
+                                        <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
+                                    </TouchableOpacity>
                                 </View>
-                                <TextInput
-                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
-                                    placeholder="00000-000"
-                                    placeholderTextColor={colors.textMuted}
-                                    keyboardType="numeric"
-                                    value={markerCep}
-                                    onChangeText={(text) => {
-                                        // Máscara XXXXX-XXX
-                                        const digits = text.replace(/\D/g, '').slice(0, 8);
-                                        const masked = digits.replace(/(\d{5})(\d)/, '$1-$2');
-                                        setMarkerCep(masked);
-                                        if (digits.length === 8) {
-                                            handleFetchCep(masked);
-                                        }
-                                    }}
-                                />
-                            </View>
+                                <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>Busque pelo CEP ou preencha o local do equipamento.</Text>
 
-                            <View style={{ marginBottom: 16 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço</Text>
-                                <TextInput
-                                    style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
-                                    placeholder="Rua, Bairro..."
-                                    placeholderTextColor={colors.textMuted}
-                                    value={markerAddress}
-                                    onChangeText={setMarkerAddress}
-                                />
-                            </View>
-
-                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nº</Text>
+                                <View style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nome do Equipamento / Cliente *</Text>
                                     <TextInput
-                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
-                                        placeholder="123"
+                                        style={{ borderWidth: 1, borderColor: colors.inputBorder, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                        placeholder="Ex: Unidade Sul"
+                                        placeholderTextColor={colors.textMuted}
+                                        returnKeyType="next"
+                                        accessibilityLabel="Nome do Equipamento ou Cliente obrigatório"
+                                        value={markerName}
+                                        onChangeText={setMarkerName}
+                                    />
+                                </View>
+
+                                <View style={{ marginBottom: 16 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>CEP</Text>
+                                        {cepLoading && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} accessibilityLabel="Buscando CEP" />}
+                                    </View>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: colors.inputBorder, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                        placeholder="00000-000"
                                         placeholderTextColor={colors.textMuted}
                                         keyboardType="numeric"
-                                        value={markerNumber}
-                                        onChangeText={setMarkerNumber}
+                                        maxLength={9}
+                                        returnKeyType="next"
+                                        accessibilityLabel="CEP"
+                                        value={markerCep}
+                                        onChangeText={(text) => {
+                                            const digits = text.replace(/\D/g, '').slice(0, 8);
+                                            const masked = digits.replace(/(\d{5})(\d)/, '$1-$2');
+                                            setMarkerCep(masked);
+                                            if (digits.length === 8) {
+                                                handleFetchCep(masked);
+                                            }
+                                        }}
                                     />
                                 </View>
-                                <View style={{ flex: 2 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Complemento</Text>
+
+                                <View style={{ marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Endereço *</Text>
                                     <TextInput
-                                        style={{ borderWidth: 1, borderColor: colors.border, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
-                                        placeholder="Opcional (Ex: Km 42)"
+                                        style={{ borderWidth: 1, borderColor: colors.inputBorder, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14, backgroundColor: colors.background }}
+                                        placeholder="Rua, Bairro..."
                                         placeholderTextColor={colors.textMuted}
-                                        value={markerComplement}
-                                        onChangeText={setMarkerComplement}
+                                        returnKeyType="next"
+                                        accessibilityLabel="Endereço obrigatório"
+                                        value={markerAddress}
+                                        onChangeText={setMarkerAddress}
                                     />
                                 </View>
-                            </View>
 
-                            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
-                                <TouchableOpacity onPress={() => { setMapModalVisible(false); setMarkerEditingId(null); }} style={{ padding: 10, paddingHorizontal: 16 }}>
-                                    <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Cancelar</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={async () => {
-                                        let lat: number | undefined, lon: number | undefined;
-                                        try {
-                                            setCepLoading(true);
-                                            const headers = {
-                                                'User-Agent': 'BioDashMobileApp/1.0',
-                                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
-                                            };
+                                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Nº</Text>
+                                        <TextInput
+                                            style={{ borderWidth: 1, borderColor: colors.inputBorder, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                            placeholder="123 ou S/N"
+                                            placeholderTextColor={colors.textMuted}
+                                            returnKeyType="next"
+                                            accessibilityLabel="Número do endereço"
+                                            value={markerNumber}
+                                            onChangeText={setMarkerNumber}
+                                        />
+                                    </View>
+                                    <View style={{ flex: 2 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Complemento</Text>
+                                        <TextInput
+                                            style={{ borderWidth: 1, borderColor: colors.inputBorder, padding: 12, borderRadius: 10, color: colors.text, fontSize: 14 }}
+                                            placeholder="Opcional (Ex: Km 42)"
+                                            placeholderTextColor={colors.textMuted}
+                                            returnKeyType="done"
+                                            accessibilityLabel="Complemento opcional"
+                                            value={markerComplement}
+                                            onChangeText={setMarkerComplement}
+                                        />
+                                    </View>
+                                </View>
 
-                                            // Geocodificação: Faz a busca da latitude e longitude também na edição (caso tenham mudado CEP ou endereço)
-                                            // Antes estava preso no if (!markerEditingId), o que ignorava a atualização das coordenadas
-                                            const cleanAddress = markerAddress.replace(/[-/]/g, ',');
-                                            const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
-                                            let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
-                                            let geoData = await geoRes.json();
+                                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                                    <TouchableOpacity
+                                        onPress={() => { setMapModalVisible(false); setMarkerEditingId(null); }}
+                                        disabled={savingMarker}
+                                        style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Cancelar"
+                                        accessibilityState={{ disabled: savingMarker }}
+                                    >
+                                        <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Cancelar</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        disabled={savingMarker}
+                                        onPress={async () => {
+                                            if (!markerName.trim() || !markerAddress.trim()) {
+                                                showAlert("Aviso", "Informe o nome do equipamento e o endereço antes de salvar.");
+                                                return;
+                                            }
+                                            let lat: number | undefined, lon: number | undefined;
+                                            setSavingMarker(true);
+                                            try {
+                                                const headers = {
+                                                    'User-Agent': 'BioDashMobileApp/1.0',
+                                                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+                                                };
 
-                                            if (geoData && geoData.length > 0) {
-                                                lat = parseFloat(geoData[0].lat);
-                                                lon = parseFloat(geoData[0].lon);
-                                            } else if (markerCep) {
-                                                geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
-                                                geoData = await geoRes.json();
+                                                const cleanAddress = markerAddress.replace(/[-/]/g, ',');
+                                                const addressQuery = `${cleanAddress}, ${markerNumber || ''}, Brasil`;
+                                                let geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressQuery)}`, { headers });
+                                                let geoData = await geoRes.json();
+
                                                 if (geoData && geoData.length > 0) {
                                                     lat = parseFloat(geoData[0].lat);
                                                     lon = parseFloat(geoData[0].lon);
-                                                }
-                                            }
-
-                                            const user = await authLib.getUser();
-                                            if (user) {
-                                                const addressFull = `${markerAddress}${markerNumber ? ', ' + markerNumber : ''}${markerComplement ? ' - ' + markerComplement : ''}, ${markerCep}, Brasil`.replace(/'/g, "");
-                                                const addressJson = {
-                                                    cep: markerCep,
-                                                    street: markerAddress,
-                                                    number: markerNumber,
-                                                    complement: markerComplement
-                                                };
-
-                                                const markerPayload = {
-                                                    id: markerEditingId,
-                                                    userId: user.id,
-                                                    title: markerName,
-                                                    description: addressFull,
-                                                    latitude: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : 0),
-                                                    longitude: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : 0),
-                                                    address: addressJson
-                                                };
-
-                                                const res = await markersApi.save(markerPayload);
-                                                if (res.success && res.data) {
-                                                    await fetchMapMarkers((res.data._id || res.data.id)?.toString());
-                                                } else {
-                                                    await fetchMapMarkers();
+                                                } else if (markerCep) {
+                                                    geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${markerCep}, Brasil`)}`, { headers });
+                                                    geoData = await geoRes.json();
+                                                    if (geoData && geoData.length > 0) {
+                                                        lat = parseFloat(geoData[0].lat);
+                                                        lon = parseFloat(geoData[0].lon);
+                                                    }
                                                 }
 
-                                                setMapModalVisible(false);
-                                                setMarkerEditingId(null);
-                                                setMarkerName(''); setMarkerCep(''); setMarkerAddress(''); setMarkerNumber(''); setMarkerComplement('');
-                                                setTimeout(() => Alert.alert("Sucesso", "Localização salva!"), 500);
+                                                const user = await authLib.getUser();
+                                                if (user) {
+                                                    const addressFull = `${markerAddress.trim()}${markerNumber.trim() ? ', ' + markerNumber.trim() : ''}${markerComplement.trim() ? ' - ' + markerComplement.trim() : ''}${markerCep ? ', ' + markerCep : ''}, Brasil`.replace(/'/g, "");
+                                                    const addressJson = {
+                                                        cep: markerCep,
+                                                        street: markerAddress.trim(),
+                                                        number: markerNumber.trim(),
+                                                        complement: markerComplement.trim()
+                                                    };
+
+                                                    const markerPayload = {
+                                                        id: markerEditingId,
+                                                        userId: user.id,
+                                                        title: markerName.trim(),
+                                                        description: addressFull,
+                                                        latitude: lat || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.latitude : 0),
+                                                        longitude: lon || (markerEditingId ? mapMarkers.find(x => x.id === markerEditingId)?.longitude : 0),
+                                                        address: addressJson
+                                                    };
+
+                                                    const res = await markersApi.save(markerPayload);
+                                                    if (res.success && res.data) {
+                                                        await fetchMapMarkers((res.data._id || res.data.id)?.toString());
+                                                    } else {
+                                                        await fetchMapMarkers();
+                                                    }
+
+                                                    setMapModalVisible(false);
+                                                    setMarkerEditingId(null);
+                                                    setMarkerName(''); setMarkerCep(''); setMarkerAddress(''); setMarkerNumber(''); setMarkerComplement('');
+                                                    showAlert("Sucesso", "Localização salva!");
+                                                }
+                                            } catch (e: any) {
+                                                showAlert("Erro", "Falha ao salvar: " + e.message);
+                                            } finally {
+                                                setSavingMarker(false);
                                             }
-                                        } catch (e: any) {
-                                            Alert.alert("Erro", "Falha ao salvar: " + e.message);
-                                        } finally {
-                                            setCepLoading(false);
-                                        }
-                                    }}
-                                    style={{ backgroundColor: '#16a34a', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 }}
-                                >
-                                    {cepLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{markerEditingId ? 'Atualizar Dados' : 'Salvar no Mapa'}</Text>}
-                                </TouchableOpacity>
-                            </View>
+                                        }}
+                                        style={{ backgroundColor: colors.primary, minHeight: 44, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, opacity: savingMarker ? 0.7 : 1 }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={savingMarker ? 'Salvando marcador, aguarde' : (markerEditingId ? 'Atualizar Dados' : 'Salvar no Mapa')}
+                                        accessibilityState={{ disabled: savingMarker, busy: savingMarker }}
+                                    >
+                                        {savingMarker ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={{ color: colors.onPrimary, fontWeight: 'bold', fontSize: 15 }}>{markerEditingId ? 'Atualizar Dados' : 'Salvar no Mapa'}</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            </ScrollView>
                         </View>
-                    </View>
+                    </KeyboardAvoidingView>
                 </Modal>
 
                 {/* Distance Calculation Modal */}
-                <Modal visible={isDistanceModalVisible} transparent animationType="fade">
+                <Modal
+                    visible={isDistanceModalVisible}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => {
+                        setDistanceModalVisible(false);
+                        setDistanceSourceId(null);
+                        setDistanceTargetId(null);
+                    }}
+                >
                     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
-                        <View style={{ backgroundColor: colors.cardBackground, width: '92%', padding: 24, borderRadius: 16, maxHeight: '85%' }}>
+                        <View accessibilityViewIsModal style={{ backgroundColor: colors.cardBackground, width: '92%', padding: 24, borderRadius: 16, maxHeight: '85%' }}>
                             <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
-                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>
-                                    Calcular Distância entre Biodigestores
-                                </Text>
+                                <View style={styles.modalHeader}>
+                                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, flex: 1 }} accessibilityRole="header">
+                                        Calcular Distância entre Biodigestores
+                                    </Text>
+                                    <TouchableOpacity
+                                        style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                        onPress={() => {
+                                            setDistanceModalVisible(false);
+                                            setDistanceSourceId(null);
+                                            setDistanceTargetId(null);
+                                        }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Fechar cálculo de distância"
+                                    >
+                                        <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
+                                    </TouchableOpacity>
+                                </View>
                                 <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>
                                     Selecione dois biodigestores cadastrados para mensurar a distância geográfica entre eles.
                                 </Text>
@@ -1701,28 +1997,33 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         }}
                                         style={{
                                             backgroundColor: colors.background,
+                                            minHeight: 44,
                                             paddingHorizontal: 12,
                                             paddingVertical: 12,
                                             borderRadius: 10,
                                             borderWidth: 1,
-                                            borderColor: colors.border,
+                                            borderColor: colors.inputBorder,
                                             flexDirection: 'row',
                                             justifyContent: 'space-between',
                                             alignItems: 'center'
                                         }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Biodigestor de Origem: ${distanceSourceId ? selectedSourceMarker?.title : 'nenhum selecionado'}`}
+                                        accessibilityState={{ expanded: sourceDropdownOpen }}
                                     >
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e' }} />
+                                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: isDark ? '#4ade80' : '#15803d' }} importantForAccessibility="no" />
                                             <Text style={{ color: distanceSourceId ? colors.text : colors.textMuted }}>
-                                                {distanceSourceId 
-                                                    ? selectedSourceMarker?.title 
+                                                {distanceSourceId
+                                                    ? selectedSourceMarker?.title
                                                     : "Selecione o biodigestor de origem..."}
                                             </Text>
                                         </View>
-                                        <MaterialCommunityIcons 
-                                            name={sourceDropdownOpen ? 'chevron-up' : 'chevron-down'} 
-                                            size={18} 
-                                            color={colors.textMuted} 
+                                        <MaterialCommunityIcons
+                                            name={sourceDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                                            size={18}
+                                            color={colors.textMuted}
+                                            importantForAccessibility="no"
                                         />
                                     </TouchableOpacity>
 
@@ -1738,7 +2039,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                 paddingHorizontal: 10,
                                             }}
                                         >
-                                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#22c55e', textTransform: 'uppercase', marginBottom: 4 }}>
+                                            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#4ade80' : '#15803d', textTransform: 'uppercase', marginBottom: 4 }}>
                                                 Endereço da origem
                                             </Text>
                                             {getMarkerAddressLines(selectedSourceMarker).map((line, index) => (
@@ -1785,17 +2086,22 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                                 setSourceDropdownOpen(false);
                                                             }}
                                                             style={{
+                                                                minHeight: 44,
+                                                                justifyContent: 'center',
                                                                 paddingVertical: 12,
                                                                 paddingHorizontal: 16,
                                                                 backgroundColor: distanceSourceId === m.id ? colors.primaryLight : 'transparent',
                                                                 borderBottomWidth: 1,
                                                                 borderBottomColor: colors.border,
                                                             }}
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel={m.title}
+                                                            accessibilityState={{ selected: distanceSourceId === m.id }}
                                                         >
-                                                            <Text style={{ 
+                                                            <Text style={{
                                                                 color: distanceSourceId === m.id ? colors.primaryDark : colors.text,
                                                                 fontWeight: distanceSourceId === m.id ? '700' : '400',
-                                                                fontSize: 13 
+                                                                fontSize: 13
                                                             }}>
                                                                 {m.title}
                                                             </Text>
@@ -1813,21 +2119,23 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         onPress={handleSwapBiodigesters}
                                         style={{
                                             backgroundColor: colors.background,
-                                            width: 36,
-                                            height: 36,
-                                            borderRadius: 18,
+                                            width: 44,
+                                            height: 44,
+                                            borderRadius: 22,
                                             justifyContent: 'center',
                                             alignItems: 'center',
                                             borderWidth: 1,
-                                            borderColor: colors.border,
+                                            borderColor: colors.inputBorder,
                                             elevation: 2,
                                             shadowColor: '#000',
                                             shadowOpacity: 0.1,
                                             shadowRadius: 2,
                                             shadowOffset: { width: 0, height: 1 }
                                         }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Inverter biodigestor de origem e destino"
                                     >
-                                        <MaterialCommunityIcons name="swap-vertical" size={20} color={colors.primary} />
+                                        <MaterialCommunityIcons name="swap-vertical" size={20} color={colors.primary} importantForAccessibility="no" />
                                     </TouchableOpacity>
                                 </View>
 
@@ -1843,28 +2151,33 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         }}
                                         style={{
                                             backgroundColor: colors.background,
+                                            minHeight: 44,
                                             paddingHorizontal: 12,
                                             paddingVertical: 12,
                                             borderRadius: 10,
                                             borderWidth: 1,
-                                            borderColor: colors.border,
+                                            borderColor: colors.inputBorder,
                                             flexDirection: 'row',
                                             justifyContent: 'space-between',
                                             alignItems: 'center'
                                         }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Biodigestor de Destino: ${distanceTargetId ? selectedTargetMarker?.title : 'nenhum selecionado'}`}
+                                        accessibilityState={{ expanded: targetDropdownOpen }}
                                     >
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#3b82f6' }} />
+                                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: isDark ? '#60a5fa' : '#1d4ed8' }} importantForAccessibility="no" />
                                             <Text style={{ color: distanceTargetId ? colors.text : colors.textMuted }}>
-                                                {distanceTargetId 
-                                                    ? selectedTargetMarker?.title 
+                                                {distanceTargetId
+                                                    ? selectedTargetMarker?.title
                                                     : "Selecione o biodigestor de destino..."}
                                             </Text>
                                         </View>
-                                        <MaterialCommunityIcons 
-                                            name={targetDropdownOpen ? 'chevron-up' : 'chevron-down'} 
-                                            size={18} 
-                                            color={colors.textMuted} 
+                                        <MaterialCommunityIcons
+                                            name={targetDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                                            size={18}
+                                            color={colors.textMuted}
+                                            importantForAccessibility="no"
                                         />
                                     </TouchableOpacity>
 
@@ -1880,7 +2193,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                 paddingHorizontal: 10,
                                             }}
                                         >
-                                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase', marginBottom: 4 }}>
+                                            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#60a5fa' : '#1d4ed8', textTransform: 'uppercase', marginBottom: 4 }}>
                                                 Endereço do destino
                                             </Text>
                                             {getMarkerAddressLines(selectedTargetMarker).map((line, index) => (
@@ -1938,17 +2251,22 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                                     setTargetDropdownOpen(false);
                                                                 }}
                                                                 style={{
+                                                                    minHeight: 44,
+                                                                    justifyContent: 'center',
                                                                     paddingVertical: 12,
                                                                     paddingHorizontal: 16,
                                                                     backgroundColor: distanceTargetId === m.id ? colors.primaryLight : 'transparent',
                                                                     borderBottomWidth: 1,
                                                                     borderBottomColor: colors.border,
                                                                 }}
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel={m.title}
+                                                                accessibilityState={{ selected: distanceTargetId === m.id }}
                                                             >
-                                                                <Text style={{ 
+                                                                <Text style={{
                                                                     color: distanceTargetId === m.id ? colors.primaryDark : colors.text,
                                                                     fontWeight: distanceTargetId === m.id ? '700' : '400',
-                                                                    fontSize: 13 
+                                                                    fontSize: 13
                                                                 }}>
                                                                     {m.title}
                                                                 </Text>
@@ -1976,7 +2294,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                 marginBottom: 24,
                                                 borderStyle: 'dashed'
                                             }}>
-                                                <MaterialCommunityIcons name="map-marker-distance" size={32} color={colors.textMuted} style={{ marginBottom: 6 }} />
+                                                <MaterialCommunityIcons name="map-marker-distance" size={32} color={colors.textMuted} style={{ marginBottom: 6 }} importantForAccessibility="no" />
                                                 <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center' }}>
                                                     Selecione ambos os biodigestores acima para calcular.
                                                 </Text>
@@ -1986,20 +2304,23 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
 
                                     if (distanceSourceId === distanceTargetId) {
                                         return (
-                                            <View style={{
-                                                backgroundColor: '#fffbeb',
-                                                padding: 16,
-                                                borderRadius: 12,
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                borderWidth: 1,
-                                                borderColor: '#fef3c7',
-                                                marginBottom: 24,
-                                                flexDirection: 'row',
-                                                gap: 8
-                                            }}>
-                                                <MaterialCommunityIcons name="alert" size={20} color="#d97706" />
-                                                <Text style={{ color: '#b45309', fontSize: 13, fontWeight: '600' }}>
+                                            <View
+                                                style={{
+                                                    backgroundColor: isDark ? '#422006' : '#fffbeb',
+                                                    padding: 16,
+                                                    borderRadius: 12,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    borderWidth: 1,
+                                                    borderColor: isDark ? '#854d0e' : '#fef3c7',
+                                                    marginBottom: 24,
+                                                    flexDirection: 'row',
+                                                    gap: 8
+                                                }}
+                                                accessibilityRole="alert"
+                                            >
+                                                <MaterialCommunityIcons name="alert" size={20} color={isDark ? '#fde047' : '#b45309'} importantForAccessibility="no" />
+                                                <Text style={{ color: isDark ? '#fde047' : '#92400e', fontSize: 13, fontWeight: '600' }}>
                                                     Aviso: Selecione dois biodigestores diferentes.
                                                 </Text>
                                             </View>
@@ -2016,14 +2337,12 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         targetNode.latitude, targetNode.longitude
                                     );
 
-                                    // Elegantly format distance
-                                    const formattedDistance = distanceKm < 1 
-                                        ? `${Math.round(distanceKm * 1000)} m` 
+                                    const formattedDistance = distanceKm < 1
+                                        ? `${Math.round(distanceKm * 1000)} m`
                                         : `${distanceKm.toFixed(1)} km`;
 
                                     return (
-                                        <View style={{ marginBottom: 24 }}>
-                                            {/* Premium connection graphics */}
+                                        <View style={{ marginBottom: 24 }} accessibilityLiveRegion="polite">
                                             <View style={{
                                                 backgroundColor: colors.background,
                                                 borderRadius: 14,
@@ -2038,18 +2357,18 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                             }}>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                                                     <View style={{ flex: 1 }}>
-                                                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#22c55e', textTransform: 'uppercase' }}>Origem</Text>
+                                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#4ade80' : '#15803d', textTransform: 'uppercase' }}>Origem</Text>
                                                         <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }} numberOfLines={1}>
                                                             {sourceNode.title}
                                                         </Text>
                                                     </View>
-                                                    
+
                                                     <View style={{ paddingHorizontal: 12, alignItems: 'center' }}>
-                                                        <MaterialCommunityIcons name="ray-start-end" size={20} color={colors.primary} />
+                                                        <MaterialCommunityIcons name="ray-start-end" size={20} color={colors.primary} importantForAccessibility="no" />
                                                     </View>
 
                                                     <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase' }}>Destino</Text>
+                                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#60a5fa' : '#1d4ed8', textTransform: 'uppercase' }}>Destino</Text>
                                                         <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }} numberOfLines={1}>
                                                             {targetNode.title}
                                                         </Text>
@@ -2071,20 +2390,24 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
 
                                 {/* Actions */}
                                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
-                                    <TouchableOpacity 
+                                    <TouchableOpacity
                                         onPress={() => {
                                             setDistanceModalVisible(false);
                                             setDistanceSourceId(null);
                                             setDistanceTargetId(null);
-                                        }} 
-                                        style={{ 
-                                            paddingVertical: 12, 
-                                            paddingHorizontal: 24, 
+                                        }}
+                                        style={{
+                                            minHeight: 44,
+                                            justifyContent: 'center',
+                                            paddingVertical: 12,
+                                            paddingHorizontal: 24,
                                             borderRadius: 10,
                                             borderWidth: 1,
-                                            borderColor: colors.border,
+                                            borderColor: colors.inputBorder,
                                             backgroundColor: colors.background
                                         }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Fechar"
                                     >
                                         <Text style={{ color: colors.text, fontWeight: 'bold', fontSize: 14 }}>
                                             Fechar
@@ -2096,24 +2419,18 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                     </View>
                 </Modal>
 
-                {/* Lista de Locais Acima do Mapa (Novo Requisito) */}
-                {/* Lista de Locais (Refinada - Flex Wrap) */}
+                {/* Lista de Locais Acima do Mapa */}
                 {mapMarkers.length > 0 && (
                     <View style={{ marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                         {mapMarkers.map((m) => (
-                            <TouchableOpacity
+                            <View
                                 key={m.id}
-                                onPress={() => {
-                                    setMapFocusLocation({ latitude: m.latitude, longitude: m.longitude });
-                                }}
-                                onLongPress={() => handleOpenDistanceModal(m.id)}
-                                delayLongPress={500}
                                 style={{
                                     backgroundColor: colors.cardBackground,
-                                    paddingLeft: 14,
-                                    paddingRight: 8,
-                                    paddingVertical: 8,
-                                    borderRadius: 20,
+                                    paddingLeft: 4,
+                                    paddingRight: 4,
+                                    paddingVertical: 2,
+                                    borderRadius: 24,
                                     borderWidth: 1,
                                     borderColor: colors.border,
                                     flexDirection: 'row',
@@ -2125,17 +2442,47 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                     shadowRadius: 2
                                 }}
                             >
-                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#16a34a', marginRight: 8 }} />
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text, marginRight: 8 }}>{m.title}</Text>
-
-                                <TouchableOpacity onPress={() => handleEditMarker(m)} style={{ padding: 6, backgroundColor: '#3b82f6', borderRadius: 10, marginRight: 6 }}>
-                                    <MaterialCommunityIcons name="pencil" size={14} color="#fff" />
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setMapFocusLocation({ latitude: m.latitude, longitude: m.longitude });
+                                    }}
+                                    onLongPress={() => handleOpenDistanceModal(m.id)}
+                                    delayLongPress={500}
+                                    style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        minHeight: 40,
+                                        paddingLeft: 10,
+                                        paddingRight: 8,
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Centralizar mapa em ${m.title}`}
+                                    accessibilityHint="Mantenha pressionado para calcular distância a partir deste biodigestor"
+                                >
+                                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginRight: 8 }} importantForAccessibility="no" />
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{m.title}</Text>
                                 </TouchableOpacity>
 
-                                <TouchableOpacity onPress={() => handleDeleteMarker(m.id, m.title)} style={{ padding: 6, backgroundColor: '#dc2626', borderRadius: 10 }}>
-                                    <MaterialCommunityIcons name="close" size={14} color="#fff" />
+                                <TouchableOpacity
+                                    onPress={() => handleEditMarker(m)}
+                                    style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1d4ed8', marginRight: 6 }}
+                                    hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Editar ${m.title}`}
+                                >
+                                    <MaterialCommunityIcons name="pencil" size={16} color="#fff" importantForAccessibility="no" />
                                 </TouchableOpacity>
-                            </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    onPress={() => handleDeleteMarker(m.id, m.title)}
+                                    style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#b91c1c' }}
+                                    hitSlop={{ top: 4, bottom: 4, left: 2, right: 4 }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Excluir ${m.title}`}
+                                >
+                                    <MaterialCommunityIcons name="close" size={16} color="#fff" importantForAccessibility="no" />
+                                </TouchableOpacity>
+                            </View>
                         ))}
                     </View>
                 )}
@@ -2158,194 +2505,266 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             </ScrollView>
 
             {/* Modal de Atualização Manual de Métricas */}
-            <Modal visible={metricsModalVisible} animationType="slide" transparent={true} onRequestClose={() => setMetricsModalVisible(false)}>
-                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
-                        <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Atualizar Métricas</Text>
-                            <TouchableOpacity onPress={() => setMetricsModalVisible(false)}>
-                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+            <Modal visible={metricsModalVisible} animationType="slide" transparent={true} onRequestClose={() => !savingMetrics && setMetricsModalVisible(false)}>
+                <KeyboardAvoidingView
+                    style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    <View
+                        accessibilityViewIsModal
+                        style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', maxHeight: '90%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: Math.max(insets.bottom, 24) }]}
+                    >
+                        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                            <View style={styles.modalHeader}>
+                                <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Atualizar Métricas</Text>
+                                <TouchableOpacity
+                                    style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                    onPress={() => setMetricsModalVisible(false)}
+                                    disabled={savingMetrics}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Fechar atualização de métricas"
+                                >
+                                    <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
+                                </TouchableOpacity>
+                            </View>
+                            <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores consolidados para o período selecionado.</Text>
+
+                            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, zIndex: 10 }}>
+                                <View style={{ flex: 1, position: 'relative' }}>
+                                    <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Mês</Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setMonthPickerVisible(!monthPickerVisible);
+                                            setYearPickerVisible(false);
+                                        }}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            minHeight: 44,
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 10,
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.inputBorder,
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Mês selecionado: ${months[parseInt(manualMetrics.month)].label}`}
+                                        accessibilityState={{ expanded: monthPickerVisible }}
+                                    >
+                                        <Text style={{ color: colors.text }}>{months[parseInt(manualMetrics.month)].label}</Text>
+                                        <MaterialCommunityIcons name={monthPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} importantForAccessibility="no" />
+                                    </TouchableOpacity>
+
+                                    {monthPickerVisible && (
+                                        <View
+                                            style={{
+                                                position: 'absolute',
+                                                top: '100%',
+                                                left: 0,
+                                                width: 260,
+                                                backgroundColor: colors.cardBackground,
+                                                borderRadius: 12,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                marginTop: 6,
+                                                padding: 10,
+                                                flexDirection: 'row',
+                                                flexWrap: 'wrap',
+                                                zIndex: 9999,
+                                                elevation: 25,
+                                                shadowColor: '#000',
+                                                shadowOpacity: 0.3,
+                                                shadowRadius: 10,
+                                            }}
+                                        >
+                                            {months.map((m) => (
+                                                <TouchableOpacity
+                                                    key={m.value}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => {
+                                                        setManualMetrics({ ...manualMetrics, month: m.value });
+                                                        setMonthPickerVisible(false);
+                                                    }}
+                                                    style={{
+                                                        width: '33.3%',
+                                                        minHeight: 44,
+                                                        paddingVertical: 12,
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        backgroundColor: manualMetrics.month === m.value ? colors.primary : 'transparent',
+                                                        borderRadius: 8,
+                                                    }}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={m.label}
+                                                    accessibilityState={{ selected: manualMetrics.month === m.value }}
+                                                >
+                                                    <Text style={{
+                                                        color: manualMetrics.month === m.value ? colors.onPrimary : colors.text,
+                                                        fontWeight: '700',
+                                                        fontSize: 12
+                                                    }}>
+                                                        {m.label.substring(0, 3)}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+
+                                <View style={{ width: 100, position: 'relative' }}>
+                                    <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Ano</Text>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setYearPickerVisible(!yearPickerVisible);
+                                            setMonthPickerVisible(false);
+                                        }}
+                                        style={{
+                                            backgroundColor: colors.background,
+                                            minHeight: 44,
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 10,
+                                            borderRadius: 10,
+                                            borderWidth: 1,
+                                            borderColor: colors.inputBorder,
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Ano selecionado: ${manualMetrics.year}`}
+                                        accessibilityState={{ expanded: yearPickerVisible }}
+                                    >
+                                        <Text style={{ color: colors.text }}>{manualMetrics.year}</Text>
+                                        <MaterialCommunityIcons name={yearPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} importantForAccessibility="no" />
+                                    </TouchableOpacity>
+
+                                    {yearPickerVisible && (
+                                        <View
+                                            style={{
+                                                position: 'absolute',
+                                                top: '100%',
+                                                right: 0,
+                                                width: 180,
+                                                backgroundColor: colors.cardBackground,
+                                                borderRadius: 12,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                                marginTop: 6,
+                                                padding: 10,
+                                                flexDirection: 'row',
+                                                flexWrap: 'wrap',
+                                                justifyContent: 'center',
+                                                zIndex: 9999,
+                                                elevation: 25,
+                                                shadowColor: '#000',
+                                                shadowOpacity: 0.3,
+                                                shadowRadius: 10,
+                                            }}
+                                        >
+                                            {years.map((y) => (
+                                                <TouchableOpacity
+                                                    key={y}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => {
+                                                        setManualMetrics({ ...manualMetrics, year: y });
+                                                        setYearPickerVisible(false);
+                                                    }}
+                                                    style={{
+                                                        minHeight: 44,
+                                                        justifyContent: 'center',
+                                                        paddingHorizontal: 14,
+                                                        paddingVertical: 10,
+                                                        margin: 4,
+                                                        backgroundColor: manualMetrics.year === y ? colors.primary : colors.background,
+                                                        borderRadius: 8,
+                                                        borderWidth: 1,
+                                                        borderColor: colors.inputBorder
+                                                    }}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={y}
+                                                    accessibilityState={{ selected: manualMetrics.year === y }}
+                                                >
+                                                    <Text style={{
+                                                        color: manualMetrics.year === y ? colors.onPrimary : colors.text,
+                                                        fontWeight: '700',
+                                                        fontSize: 13
+                                                    }}>
+                                                        {y}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+                            </View>
+
+                            {metricsLoading ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }} accessibilityLiveRegion="polite">
+                                    <ActivityIndicator size="small" color={colors.primary} />
+                                    <Text style={{ fontSize: 12, color: colors.textMuted }}>Carregando valores do período...</Text>
+                                </View>
+                            ) : null}
+
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                                <View style={[styles.formGroup, { width: '48%' }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Resíduos (kg)</Text>
+                                    <TextInput
+                                        style={[styles.input, { color: colors.text, borderColor: colors.inputBorder }]}
+                                        keyboardType="numeric"
+                                        placeholder="Ex: 120.0"
+                                        placeholderTextColor={colors.textMuted}
+                                        accessibilityLabel="Resíduos processados em quilogramas"
+                                        value={manualMetrics.waste}
+                                        onChangeText={t => setManualMetrics({ ...manualMetrics, waste: t })}
+                                    />
+                                </View>
+                                <View style={[styles.formGroup, { width: '48%' }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Energia (kWh)</Text>
+                                    <TextInput
+                                        style={[styles.input, { color: colors.text, borderColor: colors.inputBorder }]}
+                                        keyboardType="numeric"
+                                        placeholder="Ex: 92.5"
+                                        placeholderTextColor={colors.textMuted}
+                                        accessibilityLabel="Energia gerada em quilowatt-hora"
+                                        value={manualMetrics.energy}
+                                        onChangeText={t => setManualMetrics({ ...manualMetrics, energy: t })}
+                                    />
+                                </View>
+                                <View style={[styles.formGroup, { width: '100%' }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Benefícios Aplicáveis (R$)</Text>
+                                    <TextInput
+                                        style={[styles.input, { color: colors.text, borderColor: colors.inputBorder }]}
+                                        keyboardType="numeric"
+                                        placeholder="Ex: 750.00"
+                                        placeholderTextColor={colors.textMuted}
+                                        accessibilityLabel="Benefícios aplicáveis em reais"
+                                        value={manualMetrics.tax}
+                                        onChangeText={t => setManualMetrics({ ...manualMetrics, tax: t })}
+                                    />
+                                </View>
+                            </View>
+
+                            <TouchableOpacity
+                                style={[styles.primaryButton, { backgroundColor: colors.primary, minHeight: 48, justifyContent: 'center', opacity: savingMetrics ? 0.7 : 1 }]}
+                                onPress={handleSaveManualMetrics}
+                                disabled={savingMetrics}
+                                accessibilityRole="button"
+                                accessibilityLabel={savingMetrics ? 'Salvando dados, aguarde' : 'Salvar Dados'}
+                                accessibilityState={{ disabled: savingMetrics, busy: savingMetrics }}
+                            >
+                                {savingMetrics ? (
+                                    <ActivityIndicator size="small" color={colors.onPrimary} />
+                                ) : (
+                                    <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>Salvar Dados</Text>
+                                )}
                             </TouchableOpacity>
-                        </View>
-                        <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Insira os valores consolidados para o período selecionado.</Text>
-
-                        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, zIndex: 10 }}>
-                            <View style={{ flex: 1, position: 'relative' }}>
-                                <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Mês</Text>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setMonthPickerVisible(!monthPickerVisible);
-                                        setYearPickerVisible(false);
-                                    }}
-                                    style={{
-                                        backgroundColor: colors.background,
-                                        paddingHorizontal: 12,
-                                        paddingVertical: 10,
-                                        borderRadius: 10,
-                                        borderWidth: 1,
-                                        borderColor: colors.border,
-                                        flexDirection: 'row',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center'
-                                    }}
-                                >
-                                    <Text style={{ color: colors.text }}>{months[parseInt(manualMetrics.month)].label}</Text>
-                                    <MaterialCommunityIcons name={monthPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-                                </TouchableOpacity>
-
-                                {monthPickerVisible && (
-                                    <View
-                                        style={{
-                                            position: 'absolute',
-                                            top: '100%',
-                                            left: 0,
-                                            width: 260,
-                                            backgroundColor: colors.cardBackground,
-                                            borderRadius: 12,
-                                            borderWidth: 1,
-                                            borderColor: colors.border,
-                                            marginTop: 6,
-                                            padding: 10,
-                                            flexDirection: 'row',
-                                            flexWrap: 'wrap',
-                                            zIndex: 9999,
-                                            elevation: 25,
-                                            shadowColor: '#000',
-                                            shadowOpacity: 0.3,
-                                            shadowRadius: 10,
-                                        }}
-                                    >
-                                        {months.map((m) => (
-                                            <TouchableOpacity
-                                                key={m.value}
-                                                activeOpacity={0.7}
-                                                onPress={() => {
-                                                    setManualMetrics({ ...manualMetrics, month: m.value });
-                                                    setMonthPickerVisible(false);
-                                                }}
-                                                style={{
-                                                    width: '33.3%',
-                                                    paddingVertical: 12,
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    backgroundColor: manualMetrics.month === m.value ? colors.primary : 'transparent',
-                                                    borderRadius: 8,
-                                                }}
-                                            >
-                                                <Text style={{
-                                                    color: manualMetrics.month === m.value ? '#fff' : colors.text,
-                                                    fontWeight: '700',
-                                                    fontSize: 12
-                                                }}>
-                                                    {m.label.substring(0, 3)}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                )}
-                            </View>
-
-                            <View style={{ width: 100, position: 'relative' }}>
-                                <Text style={[styles.label, { color: colors.text, fontSize: 12 }]}>Ano</Text>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setYearPickerVisible(!yearPickerVisible);
-                                        setMonthPickerVisible(false);
-                                    }}
-                                    style={{
-                                        backgroundColor: colors.background,
-                                        paddingHorizontal: 12,
-                                        paddingVertical: 10,
-                                        borderRadius: 10,
-                                        borderWidth: 1,
-                                        borderColor: colors.border,
-                                        flexDirection: 'row',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center'
-                                    }}
-                                >
-                                    <Text style={{ color: colors.text }}>{manualMetrics.year}</Text>
-                                    <MaterialCommunityIcons name={yearPickerVisible ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-                                </TouchableOpacity>
-
-                                {yearPickerVisible && (
-                                    <View
-                                        style={{
-                                            position: 'absolute',
-                                            top: '100%',
-                                            right: 0,
-                                            width: 180,
-                                            backgroundColor: colors.cardBackground,
-                                            borderRadius: 12,
-                                            borderWidth: 1,
-                                            borderColor: colors.border,
-                                            marginTop: 6,
-                                            padding: 10,
-                                            flexDirection: 'row',
-                                            flexWrap: 'wrap',
-                                            justifyContent: 'center',
-                                            zIndex: 9999,
-                                            elevation: 25,
-                                            shadowColor: '#000',
-                                            shadowOpacity: 0.3,
-                                            shadowRadius: 10,
-                                        }}
-                                    >
-                                        {years.map((y) => (
-                                            <TouchableOpacity
-                                                key={y}
-                                                activeOpacity={0.7}
-                                                onPress={() => {
-                                                    setManualMetrics({ ...manualMetrics, year: y });
-                                                    setYearPickerVisible(false);
-                                                }}
-                                                style={{
-                                                    paddingHorizontal: 14,
-                                                    paddingVertical: 10,
-                                                    margin: 4,
-                                                    backgroundColor: manualMetrics.year === y ? colors.primary : colors.background,
-                                                    borderRadius: 8,
-                                                    borderWidth: 1,
-                                                    borderColor: colors.border
-                                                }}
-                                            >
-                                                <Text style={{
-                                                    color: manualMetrics.year === y ? '#fff' : colors.text,
-                                                    fontWeight: '700',
-                                                    fontSize: 13
-                                                }}>
-                                                    {y}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                )}
-                            </View>
-                        </View>
-
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-                            <View style={[styles.formGroup, { width: '48%' }]}>
-                                <Text style={[styles.label, { color: colors.text }]}>Resíduos (kg)</Text>
-                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.waste} onChangeText={t => setManualMetrics({ ...manualMetrics, waste: t })} />
-                            </View>
-                            <View style={[styles.formGroup, { width: '48%' }]}>
-                                <Text style={[styles.label, { color: colors.text }]}>Energia (kWh)</Text>
-                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.energy} onChangeText={t => setManualMetrics({ ...manualMetrics, energy: t })} />
-                            </View>
-                            <View style={[styles.formGroup, { width: '100%' }]}>
-                                <Text style={[styles.label, { color: colors.text }]}>Benefícios Aplicáveis (R$)</Text>
-                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]} keyboardType="numeric" value={manualMetrics.tax} onChangeText={t => setManualMetrics({ ...manualMetrics, tax: t })} />
-                            </View>
-                        </View>
-
-                        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handleSaveManualMetrics}>
-                            <Text style={styles.primaryButtonText}>Salvar Dados</Text>
-                        </TouchableOpacity>
+                        </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal >
 
-            {/* Action Menu (Long Press) */}
             {/* Seleção do mês exibido nos cards do dashboard */}
             <Modal
                 visible={showMonthPicker}
@@ -2353,30 +2772,45 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 transparent={true}
                 onRequestClose={() => setShowMonthPicker(false)}
             >
-                <TouchableOpacity
-                    style={[styles.modalOverlay, { justifyContent: 'center' }]}
-                    activeOpacity={1}
-                    onPress={() => setShowMonthPicker(false)}
-                >
+                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 16 }]}>
+                    <Pressable style={StyleSheet.absoluteFill} accessible={false} onPress={() => setShowMonthPicker(false)} />
                     <View
-                        style={{ backgroundColor: colors.cardBackground, width: '85%', maxHeight: '70%', borderRadius: 16, overflow: 'hidden', alignSelf: 'center' }}
-                        onStartShouldSetResponder={() => true}
+                        accessibilityViewIsModal
+                        style={{ backgroundColor: colors.cardBackground, width: '90%', maxWidth: 420, maxHeight: '75%', borderRadius: 16, overflow: 'hidden', alignSelf: 'center' }}
                     >
-                        <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }}>Selecionar Período</Text>
-                            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>Escolha o mês exibido nos indicadores</Text>
+                        <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }} accessibilityRole="header">Selecionar Período</Text>
+                                <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>Escolha o mês exibido nos indicadores</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                onPress={() => setShowMonthPicker(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fechar seletor de período"
+                            >
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
+                            </TouchableOpacity>
                         </View>
 
                         <ScrollView>
                             <TouchableOpacity
-                                style={{ paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
-                                onPress={() => { setSelectedMonth(null); setShowMonthPicker(false); }}
+                                style={{ minHeight: 48, paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
+                                onPress={() => {
+                                    AsyncStorage.removeItem('@biodash_last_edited').catch(() => {});
+                                    setSelectedMonth(null);
+                                    setShowMonthPicker(false);
+                                }}
+                                accessibilityRole="radio"
+                                accessibilityLabel="Mês mais recente"
+                                accessibilityState={{ checked: selectedMonth === null, selected: selectedMonth === null }}
                             >
                                 <MaterialCommunityIcons
                                     name={selectedMonth === null ? 'radiobox-marked' : 'radiobox-blank'}
                                     size={20}
                                     color={selectedMonth === null ? colors.primary : colors.textMuted}
                                     style={{ marginRight: 12 }}
+                                    importantForAccessibility="no"
                                 />
                                 <Text style={{ fontSize: 15, color: selectedMonth === null ? colors.primary : colors.text, fontWeight: selectedMonth === null ? 'bold' : 'normal' }}>
                                     Mês mais recente
@@ -2388,14 +2822,18 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                 return (
                                     <TouchableOpacity
                                         key={`${opt.year}-${opt.month}`}
-                                        style={{ paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
+                                        style={{ minHeight: 48, paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
                                         onPress={() => { setSelectedMonth({ month: opt.month, year: opt.year }); setShowMonthPicker(false); }}
+                                        accessibilityRole="radio"
+                                        accessibilityLabel={opt.label}
+                                        accessibilityState={{ checked: isSel, selected: isSel }}
                                     >
                                         <MaterialCommunityIcons
                                             name={isSel ? 'radiobox-marked' : 'radiobox-blank'}
                                             size={20}
                                             color={isSel ? colors.primary : colors.textMuted}
                                             style={{ marginRight: 12 }}
+                                            importantForAccessibility="no"
                                         />
                                         <Text style={{ fontSize: 15, color: isSel ? colors.primary : colors.text, fontWeight: isSel ? 'bold' : 'normal' }}>
                                             {opt.label}
@@ -2404,8 +2842,19 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                 );
                             })}
                         </ScrollView>
+
+                        <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <TouchableOpacity
+                                style={{ minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 8, backgroundColor: colors.background }}
+                                onPress={() => setShowMonthPicker(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fechar"
+                            >
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>Fechar</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                </TouchableOpacity>
+                </View>
             </Modal>
 
             <Modal
@@ -2414,170 +2863,198 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 transparent={true}
                 onRequestClose={() => setActionModalVisible(false)}
             >
-                <TouchableOpacity
-                    style={[styles.modalOverlay, { justifyContent: 'flex-end', paddingBottom: 30 }]}
-                    activeOpacity={1}
-                    onPress={() => setActionModalVisible(false)}
-                >
-                    <View style={[{ backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16, overflow: 'hidden', alignSelf: 'center' }]} onStartShouldSetResponder={() => true}>
-                        <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }}>Opções de Manutenção</Text>
-                            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>{selectedMaintenance?.title}</Text>
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', paddingBottom: Math.max(insets.bottom, 24) }]}>
+                    <Pressable style={StyleSheet.absoluteFill} accessible={false} onPress={() => setActionModalVisible(false)} />
+                    <View accessibilityViewIsModal style={{ width: '90%', alignSelf: 'center' }}>
+                        <View style={{ backgroundColor: colors.cardBackground, borderRadius: 16, overflow: 'hidden' }}>
+                            <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}>
+                                <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.text }} accessibilityRole="header">Opções de Manutenção</Text>
+                                <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>{selectedMaintenance?.title}</Text>
+                            </View>
+
+                            {selectedMaintenance?.status === 'pending' && (
+                                <TouchableOpacity
+                                    style={{ minHeight: 52, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                                    onPress={() => {
+                                        setActionModalVisible(false);
+                                        if (selectedMaintenance) {
+                                            telemetryRef.current?.edit(selectedMaintenance.raw);
+                                        }
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Editar Informações"
+                                >
+                                    <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} style={{ marginRight: 8 }} importantForAccessibility="no" />
+                                    <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>Editar Informações</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {selectedMaintenance?.status === 'pending' && (
+                                <TouchableOpacity
+                                    style={{ minHeight: 52, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                                    onPress={() => {
+                                        setActionModalVisible(false);
+                                        if (selectedMaintenance) handleMarkAsDone(selectedMaintenance.id);
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Marcar como Concluída"
+                                >
+                                    <MaterialCommunityIcons name="check-circle" size={20} color={isDark ? '#4ade80' : '#15803d'} style={{ marginRight: 8 }} importantForAccessibility="no" />
+                                    <Text style={{ fontSize: 16, color: isDark ? '#4ade80' : '#15803d', fontWeight: 'bold' }}>Marcar como Concluída</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {selectedMaintenance?.status === 'completed' && (
+                                <TouchableOpacity
+                                    style={{ minHeight: 52, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                                    onPress={() => {
+                                        if (selectedMaintenance) handleArchiveMaintenance(selectedMaintenance.id);
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Arquivar Manutenção"
+                                >
+                                    <MaterialCommunityIcons name="archive-arrow-down" size={20} color={isDark ? '#c4b5fd' : '#6d28d9'} style={{ marginRight: 8 }} importantForAccessibility="no" />
+                                    <Text style={{ fontSize: 16, color: isDark ? '#c4b5fd' : '#6d28d9', fontWeight: 'bold' }}>Arquivar Manutenção</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            <TouchableOpacity
+                                style={{ minHeight: 52, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                                onPress={() => {
+                                    setActionModalVisible(false);
+                                    if (selectedMaintenance) handleDelete(selectedMaintenance.id);
+                                }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Apagar Agenda"
+                            >
+                                <MaterialCommunityIcons name="delete-outline" size={20} color={colors.danger} style={{ marginRight: 8 }} importantForAccessibility="no" />
+                                <Text style={{ fontSize: 16, color: colors.danger, fontWeight: 'bold' }}>Apagar Agenda</Text>
+                            </TouchableOpacity>
                         </View>
 
-                        {selectedMaintenance?.status === 'pending' && (
-                            <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
-                                onPress={() => {
-                                    setActionModalVisible(false);
-                                    if (selectedMaintenance) {
-                                        telemetryRef.current?.edit(selectedMaintenance.raw);
-                                    }
-                                }}
-                            >
-                                <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} style={{ marginRight: 8 }} />
-                                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: 'bold' }}>Editar Informações</Text>
-                            </TouchableOpacity>
-                        )}
-
-                        {selectedMaintenance?.status === 'pending' && (
-                            <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
-                                onPress={() => {
-                                    setActionModalVisible(false);
-                                    if (selectedMaintenance) handleMarkAsDone(selectedMaintenance.id);
-                                }}
-                            >
-                                <MaterialCommunityIcons name="check-circle" size={20} color="#16a34a" style={{ marginRight: 8 }} />
-                                <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: 'bold' }}>Marcar como Concluída</Text>
-                            </TouchableOpacity>
-                        )}
-
-                        {selectedMaintenance?.status === 'done' && (
-                            <TouchableOpacity
-                                style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
-                                onPress={() => {
-                                    if (selectedMaintenance) handleArchiveMaintenance(selectedMaintenance.id);
-                                }}
-                            >
-                                <MaterialCommunityIcons name="archive-arrow-down" size={20} color="#8b5cf6" style={{ marginRight: 8 }} />
-                                <Text style={{ fontSize: 16, color: '#8b5cf6', fontWeight: 'bold' }}>Arquivar Manutenção</Text>
-                            </TouchableOpacity>
-                        )}
-
                         <TouchableOpacity
-                            style={{ paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
-                            onPress={() => {
-                                setActionModalVisible(false);
-                                if (selectedMaintenance) handleDelete(selectedMaintenance.id);
-                            }}
+                            style={{ backgroundColor: colors.cardBackground, minHeight: 52, borderRadius: 16, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', marginTop: 12 }}
+                            onPress={() => setActionModalVisible(false)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Cancelar"
                         >
-                            <MaterialCommunityIcons name="delete-outline" size={20} color="#dc2626" style={{ marginRight: 8 }} />
-                            <Text style={{ fontSize: 16, color: '#dc2626', fontWeight: 'bold' }}>Apagar Agenda</Text>
+                            <Text style={{ fontSize: 16, color: isDark ? '#60a5fa' : '#1d4ed8', fontWeight: 'bold' }}>Cancelar</Text>
                         </TouchableOpacity>
                     </View>
-
-                    <TouchableOpacity
-                        style={{ backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 12, alignSelf: 'center' }}
-                        onPress={() => setActionModalVisible(false)}
-                    >
-                        <Text style={{ fontSize: 16, color: '#3b82f6', fontWeight: 'bold' }}>Cancelar</Text>
-                    </TouchableOpacity>
-                </TouchableOpacity>
+                </View>
             </Modal >
 
             {/* Modal de Resolução de Incidente */}
-            <Modal visible={incidentResolveModalVisible} animationType="fade" transparent={true} onRequestClose={() => setIncidentResolveModalVisible(false)}>
-                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16 }]}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Resolver Alerta Crítico</Text>
-                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
-                        
-                        <TextInput
-                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 100, marginBottom: 20 }]}
-                            value={incidentResolveMessage}
-                            onChangeText={setIncidentResolveMessage}
-                            placeholder="Ação tomada..."
-                            placeholderTextColor={colors.textMuted}
-                            multiline
-                            textAlignVertical="top"
-                        />
-                        
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }]} onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}>
-                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0, paddingVertical: 12 }]} onPress={handleResolveIncident}>
-                                <Text style={styles.primaryButtonText}>Confirmar</Text>
-                            </TouchableOpacity>
-                        </View>
+            <Modal
+                visible={incidentResolveModalVisible}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => !resolvingIncident && setIncidentResolveModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 16 }]}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    <View accessibilityViewIsModal style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', maxWidth: 420, borderRadius: 16 }]}>
+                        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                            <View style={styles.modalHeader}>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, flex: 1 }} accessibilityRole="header">
+                                    Resolver Alerta Crítico
+                                </Text>
+                                <TouchableOpacity
+                                    style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                    onPress={() => {
+                                        if (resolvingIncident) return;
+                                        setIncidentResolveModalVisible(false);
+                                        setIncidentResolveMessage('');
+                                    }}
+                                    disabled={resolvingIncident}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Fechar resolução de alerta"
+                                >
+                                    <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
+                                </TouchableOpacity>
+                            </View>
+                            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
+
+                            <Text style={[styles.label, { color: colors.text }]}>Ação tomada *</Text>
+                            <TextInput
+                                style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background, height: 100, marginBottom: 20 }]}
+                                value={incidentResolveMessage}
+                                onChangeText={setIncidentResolveMessage}
+                                placeholder="Ex: Válvula inspecionada e temperatura estabilizada."
+                                placeholderTextColor={colors.textMuted}
+                                multiline
+                                textAlignVertical="top"
+                                accessibilityLabel="Descrição da ação tomada obrigatória"
+                            />
+
+                            <View style={{ flexDirection: 'row', gap: 12 }}>
+                                <TouchableOpacity
+                                    style={[styles.cancelBtn, { borderColor: colors.inputBorder, flex: 1, minHeight: 44, paddingVertical: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center', opacity: resolvingIncident ? 0.6 : 1 }]}
+                                    onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}
+                                    disabled={resolvingIncident}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Cancelar"
+                                    accessibilityState={{ disabled: resolvingIncident }}
+                                >
+                                    <Text style={[styles.cancelText, { color: colors.text, fontWeight: '600' }]}>Cancelar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, minHeight: 44, marginTop: 0, paddingVertical: 12, justifyContent: 'center', opacity: resolvingIncident ? 0.7 : 1 }]}
+                                    onPress={handleResolveIncident}
+                                    disabled={resolvingIncident}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={resolvingIncident ? 'Confirmando resolução, aguarde' : 'Confirmar resolução'}
+                                    accessibilityState={{ disabled: resolvingIncident, busy: resolvingIncident }}
+                                >
+                                    {resolvingIncident ? (
+                                        <ActivityIndicator size="small" color={colors.onPrimary} />
+                                    ) : (
+                                        <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>Confirmar</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             {/* Modal de Manutenções Arquivadas */}
             <Modal visible={archivedModalVisible} animationType="slide" transparent={true} onRequestClose={() => setArchivedModalVisible(false)}>
                 <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, height: '70%' }]}>
+                    <View accessibilityViewIsModal style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, height: '70%', paddingBottom: Math.max(insets.bottom, 20) }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Manutenções Arquivadas</Text>
-                            <TouchableOpacity onPress={() => setArchivedModalVisible(false)}>
-                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+                            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Manutenções Arquivadas</Text>
+                            <TouchableOpacity
+                                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                onPress={() => setArchivedModalVisible(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fechar manutenções arquivadas"
+                            >
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Histórico dos últimos 30 dias.</Text>
-                        
+
                         <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-                            {archivedMaintenances.length === 0 ? (
+                            {archivedLoading ? (
+                                <View style={{ alignItems: 'center', marginTop: 40, gap: 8 }} accessibilityLiveRegion="polite">
+                                    <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Carregando manutenções arquivadas" />
+                                    <Text style={{ color: colors.textMuted, fontSize: 13 }}>Carregando manutenções arquivadas...</Text>
+                                </View>
+                            ) : archivedMaintenances.length === 0 ? (
                                 <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40 }}>Nenhuma manutenção arquivada nos últimos 30 dias.</Text>
                             ) : (
-                                archivedMaintenances.map((item, index) => (
+                                archivedMaintenances.map((item) => (
                                     <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                                         <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
                                         <Text style={[styles.maintenanceDate, { color: colors.textMuted, marginTop: 4 }]}>{item.date}</Text>
-                                        <Text style={{ color: '#8b5cf6', fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>Arquivado</Text>
+                                        <Text style={{ color: isDark ? '#c4b5fd' : '#6d28d9', fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>Arquivado</Text>
                                     </View>
                                 ))
                             )}
                         </ScrollView>
-                    </View>
-                </View>
-            </Modal>
-            
-            {/* Modal de Resolução de Incidente */}
-            <Modal visible={incidentResolveModalVisible} animationType="fade" transparent={true} onRequestClose={() => setIncidentResolveModalVisible(false)}>
-                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', borderRadius: 16 }]}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.text, marginBottom: 8 }}>Resolver Alerta Crítico</Text>
-                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>Descreva brevemente como o problema foi resolvido.</Text>
-                        
-                        <TextInput
-                            style={{ 
-                                borderWidth: 1, 
-                                borderColor: colors.border, 
-                                borderRadius: 8, 
-                                padding: 12, 
-                                color: colors.text, 
-                                backgroundColor: colors.background, 
-                                height: 100, 
-                                marginBottom: 20 
-                            }}
-                            value={incidentResolveMessage}
-                            onChangeText={setIncidentResolveMessage}
-                            placeholder="Ação tomada..."
-                            placeholderTextColor={colors.textMuted}
-                            multiline
-                            textAlignVertical="top"
-                        />
-                        
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }]} onPress={() => { setIncidentResolveModalVisible(false); setIncidentResolveMessage(''); }}>
-                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0, paddingVertical: 12 }]} onPress={handleResolveIncident}>
-                                <Text style={styles.primaryButtonText}>Confirmar</Text>
-                            </TouchableOpacity>
-                        </View>
                     </View>
                 </View>
             </Modal>
@@ -2587,32 +3064,42 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 visible={exportModalVisible}
                 animationType="slide"
                 transparent={true}
-                onRequestClose={() => setExportModalVisible(false)}
+                onRequestClose={() => !exportLoading && setExportModalVisible(false)}
             >
                 <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+                    <View accessibilityViewIsModal style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: Math.max(insets.bottom, 24) }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Configurar Relatório</Text>
-                            <TouchableOpacity onPress={() => setExportModalVisible(false)}>
-                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+                            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Configurar Relatório</Text>
+                            <TouchableOpacity
+                                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                onPress={() => setExportModalVisible(false)}
+                                disabled={exportLoading}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fechar configuração de relatório"
+                            >
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 20 }]}>
                             Escolha o período para o arquivo {pendingExportType?.toUpperCase()}.
                         </Text>
 
-                        <View style={{ gap: 12, marginBottom: 24 }}>
+                        <View style={{ gap: 12, marginBottom: 24 }} accessibilityRole="radiogroup" accessibilityLabel="Período do relatório">
                             <TouchableOpacity
                                 onPress={() => setExportPeriodType("12months")}
                                 style={{
                                     flexDirection: 'row',
                                     alignItems: 'center',
+                                    minHeight: 56,
                                     padding: 16,
                                     borderRadius: 12,
                                     borderWidth: 1,
-                                    borderColor: exportPeriodType === "12months" ? colors.primary : colors.border,
-                                    backgroundColor: exportPeriodType === "12months" ? colors.primary + '10' : 'transparent'
+                                    borderColor: exportPeriodType === "12months" ? colors.primary : colors.inputBorder,
+                                    backgroundColor: exportPeriodType === "12months" ? colors.primary + '15' : 'transparent'
                                 }}
+                                accessibilityRole="radio"
+                                accessibilityLabel="Últimos 12 Meses: Resumo consolidado do último ano"
+                                accessibilityState={{ checked: exportPeriodType === "12months", selected: exportPeriodType === "12months" }}
                             >
                                 <View style={{
                                     width: 20,
@@ -2623,12 +3110,12 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     marginRight: 12
-                                }}>
+                                }} importantForAccessibility="no">
                                     {exportPeriodType === "12months" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary }} />}
                                 </View>
                                 <View>
                                     <Text style={{ fontWeight: 'bold', color: colors.text }}>Últimos 12 Meses</Text>
-                                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Resumo consolidado do último ano</Text>
+                                    <Text style={{ fontSize: 12, color: colors.textMuted }}>Resumo consolidado do último ano</Text>
                                 </View>
                             </TouchableOpacity>
 
@@ -2637,12 +3124,16 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                 style={{
                                     flexDirection: 'row',
                                     alignItems: 'center',
+                                    minHeight: 56,
                                     padding: 16,
                                     borderRadius: 12,
                                     borderWidth: 1,
-                                    borderColor: exportPeriodType === "specific" ? colors.primary : colors.border,
-                                    backgroundColor: exportPeriodType === "specific" ? colors.primary + '10' : 'transparent'
+                                    borderColor: exportPeriodType === "specific" ? colors.primary : colors.inputBorder,
+                                    backgroundColor: exportPeriodType === "specific" ? colors.primary + '15' : 'transparent'
                                 }}
+                                accessibilityRole="radio"
+                                accessibilityLabel="Mês Específico: Dados de um período único"
+                                accessibilityState={{ checked: exportPeriodType === "specific", selected: exportPeriodType === "specific" }}
                             >
                                 <View style={{
                                     width: 20,
@@ -2653,12 +3144,12 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     marginRight: 12
-                                }}>
+                                }} importantForAccessibility="no">
                                     {exportPeriodType === "specific" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary }} />}
                                 </View>
                                 <View>
                                     <Text style={{ fontWeight: 'bold', color: colors.text }}>Mês Específico</Text>
-                                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Dados de um período único</Text>
+                                    <Text style={{ fontSize: 12, color: colors.textMuted }}>Dados de um período único</Text>
                                 </View>
                             </TouchableOpacity>
                         </View>
@@ -2674,21 +3165,26 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         }}
                                         style={{
                                             backgroundColor: colors.background,
+                                            minHeight: 44,
                                             padding: 12,
                                             borderRadius: 10,
                                             borderWidth: 1,
-                                            borderColor: colors.border,
+                                            borderColor: colors.inputBorder,
                                             flexDirection: 'row',
-                                            justifyContent: 'space-between'
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
                                         }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Mês para exportação: ${months[parseInt(exportMonth)].label}`}
+                                        accessibilityState={{ expanded: exportMonthPickerVisible }}
                                     >
                                         <Text style={{ color: colors.text }}>{months[parseInt(exportMonth)].label}</Text>
-                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
+                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} importantForAccessibility="no" />
                                     </TouchableOpacity>
 
                                     {exportMonthPickerVisible && (
                                         <View style={{
-                                            position: 'absolute', bottom: '100%', left: 0, width: 200,
+                                            position: 'absolute', bottom: '100%', left: 0, width: 220,
                                             backgroundColor: colors.cardBackground, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
                                             padding: 8, flexDirection: 'row', flexWrap: 'wrap', zIndex: 1000, elevation: 10
                                         }}>
@@ -2696,7 +3192,10 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                 <TouchableOpacity
                                                     key={m.value}
                                                     onPress={() => { setExportMonth(m.value); setExportMonthPickerVisible(false); }}
-                                                    style={{ width: '33.3%', paddingVertical: 10, alignItems: 'center' }}
+                                                    style={{ width: '33.3%', minHeight: 44, justifyContent: 'center', paddingVertical: 10, alignItems: 'center' }}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={m.label}
+                                                    accessibilityState={{ selected: exportMonth === m.value }}
                                                 >
                                                     <Text style={{ color: colors.text, fontSize: 12, fontWeight: exportMonth === m.value ? 'bold' : 'normal' }}>{m.label.substring(0, 3)}</Text>
                                                 </TouchableOpacity>
@@ -2714,16 +3213,21 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                         }}
                                         style={{
                                             backgroundColor: colors.background,
+                                            minHeight: 44,
                                             padding: 12,
                                             borderRadius: 10,
                                             borderWidth: 1,
-                                            borderColor: colors.border,
+                                            borderColor: colors.inputBorder,
                                             flexDirection: 'row',
-                                            justifyContent: 'space-between'
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
                                         }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Ano para exportação: ${exportYear}`}
+                                        accessibilityState={{ expanded: exportYearPickerVisible }}
                                     >
                                         <Text style={{ color: colors.text }}>{exportYear}</Text>
-                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
+                                        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} importantForAccessibility="no" />
                                     </TouchableOpacity>
 
                                     {exportYearPickerVisible && (
@@ -2736,7 +3240,10 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                                 <TouchableOpacity
                                                     key={y}
                                                     onPress={() => { setExportYear(y); setExportYearPickerVisible(false); }}
-                                                    style={{ paddingVertical: 10, alignItems: 'center' }}
+                                                    style={{ minHeight: 44, justifyContent: 'center', paddingVertical: 10, alignItems: 'center' }}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={y}
+                                                    accessibilityState={{ selected: exportYear === y }}
                                                 >
                                                     <Text style={{ color: colors.text, fontSize: 12, fontWeight: exportYear === y ? 'bold' : 'normal' }}>{y}</Text>
                                                 </TouchableOpacity>
@@ -2748,17 +3255,23 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         )}
 
                         <TouchableOpacity
-                            onPress={() => {
-                                setExportModalVisible(false);
-                                if (pendingExportType === "pdf") handleExportPDF();
-                                else if (pendingExportType === "excel") handleExportExcel();
-                                else if (pendingExportType === "csv") handleExportCSV();
+                            onPress={async () => {
+                                try {
+                                    if (pendingExportType === "pdf") await handleExportPDF();
+                                    else if (pendingExportType === "excel") await handleExportExcel();
+                                    else if (pendingExportType === "csv") await handleExportCSV();
+                                } finally {
+                                    setExportModalVisible(false);
+                                }
                             }}
                             disabled={exportLoading}
-                            style={[styles.primaryButton, { backgroundColor: colors.primary, flexDirection: 'row', gap: 10, marginBottom: 30 }]}
+                            style={[styles.primaryButton, { backgroundColor: colors.primary, minHeight: 48, justifyContent: 'center', flexDirection: 'row', gap: 10, opacity: exportLoading ? 0.7 : 1 }]}
+                            accessibilityRole="button"
+                            accessibilityLabel={exportLoading ? 'Processando relatório, aguarde' : 'Gerar Arquivo'}
+                            accessibilityState={{ disabled: exportLoading, busy: exportLoading }}
                         >
-                            {exportLoading && <ActivityIndicator size="small" color="#fff" />}
-                            <Text style={styles.primaryButtonText}>{exportLoading ? "Processando..." : "Gerar Arquivo"}</Text>
+                            {exportLoading && <ActivityIndicator size="small" color={colors.onPrimary} />}
+                            <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>{exportLoading ? "Processando..." : "Gerar Arquivo"}</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -2767,11 +3280,16 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             {/* Modal de Ordenação dos Cards */}
             <Modal visible={isOrderModalVisible} animationType="slide" transparent={true} onRequestClose={() => setOrderModalVisible(false)}>
                 <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+                    <View accessibilityViewIsModal style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: Math.max(insets.bottom, 24) }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Ordenar Visão Geral</Text>
-                            <TouchableOpacity onPress={() => setOrderModalVisible(false)}>
-                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+                            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Ordenar Visão Geral</Text>
+                            <TouchableOpacity
+                                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                onPress={() => setOrderModalVisible(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fechar ordenação dos cartões"
+                            >
+                                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} importantForAccessibility="no" />
                             </TouchableOpacity>
                         </View>
                         <Text style={[styles.modalSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>Altere a ordem de exibição dos painéis principais.</Text>
@@ -2779,25 +3297,50 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         <View style={{ gap: 8, marginBottom: 24 }}>
                             {tempOrder.map((key, index) => {
                                 const iconMap: Record<CardKey, string> = { waste: 'water-outline', energy: 'lightning-bolt', tax: 'currency-usd', efficiency: 'leaf' };
+                                const cardTitle = getCardTitle(key);
 
                                 return (
-                                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: data[key].color, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
-                                        <MaterialCommunityIcons name={iconMap[key] as any} size={18} color="#fff" style={{ marginRight: 8 }} />
-                                        <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {getCardTitle(key)}</Text>
-                                        <View style={{ flexDirection: 'row', gap: 4 }}>
+                                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colorToMetric[key], padding: 12, borderRadius: 8 }}>
+                                        <MaterialCommunityIcons name={iconMap[key] as any} size={18} color="#fff" style={{ marginRight: 8 }} importantForAccessibility="no" />
+                                        <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' }}>{index + 1}. {cardTitle}</Text>
+                                        <View style={{ flexDirection: 'row', gap: 6 }}>
                                             <TouchableOpacity
-                                                style={{ backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                                style={{
+                                                    width: 44,
+                                                    height: 44,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    backgroundColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.25)',
+                                                    borderRadius: 8,
+                                                    borderWidth: 1,
+                                                    borderColor: index === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)'
+                                                }}
                                                 onPress={() => moveCard(index, 'up')}
                                                 disabled={index === 0}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={`Mover ${cardTitle} para cima`}
+                                                accessibilityState={{ disabled: index === 0 }}
                                             >
-                                                <MaterialCommunityIcons name="chevron-up" size={20} color={index === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                                <MaterialCommunityIcons name="chevron-up" size={20} color={index === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} importantForAccessibility="no" />
                                             </TouchableOpacity>
                                             <TouchableOpacity
-                                                style={{ backgroundColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)' }}
+                                                style={{
+                                                    width: 44,
+                                                    height: 44,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    backgroundColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.25)',
+                                                    borderRadius: 8,
+                                                    borderWidth: 1,
+                                                    borderColor: index === tempOrder.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)'
+                                                }}
                                                 onPress={() => moveCard(index, 'down')}
                                                 disabled={index === tempOrder.length - 1}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={`Mover ${cardTitle} para baixo`}
+                                                accessibilityState={{ disabled: index === tempOrder.length - 1 }}
                                             >
-                                                <MaterialCommunityIcons name="chevron-down" size={20} color={index === tempOrder.length - 1 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+                                                <MaterialCommunityIcons name="chevron-down" size={20} color={index === tempOrder.length - 1 ? 'rgba(255,255,255,0.4)' : '#fff'} importantForAccessibility="no" />
                                             </TouchableOpacity>
                                         </View>
                                     </View>
@@ -2806,11 +3349,21 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         </View>
 
                         <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border, flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' }]} onPress={resetCardOrder}>
-                                <Text style={[styles.cancelText, { color: colors.textMuted, fontWeight: '600' }]}>Restaurar Padrão</Text>
+                            <TouchableOpacity
+                                style={[styles.cancelBtn, { borderColor: colors.inputBorder, flex: 1, minHeight: 44, paddingVertical: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }]}
+                                onPress={resetCardOrder}
+                                accessibilityRole="button"
+                                accessibilityLabel="Restaurar Ordem Padrão"
+                            >
+                                <Text style={[styles.cancelText, { color: colors.text, fontWeight: '600' }]}>Restaurar Padrão</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, marginTop: 0 }]} onPress={() => saveCardOrder(cardOrder, tempOrder)}>
-                                <Text style={styles.primaryButtonText}>Salvar Ordem</Text>
+                            <TouchableOpacity
+                                style={[styles.primaryButton, { flex: 1, backgroundColor: colors.primary, minHeight: 44, marginTop: 0, justifyContent: 'center' }]}
+                                onPress={() => saveCardOrder(cardOrder, tempOrder)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Salvar Ordem"
+                            >
+                                <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>Salvar Ordem</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -2828,8 +3381,43 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
     )
 }
 
+function parseStrictScheduleDateTime(dateStr: string, timeStr: string): { iso: string } | { error: string } {
+    const dMatch = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!dMatch) return { error: 'Formato de data inválido. Use DD/MM/AAAA.' };
+
+    const tMatch = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!tMatch) return { error: 'Formato de horário inválido. Use HH:MM.' };
+
+    const day = Number(dMatch[1]);
+    const month = Number(dMatch[2]);
+    const year = Number(dMatch[3]);
+    const hour = Number(tMatch[1]);
+    const minute = Number(tMatch[2]);
+
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        return { error: 'Data inválida. Verifique o dia e o mês informados.' };
+    }
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return { error: 'Horário inválido. Informe valores entre 00:00 e 23:59.' };
+    }
+
+    const dt = new Date(year, month - 1, day, hour, minute, 0);
+    if (
+        dt.getFullYear() !== year ||
+        dt.getMonth() !== month - 1 ||
+        dt.getDate() !== day
+    ) {
+        return { error: 'Data inexistente no calendário.' };
+    }
+
+    return { iso: dt.toISOString() };
+}
+
 const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, alertsEnabled: boolean, activeBiodigester?: any, onNavigateNotifications?: () => void }>(({ onAddMaintenance, alertsEnabled, activeBiodigester, onNavigateNotifications }, ref) => {
-    const { colors } = useTheme();
+    const { colors, theme } = useTheme();
+    const isDark = theme === 'dark';
+    const { width: windowWidth } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const [editingId, setEditingId] = useState<string | null>(null);
     const [temp, setTemp] = useState(35.5);
     const [pressure, setPressure] = useState(1.45);
@@ -2841,7 +3429,9 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
     const [expanded, setExpanded] = useState(false);
     const [maintenanceModalVisible, setMaintenanceModalVisible] = useState(false);
     const [maintenanceStep, setMaintenanceStep] = useState(1);
-    const [alertSent, setAlertSent] = useState(false);
+    const [submittingMaintenance, setSubmittingMaintenance] = useState(false);
+    const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
+    const dismissedAlertKeyRef = useRef<string | null>(null);
     const [maintenanceForm, setMaintenanceForm] = useState({
         name: '',
         email: '',
@@ -2851,6 +3441,18 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
         date: '',
         time: ''
     });
+
+    useEffect(() => {
+        let mounted = true;
+        AccessibilityInfo.isReduceMotionEnabled()
+            .then((enabled) => {
+                if (mounted) setReduceMotionEnabled(enabled);
+            })
+            .catch(() => {});
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     React.useImperativeHandle(ref, () => ({
         edit: (item: any) => {
@@ -2884,41 +3486,42 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
         }
     }));
 
+    const handleNextStep = () => {
+        if (maintenanceStep === 1 && !maintenanceForm.name.trim()) {
+            showAlert("Aviso", "Por favor, preencha o Nome Completo antes de continuar.");
+            return;
+        }
+        setMaintenanceStep(s => s + 1);
+    };
+
     const handleScheduleMaintenance = async () => {
-        if (!maintenanceForm.name || !maintenanceForm.date || !maintenanceForm.time) {
-            Alert.alert("Erro", "Por favor, preencha nome, data (DD/MM/AAAA) e hora (HH:MM).");
+        if (!maintenanceForm.name.trim() || !maintenanceForm.date.trim() || !maintenanceForm.time.trim()) {
+            showAlert("Erro", "Por favor, preencha nome, data (DD/MM/AAAA) e hora (HH:MM).");
             return;
         }
 
-        let dtIso = '';
-        try {
-            const parts = maintenanceForm.date.split('/');
-            if (parts.length === 3) {
-                const [dd, mm, yyyy] = parts;
-                dtIso = new Date(`${yyyy}-${mm}-${dd}T${maintenanceForm.time}:00`).toISOString();
-            } else {
-                throw new Error("Formato inválido");
-            }
-        } catch {
-            Alert.alert("Erro", "Formato de data inválido. Use DD/MM/AAAA.");
+        const parsed = parseStrictScheduleDateTime(maintenanceForm.date, maintenanceForm.time);
+        if ('error' in parsed) {
+            showAlert("Erro", parsed.error);
             return;
         }
 
+        setSubmittingMaintenance(true);
         try {
             if (editingId) {
                 const res = await maintenanceApi.updateSchedule(editingId, 'pending');
                 if (!res.success) {
-                    Alert.alert("Erro ao atualizar", res.error || 'Erro desconhecido');
+                    showAlert("Erro ao atualizar", res.error || 'Erro desconhecido');
                     return;
                 }
             } else {
                 const res = await maintenanceApi.createSchedule({
-                    name: maintenanceForm.name,
+                    name: maintenanceForm.name.trim(),
                     priority: maintenanceForm.priority,
-                    scheduledDate: dtIso,
+                    scheduledDate: parsed.iso,
                 });
                 if (!res.success) {
-                    Alert.alert("Erro ao salvar", res.error || 'Erro desconhecido');
+                    showAlert("Erro ao salvar", res.error || 'Erro desconhecido');
                     return;
                 }
             }
@@ -2927,14 +3530,15 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                 onAddMaintenance();
             }
 
-            Alert.alert("Sucesso", editingId ? "Manutenção atualizada!" : "Manutenção agendada com sucesso!");
+            showAlert("Sucesso", editingId ? "Manutenção atualizada!" : "Manutenção agendada com sucesso!");
             setMaintenanceModalVisible(false);
             setEditingId(null);
             setMaintenanceStep(1);
             setMaintenanceForm({ name: '', email: '', phone: '', priority: 'Média - Problema técnico', description: '', date: '', time: '' });
-        } catch (error) {
-            console.log(error);
-            Alert.alert("Erro", "Não foi possível agendar a manutenção. Tente novamente.");
+        } catch {
+            showAlert("Erro", "Não foi possível agendar a manutenção. Tente novamente.");
+        } finally {
+            setSubmittingMaintenance(false);
         }
     }
 
@@ -2991,6 +3595,7 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
         const target = simSensor === 'auto' ? 'temp' : simSensor;
         let sType = 'temperatura';
         let val = 35.5;
+        dismissedAlertKeyRef.current = null;
 
         if (level === 'info') {
             setTimeElapsed(0);
@@ -3033,15 +3638,12 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
             setCycleCount((prev) => prev + 1);
             setTimeElapsed((prev) => (prev + 1) % 16);
 
-            // Determina qual sensor está no foco do ciclo
             let targetSensor = simSensor;
             if (simSensor === 'auto') {
                 const autoIndex = Math.floor(cycleCount / 16) % 4;
                 targetSensor = autoIndex === 0 ? 'temp' : autoIndex === 1 ? 'pressure' : autoIndex === 2 ? 'ph' : 'h2s';
             }
 
-            // 1. Simulação de Temperatura
-            // Normal: 35.0-37.5 | Atenção: 37.6-38.5 | Médio: 38.6-40.0 | Crítico: > 40.0
             if (targetSensor === 'temp') {
                 if (timeElapsed >= 4 && timeElapsed <= 6) {
                     setTemp(38.0 + (Math.random() - 0.5) * 0.4);
@@ -3058,8 +3660,6 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                 setTemp((prev) => Math.max(35.0, Math.min(36.2, prev + (Math.random() - 0.5) * 0.2)));
             }
 
-            // 2. Simulação de Pressão (bar)
-            // Normal: 1.20-1.60 | Atenção: 1.61-1.75 | Médio: 1.76-1.90 | Crítico: > 1.90
             if (targetSensor === 'pressure') {
                 if (timeElapsed >= 4 && timeElapsed <= 6) {
                     setPressure(1.68 + (Math.random() - 0.5) * 0.04);
@@ -3076,8 +3676,6 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                 setPressure((prev) => Math.max(1.40, Math.min(1.50, prev + (Math.random() - 0.5) * 0.02)));
             }
 
-            // 3. Simulação de pH
-            // Normal: 6.8-7.4 | Atenção: 6.5-6.7 | Médio: 6.2-6.4 | Crítico: < 6.2
             if (targetSensor === 'ph') {
                 if (timeElapsed >= 4 && timeElapsed <= 6) {
                     setPh(6.62 + (Math.random() - 0.5) * 0.05);
@@ -3094,8 +3692,6 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                 setPh((prev) => Math.max(7.00, Math.min(7.20, prev + (Math.random() - 0.5) * 0.02)));
             }
 
-            // 4. Simulação de H2S (ppm)
-            // Normal: < 200 | Atenção: 200-400 | Médio: 401-700 | Crítico: > 700
             if (targetSensor === 'h2s') {
                 if (timeElapsed >= 4 && timeElapsed <= 6) {
                     setH2s(Math.round(290 + (Math.random() - 0.5) * 30));
@@ -3115,7 +3711,6 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
         return () => clearInterval(interval);
     }, [timeElapsed, simSensor, cycleCount]);
 
-    // Classificação contínua das métricas dos 4 sensores
     const tempClass = classifySensorReading('temperatura', temp);
     const pressClass = classifySensorReading('pressao', pressure);
     const phClass = classifySensorReading('ph', ph);
@@ -3130,13 +3725,16 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
     const isMedium = sorted[0].alertLevel === 'medium';
     const isLow = sorted[0].alertLevel === 'low';
 
-    // Gravação contínua no histórico quando anomalia detectada (Atenção, Médio ou Crítico)
     useEffect(() => {
+        if (!isCritical) {
+            dismissedAlertKeyRef.current = null;
+        }
         if (highestAlert && highestAlert.isAnomaly) {
             const sType = highestAlert.unit === '°C' ? 'temperatura' : highestAlert.unit === 'bar' ? 'pressao' : highestAlert.unit === 'pH' ? 'ph' : 'h2s';
             const rVal = highestAlert.unit === '°C' ? temp : highestAlert.unit === 'bar' ? pressure : highestAlert.unit === 'pH' ? ph : h2s;
+            const alertCycleKey = `${sType}_${highestAlert.alertLevel}`;
 
-            if (isCritical && alertsEnabled) {
+            if (isCritical && alertsEnabled && dismissedAlertKeyRef.current !== alertCycleKey) {
                 setExpanded(true);
             }
 
@@ -3144,9 +3742,8 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
         }
     }, [highestAlert?.alertLevel, highestAlert?.unit, isCritical]);
 
-    // Ativa animação quando crítico
     useEffect(() => {
-        if (isCritical && !expanded) {
+        if (isCritical && !expanded && !reduceMotionEnabled) {
             Animated.loop(
                 Animated.sequence([
                     Animated.timing(pulseAnim, { toValue: 1.25, duration: 600, useNativeDriver: true }),
@@ -3157,219 +3754,263 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
             pulseAnim.setValue(1);
             pulseAnim.stopAnimation();
         }
-    }, [isCritical, expanded]);
+    }, [isCritical, expanded, reduceMotionEnabled]);
 
-    // Componente auxiliar de Badge de Sensor
     const renderSensorTag = (level: string, label: string) => {
-        const info = getCriticalityBadgeInfo(level);
+        const info = getCriticalityBadgeInfo(level, theme);
         return (
             <View style={{ backgroundColor: info.bgColor, borderColor: info.borderColor, borderWidth: 0.5, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                <Text style={{ fontSize: 9, fontWeight: '700', color: info.color }}>{label.toUpperCase()}</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: info.color }}>{label.toUpperCase()}</Text>
             </View>
         );
     };
 
+    const sensorValueColor = (level: string) => getCriticalityBadgeInfo(level, theme).color;
+    const highestBadge = highestAlert ? getCriticalityBadgeInfo(highestAlert.alertLevel, theme) : null;
+    const ctaFillColor = isCritical ? '#b91c1c' : isMedium ? '#c2410c' : '#854d0e';
+
     return (
-        <View style={{ position: 'absolute', bottom: 100, right: 20, zIndex: 999, alignItems: 'flex-end' }}>
+        <View style={{ position: 'absolute', bottom: Math.max(insets.bottom + 84, 100), right: 16, zIndex: 999, alignItems: 'flex-end' }}>
             {expanded && (
-                <View style={{ width: 300, backgroundColor: colors.cardBackground, borderRadius: 14, padding: 16, elevation: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: isCritical ? '#fecaca' : isMedium ? '#fdba74' : colors.border }}>
+                <View style={{ width: Math.min(310, windowWidth - 32), maxHeight: '65%', backgroundColor: colors.cardBackground, borderRadius: 14, padding: 16, elevation: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: isCritical ? colors.dangerBorder : isMedium ? '#fdba74' : colors.border }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <MaterialCommunityIcons name="access-point" size={16} color={colors.primary} />
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>Monitoramento de Sensores</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                            <MaterialCommunityIcons name="access-point" size={16} color={colors.primary} importantForAccessibility="no" />
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }} accessibilityRole="header">
+                                Monitoramento de Sensores
+                            </Text>
                         </View>
-                        <TouchableOpacity onPress={() => setExpanded(false)}>
-                            <Text style={{ fontSize: 16, color: colors.textMuted }}>✕</Text>
+                        <TouchableOpacity
+                            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10, marginTop: -8 }}
+                            onPress={() => {
+                                if (highestAlert) {
+                                    const sType = highestAlert.unit === '°C' ? 'temperatura' : highestAlert.unit === 'bar' ? 'pressao' : highestAlert.unit === 'pH' ? 'ph' : 'h2s';
+                                    dismissedAlertKeyRef.current = `${sType}_${highestAlert.alertLevel}`;
+                                }
+                                setExpanded(false);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Fechar monitoramento de sensores"
+                        >
+                            <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} importantForAccessibility="no" />
                         </TouchableOpacity>
                     </View>
 
-                    {/* Linhas de Dados dos 4 Sensores */}
-                    <View style={{ gap: 9, marginBottom: 14 }}>
-                        {/* 1. Temperatura */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>🌡️ Temperatura</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ color: tempClass.alertLevel === 'critical' ? '#dc2626' : tempClass.alertLevel === 'medium' ? '#ea580c' : tempClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
-                                    {temp.toFixed(1)}°C
-                                </Text>
-                                {renderSensorTag(tempClass.alertLevel, tempClass.label)}
-                            </View>
-                        </View>
-
-                        {/* 2. Pressão */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>⏱️ Pressão</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ color: pressClass.alertLevel === 'critical' ? '#dc2626' : pressClass.alertLevel === 'medium' ? '#ea580c' : pressClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
-                                    {pressure.toFixed(2)} bar
-                                </Text>
-                                {renderSensorTag(pressClass.alertLevel, pressClass.label)}
-                            </View>
-                        </View>
-
-                        {/* 3. pH */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>💧 pH Biomassa</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ color: phClass.alertLevel === 'critical' ? '#dc2626' : phClass.alertLevel === 'medium' ? '#ea580c' : phClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
-                                    {ph.toFixed(1)}
-                                </Text>
-                                {renderSensorTag(phClass.alertLevel, phClass.label)}
-                            </View>
-                        </View>
-
-                        {/* 4. H2S */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>🧪 H2S (Gás)</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ color: h2sClass.alertLevel === 'critical' ? '#dc2626' : h2sClass.alertLevel === 'medium' ? '#ea580c' : h2sClass.alertLevel === 'low' ? '#ca8a04' : colors.text, fontWeight: 'bold', fontSize: 13 }}>
-                                    {h2s.toFixed(0)} ppm
-                                </Text>
-                                {renderSensorTag(h2sClass.alertLevel, h2sClass.label)}
-                            </View>
-                        </View>
-                    </View>
-
-                    {/* Barra de Seleção de Sensor Simulado */}
-                    <View style={{ backgroundColor: colors.background, padding: 8, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: colors.border }}>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textMuted, marginBottom: 5 }}>
-                            SIMULAR SENSOR: {simSensor.toUpperCase()}
-                        </Text>
-                        <View style={{ flexDirection: 'row', gap: 4, marginBottom: 6 }}>
-                            {[
-                                { key: 'auto', label: 'Auto 🔄' },
-                                { key: 'temp', label: 'Temp' },
-                                { key: 'pressure', label: 'Pressão' },
-                                { key: 'ph', label: 'pH' },
-                                { key: 'h2s', label: 'H2S' },
-                            ].map((s) => (
-                                <TouchableOpacity
-                                    key={s.key}
-                                    style={{
-                                        flex: 1,
-                                        paddingVertical: 4,
-                                        alignItems: 'center',
-                                        borderRadius: 4,
-                                        backgroundColor: simSensor === s.key ? colors.primary : colors.cardBackground,
-                                        borderWidth: 0.5,
-                                        borderColor: colors.border
-                                    }}
-                                    onPress={() => setSimSensor(s.key as any)}
-                                >
-                                    <Text style={{ fontSize: 9, fontWeight: '600', color: simSensor === s.key ? '#fff' : colors.text }}>
-                                        {s.label}
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {/* Linhas de Dados dos 4 Sensores */}
+                        <View style={{ gap: 9, marginBottom: 14 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <MaterialCommunityIcons name="thermometer" size={15} color={colors.textMuted} importantForAccessibility="no" />
+                                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>Temperatura</Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ color: tempClass.alertLevel === 'info' ? colors.text : sensorValueColor(tempClass.alertLevel), fontWeight: 'bold', fontSize: 13 }}>
+                                        {temp.toFixed(1)}°C
                                     </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-
-                        {/* Teste Rápido de Nível */}
-                        <View style={{ flexDirection: 'row', gap: 4 }}>
-                            {[
-                                { key: 'info', label: 'Normal', color: '#0284c7' },
-                                { key: 'low', label: 'Atenção', color: '#ca8a04' },
-                                { key: 'medium', label: 'Médio', color: '#ea580c' },
-                                { key: 'critical', label: 'Crítico', color: '#dc2626' },
-                            ].map((lvl) => (
-                                <TouchableOpacity
-                                    key={lvl.key}
-                                    style={{
-                                        flex: 1,
-                                        paddingVertical: 3,
-                                        alignItems: 'center',
-                                        borderRadius: 4,
-                                        borderWidth: 0.5,
-                                        borderColor: lvl.color
-                                    }}
-                                    onPress={() => handleTestLevel(lvl.key as any)}
-                                >
-                                    <Text style={{ fontSize: 9, fontWeight: '700', color: lvl.color }}>
-                                        {lvl.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* Alerta / Anomalia Embutido com Classificação */}
-                    {highestAlert && highestAlert.isAnomaly && (
-                        <View style={{
-                            backgroundColor: isCritical ? '#fee2e2' : isMedium ? '#ffedd5' : '#fef9c3',
-                            padding: 10,
-                            borderRadius: 8,
-                            borderWidth: 1,
-                            borderColor: isCritical ? '#fecaca' : isMedium ? '#fed7aa' : '#fde047'
-                        }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-                                <Text style={{
-                                    color: isCritical ? '#b91c1c' : isMedium ? '#c2410c' : '#854d0e',
-                                    fontWeight: 'bold',
-                                    fontSize: 12
-                                }}>
-                                    ⚠️ {highestAlert.label}: {highestAlert.unit === '°C' ? 'Temperatura' : highestAlert.unit === 'bar' ? 'Pressão' : highestAlert.unit === 'pH' ? 'pH' : 'H2S'}
-                                </Text>
+                                    {renderSensorTag(tempClass.alertLevel, tempClass.label)}
+                                </View>
                             </View>
-                            <Text style={{
-                                color: isCritical ? '#991b1b' : isMedium ? '#9a3412' : '#713f12',
-                                fontSize: 11,
-                                lineHeight: 15,
-                                marginBottom: 8
-                            }}>
-                                {highestAlert.description}
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <MaterialCommunityIcons name="gauge" size={15} color={colors.textMuted} importantForAccessibility="no" />
+                                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>Pressão</Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ color: pressClass.alertLevel === 'info' ? colors.text : sensorValueColor(pressClass.alertLevel), fontWeight: 'bold', fontSize: 13 }}>
+                                        {pressure.toFixed(2)} bar
+                                    </Text>
+                                    {renderSensorTag(pressClass.alertLevel, pressClass.label)}
+                                </View>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <MaterialCommunityIcons name="water-percent" size={15} color={colors.textMuted} importantForAccessibility="no" />
+                                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>pH Biomassa</Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ color: phClass.alertLevel === 'info' ? colors.text : sensorValueColor(phClass.alertLevel), fontWeight: 'bold', fontSize: 13 }}>
+                                        {ph.toFixed(1)}
+                                    </Text>
+                                    {renderSensorTag(phClass.alertLevel, phClass.label)}
+                                </View>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <MaterialCommunityIcons name="molecule" size={15} color={colors.textMuted} importantForAccessibility="no" />
+                                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>H2S (Gás)</Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ color: h2sClass.alertLevel === 'info' ? colors.text : sensorValueColor(h2sClass.alertLevel), fontWeight: 'bold', fontSize: 13 }}>
+                                        {h2s.toFixed(0)} ppm
+                                    </Text>
+                                    {renderSensorTag(h2sClass.alertLevel, h2sClass.label)}
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Barra de Seleção de Sensor Simulado */}
+                        <View style={{ backgroundColor: colors.background, padding: 8, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: colors.border }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textMuted, marginBottom: 6 }}>
+                                SIMULAR SENSOR: {simSensor.toUpperCase()}
                             </Text>
-                            {lastSavedAlertText && (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.7)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 }}>
-                                    <MaterialCommunityIcons name="check-circle" size={12} color="#16a34a" />
-                                    <Text style={{ fontSize: 10, color: '#166534', fontWeight: '600' }}>
-                                        {lastSavedAlertText}
+                            <View style={{ flexDirection: 'row', gap: 4, marginBottom: 6 }}>
+                                {[
+                                    { key: 'auto', label: 'Auto' },
+                                    { key: 'temp', label: 'Temp' },
+                                    { key: 'pressure', label: 'Pressão' },
+                                    { key: 'ph', label: 'pH' },
+                                    { key: 'h2s', label: 'H2S' },
+                                ].map((s) => {
+                                    const selected = simSensor === s.key;
+                                    return (
+                                        <TouchableOpacity
+                                            key={s.key}
+                                            style={{
+                                                flex: 1,
+                                                minHeight: 36,
+                                                justifyContent: 'center',
+                                                paddingVertical: 4,
+                                                alignItems: 'center',
+                                                borderRadius: 6,
+                                                backgroundColor: selected ? colors.primary : colors.cardBackground,
+                                                borderWidth: 1,
+                                                borderColor: selected ? colors.primary : colors.border
+                                            }}
+                                            hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+                                            onPress={() => setSimSensor(s.key as any)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`Simular sensor ${s.label}`}
+                                            accessibilityState={{ selected }}
+                                        >
+                                            <Text style={{ fontSize: 11, fontWeight: '600', color: selected ? colors.onPrimary : colors.text }}>
+                                                {s.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            {/* Teste Rápido de Nível */}
+                            <View style={{ flexDirection: 'row', gap: 4 }}>
+                                {[
+                                    { key: 'info', label: 'Normal' },
+                                    { key: 'low', label: 'Atenção' },
+                                    { key: 'medium', label: 'Médio' },
+                                    { key: 'critical', label: 'Crítico' },
+                                ].map((lvl) => {
+                                    const lvlColor = getCriticalityBadgeInfo(lvl.key, theme).color;
+                                    return (
+                                        <TouchableOpacity
+                                            key={lvl.key}
+                                            style={{
+                                                flex: 1,
+                                                minHeight: 36,
+                                                justifyContent: 'center',
+                                                paddingVertical: 4,
+                                                alignItems: 'center',
+                                                borderRadius: 6,
+                                                borderWidth: 1,
+                                                borderColor: lvlColor
+                                            }}
+                                            hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+                                            onPress={() => handleTestLevel(lvl.key as any)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`Testar nível ${lvl.label}`}
+                                        >
+                                            <Text style={{ fontSize: 10, fontWeight: '700', color: lvlColor }}>
+                                                {lvl.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        </View>
+
+                        {/* Alerta / Anomalia Embutido com Classificação */}
+                        {highestAlert && highestAlert.isAnomaly && highestBadge && (
+                            <View
+                                style={{
+                                    backgroundColor: highestBadge.bgColor,
+                                    padding: 10,
+                                    borderRadius: 8,
+                                    borderWidth: 1,
+                                    borderColor: highestBadge.borderColor
+                                }}
+                                accessibilityRole="alert"
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                                    <Text style={{ color: highestBadge.color, fontWeight: 'bold', fontSize: 12 }}>
+                                        {highestAlert.label}: {highestAlert.unit === '°C' ? 'Temperatura' : highestAlert.unit === 'bar' ? 'Pressão' : highestAlert.unit === 'pH' ? 'pH' : 'H2S'}
                                     </Text>
                                 </View>
-                            )}
-                            <View style={{ gap: 6 }}>
-                                <TouchableOpacity
-                                    style={{
-                                        backgroundColor: isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04',
-                                        paddingVertical: 6,
-                                        borderRadius: 6,
-                                        alignItems: 'center'
-                                    }}
-                                    onPress={() => {
-                                        const sName = highestAlert.unit === '°C' ? 'Sensor Temperatura' : highestAlert.unit === 'bar' ? 'Sensor Pressão' : highestAlert.unit === 'pH' ? 'Sensor pH' : 'Sensor H2S';
-                                        setMaintenanceForm(prev => ({
-                                            ...prev,
-                                            name: `Manutenção - ${sName}`,
-                                            priority: isCritical ? 'Urgente - Problema técnico' : isMedium ? 'Alta - Problema técnico' : 'Média - Problema técnico',
-                                            description: highestAlert.description
-                                        }));
-                                        setMaintenanceModalVisible(true);
-                                    }}
-                                >
-                                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>Solicitar Manutenção</Text>
-                                </TouchableOpacity>
-
-                                {onNavigateNotifications && (
+                                <Text style={{ color: colors.text, fontSize: 12, lineHeight: 16, marginBottom: 8 }}>
+                                    {highestAlert.description}
+                                </Text>
+                                {lastSavedAlertText && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8, backgroundColor: colors.cardBackground, paddingHorizontal: 6, paddingVertical: 4, borderRadius: 4 }}>
+                                        <MaterialCommunityIcons name="check-circle" size={12} color={colors.primary} importantForAccessibility="no" />
+                                        <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }}>
+                                            {lastSavedAlertText}
+                                        </Text>
+                                    </View>
+                                )}
+                                <View style={{ gap: 6 }}>
                                     <TouchableOpacity
                                         style={{
-                                            borderWidth: 1,
-                                            borderColor: isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04',
-                                            paddingVertical: 5,
-                                            borderRadius: 6,
-                                            alignItems: 'center',
-                                            flexDirection: 'row',
+                                            backgroundColor: ctaFillColor,
+                                            minHeight: 44,
                                             justifyContent: 'center',
-                                            gap: 4
+                                            paddingVertical: 8,
+                                            borderRadius: 6,
+                                            alignItems: 'center'
                                         }}
-                                        onPress={onNavigateNotifications}
+                                        onPress={() => {
+                                            const sName = highestAlert.unit === '°C' ? 'Sensor Temperatura' : highestAlert.unit === 'bar' ? 'Sensor Pressão' : highestAlert.unit === 'pH' ? 'Sensor pH' : 'Sensor H2S';
+                                            setMaintenanceForm(prev => ({
+                                                ...prev,
+                                                name: `Manutenção - ${sName}`,
+                                                priority: isCritical ? 'Urgente - Problema técnico' : isMedium ? 'Alta - Problema técnico' : 'Média - Problema técnico',
+                                                description: highestAlert.description
+                                            }));
+                                            setMaintenanceModalVisible(true);
+                                        }}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Solicitar Manutenção"
                                     >
-                                        <MaterialCommunityIcons name="history" size={13} color={isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04'} />
-                                        <Text style={{ color: isCritical ? '#dc2626' : isMedium ? '#ea580c' : '#ca8a04', fontWeight: '700', fontSize: 11 }}>
-                                            Ver Histórico de Alertas →
-                                        </Text>
+                                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Solicitar Manutenção</Text>
                                     </TouchableOpacity>
-                                )}
+
+                                    {onNavigateNotifications && (
+                                        <TouchableOpacity
+                                            style={{
+                                                borderWidth: 1,
+                                                borderColor: highestBadge.color,
+                                                minHeight: 44,
+                                                paddingVertical: 6,
+                                                borderRadius: 6,
+                                                alignItems: 'center',
+                                                flexDirection: 'row',
+                                                justifyContent: 'center',
+                                                gap: 4
+                                            }}
+                                            onPress={onNavigateNotifications}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Ver Histórico de Alertas"
+                                        >
+                                            <MaterialCommunityIcons name="history" size={14} color={highestBadge.color} importantForAccessibility="no" />
+                                            <Text style={{ color: highestBadge.color, fontWeight: '700', fontSize: 12 }}>
+                                                Ver Histórico de Alertas →
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
                             </View>
-                        </View>
-                    )}
+                        )}
+                    </ScrollView>
                 </View>
             )}
 
@@ -3378,65 +4019,85 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                 visible={maintenanceModalVisible}
                 animationType="fade"
                 transparent={true}
-                onRequestClose={() => setMaintenanceModalVisible(false)}
+                onRequestClose={() => !submittingMaintenance && setMaintenanceModalVisible(false)}
             >
-                <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '90%', maxWidth: 400 }]}>
+                <KeyboardAvoidingView
+                    style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 16 }]}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    <View accessibilityViewIsModal style={[styles.modalContent, { backgroundColor: colors.cardBackground, width: '100%', maxWidth: 400 }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Agendar Manutenção</Text>
-                            <TouchableOpacity onPress={() => setMaintenanceModalVisible(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
+                            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">
+                                {editingId ? 'Editar Manutenção' : 'Agendar Manutenção'}
+                            </Text>
+                            <TouchableOpacity
+                                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}
+                                onPress={() => setMaintenanceModalVisible(false)}
+                                disabled={submittingMaintenance}
+                                accessibilityRole="button"
+                                accessibilityLabel="Fechar agendamento de manutenção"
+                            >
+                                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} importantForAccessibility="no" />
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView style={{ width: '100%', maxHeight: 450 }} showsVerticalScrollIndicator={false}>
+                        <ScrollView style={{ width: '100%', maxHeight: 450 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                             {/* Indicador de passos */}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 10 }}>
-                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 1 ? '#16a34a' : '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 1 ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 'bold' }}>1</Text></View>
-                                <View style={{ flex: 1, height: 3, backgroundColor: maintenanceStep >= 2 ? '#16a34a' : '#e5e7eb' }} />
-                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 2 ? '#16a34a' : '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 2 ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 'bold' }}>2</Text></View>
-                                <View style={{ flex: 1, height: 3, backgroundColor: maintenanceStep >= 3 ? '#16a34a' : '#e5e7eb' }} />
-                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 3 ? '#16a34a' : '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 3 ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 'bold' }}>3</Text></View>
+                            <View
+                                style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 10 }}
+                                accessible
+                                accessibilityLabel={`Etapa ${maintenanceStep} de 3`}
+                            >
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 1 ? colors.primary : colors.border, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 1 ? colors.onPrimary : colors.textMuted, fontSize: 12, fontWeight: 'bold' }}>1</Text></View>
+                                <View style={{ flex: 1, height: 3, backgroundColor: maintenanceStep >= 2 ? colors.primary : colors.border }} />
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 2 ? colors.primary : colors.border, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 2 ? colors.onPrimary : colors.textMuted, fontSize: 12, fontWeight: 'bold' }}>2</Text></View>
+                                <View style={{ flex: 1, height: 3, backgroundColor: maintenanceStep >= 3 ? colors.primary : colors.border }} />
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: maintenanceStep >= 3 ? colors.primary : colors.border, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: maintenanceStep >= 3 ? colors.onPrimary : colors.textMuted, fontSize: 12, fontWeight: 'bold' }}>3</Text></View>
                             </View>
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 5, marginBottom: 20 }}>
-                                <Text style={{ fontSize: 10, color: colors.textMuted }}>Dados</Text>
-                                <Text style={{ fontSize: 10, color: colors.textMuted }}>Problema</Text>
-                                <Text style={{ fontSize: 10, color: colors.textMuted }}>Agenda</Text>
+                                <Text style={{ fontSize: 11, color: colors.textMuted }}>Dados</Text>
+                                <Text style={{ fontSize: 11, color: colors.textMuted }}>Problema</Text>
+                                <Text style={{ fontSize: 11, color: colors.textMuted }}>Agenda</Text>
                             </View>
 
                             {maintenanceStep === 1 && (
                                 <View>
-                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]}>Seus dados</Text>
+                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]} accessibilityRole="header">Seus dados</Text>
                                     <View style={styles.formGroup}>
-                                        <Text style={[styles.label, { color: colors.text }]}>Nome Completo</Text>
+                                        <Text style={[styles.label, { color: colors.text }]}>Nome Completo *</Text>
                                         <TextInput
-                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                            style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background }]}
                                             value={maintenanceForm.name}
                                             onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, name: t })}
                                             placeholder="Ex: João da Silva"
                                             placeholderTextColor={colors.textMuted}
+                                            accessibilityLabel="Nome Completo obrigatório"
                                         />
                                     </View>
                                     <View style={styles.formGroup}>
-                                        <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+                                        <Text style={[styles.label, { color: colors.text }]}>Email (Opcional)</Text>
                                         <TextInput
-                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                            style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background }]}
                                             value={maintenanceForm.email}
                                             onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, email: t })}
                                             placeholder="Ex: joao@email.com"
                                             keyboardType="email-address"
+                                            autoCapitalize="none"
+                                            autoCorrect={false}
                                             placeholderTextColor={colors.textMuted}
+                                            accessibilityLabel="Email opcional"
                                         />
                                     </View>
                                     <View style={styles.formGroup}>
-                                        <Text style={[styles.label, { color: colors.text }]}>Telefone</Text>
+                                        <Text style={[styles.label, { color: colors.text }]}>Telefone (Opcional)</Text>
                                         <TextInput
-                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                            style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background }]}
                                             value={maintenanceForm.phone}
                                             onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, phone: t })}
                                             placeholder="Ex: 11 99999-9999"
                                             keyboardType="phone-pad"
                                             placeholderTextColor={colors.textMuted}
+                                            accessibilityLabel="Telefone opcional"
                                         />
                                     </View>
                                 </View>
@@ -3444,10 +4105,10 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
 
                             {maintenanceStep === 2 && (
                                 <View>
-                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]}>Descreva o problema</Text>
+                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]} accessibilityRole="header">Descreva o problema</Text>
                                     <View style={styles.formGroup}>
                                         <Text style={[styles.label, { color: colors.text }]}>Prioridade</Text>
-                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }} accessibilityRole="radiogroup" accessibilityLabel="Prioridade da manutenção">
                                             {['Baixa', 'Média', 'Alta', 'Urgente'].map((level) => {
                                                 const isSelected = maintenanceForm.priority.startsWith(level);
                                                 return (
@@ -3455,14 +4116,17 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                                                         key={level}
                                                         style={[
                                                             styles.urgencyBtn,
-                                                            { borderColor: colors.border, paddingHorizontal: 10, paddingVertical: 6 },
-                                                            isSelected && { backgroundColor: level === 'Alta' || level === 'Urgente' ? '#fee2e2' : colors.primaryLight, borderColor: level === 'Alta' || level === 'Urgente' ? '#ef4444' : colors.primary }
+                                                            { borderColor: colors.inputBorder, minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8 },
+                                                            isSelected && { backgroundColor: level === 'Alta' || level === 'Urgente' ? colors.dangerBg : colors.primaryLight, borderColor: level === 'Alta' || level === 'Urgente' ? colors.danger : colors.primary }
                                                         ]}
                                                         onPress={() => setMaintenanceForm({ ...maintenanceForm, priority: `${level} - Problema técnico` })}
+                                                        accessibilityRole="radio"
+                                                        accessibilityLabel={`Prioridade ${level}`}
+                                                        accessibilityState={{ selected: isSelected, checked: isSelected }}
                                                     >
                                                         <Text style={[
                                                             { fontSize: 12, color: colors.text },
-                                                            isSelected && { color: level === 'Alta' || level === 'Urgente' ? '#b91c1c' : colors.primary, fontWeight: 'bold' }
+                                                            isSelected && { color: level === 'Alta' || level === 'Urgente' ? colors.danger : colors.primaryDark, fontWeight: 'bold' }
                                                         ]}>{level}</Text>
                                                     </TouchableOpacity>
                                                 )
@@ -3470,15 +4134,16 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                                         </View>
                                     </View>
                                     <View style={styles.formGroup}>
-                                        <Text style={[styles.label, { color: colors.text }]}>Descrição Detalhada</Text>
+                                        <Text style={[styles.label, { color: colors.text }]}>Descrição Detalhada (Opcional)</Text>
                                         <TextInput
-                                            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background, height: 90 }]}
+                                            style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background, height: 90 }]}
                                             value={maintenanceForm.description}
                                             onChangeText={(t) => setMaintenanceForm({ ...maintenanceForm, description: t })}
                                             placeholder="Descreva o que está ocorrendo..."
                                             placeholderTextColor={colors.textMuted}
                                             multiline
                                             textAlignVertical="top"
+                                            accessibilityLabel="Descrição detalhada opcional"
                                         />
                                     </View>
                                 </View>
@@ -3486,12 +4151,12 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
 
                             {maintenanceStep === 3 && (
                                 <View>
-                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]}>Quando podemos te ajudar?</Text>
+                                    <Text style={[styles.modalSubtitle, { color: colors.text, fontWeight: 'bold', marginBottom: 16 }]} accessibilityRole="header">Quando podemos te ajudar?</Text>
                                     <View style={{ flexDirection: 'row', gap: 8 }}>
                                         <View style={[styles.formGroup, { flex: 1 }]}>
-                                            <Text style={[styles.label, { color: colors.text }]}>Data Preferida</Text>
+                                            <Text style={[styles.label, { color: colors.text }]}>Data Preferida *</Text>
                                             <TextInput
-                                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                                style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background }]}
                                                 value={maintenanceForm.date}
                                                 onChangeText={(t) => {
                                                     let val = t.replace(/\D/g, '');
@@ -3503,12 +4168,13 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                                                 keyboardType="numeric"
                                                 maxLength={10}
                                                 placeholderTextColor={colors.textMuted}
+                                                accessibilityLabel="Data preferida obrigatória no formato dia, mês e ano"
                                             />
                                         </View>
                                         <View style={[styles.formGroup, { flex: 1 }]}>
-                                            <Text style={[styles.label, { color: colors.text }]}>Horário</Text>
+                                            <Text style={[styles.label, { color: colors.text }]}>Horário *</Text>
                                             <TextInput
-                                                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                                style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.background }]}
                                                 value={maintenanceForm.time}
                                                 onChangeText={(t) => {
                                                     let val = t.replace(/\D/g, '');
@@ -3519,6 +4185,7 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                                                 keyboardType="numeric"
                                                 maxLength={5}
                                                 placeholderTextColor={colors.textMuted}
+                                                accessibilityLabel="Horário obrigatório no formato hora e minuto"
                                             />
                                         </View>
                                     </View>
@@ -3534,30 +4201,53 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
 
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
                                 {maintenanceStep > 1 ? (
-                                    <TouchableOpacity style={[styles.primaryButton, { flex: 0.4, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]} onPress={() => setMaintenanceStep(s => s - 1)}>
+                                    <TouchableOpacity
+                                        style={[styles.primaryButton, { flex: 0.4, minHeight: 44, justifyContent: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.inputBorder }]}
+                                        onPress={() => setMaintenanceStep(s => s - 1)}
+                                        disabled={submittingMaintenance}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Voltar para etapa anterior"
+                                    >
                                         <Text style={[styles.primaryButtonText, { color: colors.text }]}>Voltar</Text>
                                     </TouchableOpacity>
                                 ) : <View style={{ flex: 0.4 }} />}
 
                                 {maintenanceStep < 3 ? (
-                                    <TouchableOpacity style={[styles.primaryButton, { flex: 0.5, backgroundColor: '#16a34a' }]} onPress={() => setMaintenanceStep(s => s + 1)}>
-                                        <Text style={styles.primaryButtonText}>Próximo</Text>
+                                    <TouchableOpacity
+                                        style={[styles.primaryButton, { flex: 0.5, minHeight: 44, justifyContent: 'center', backgroundColor: colors.primary }]}
+                                        onPress={handleNextStep}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Avançar para próxima etapa"
+                                    >
+                                        <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>Próximo</Text>
                                     </TouchableOpacity>
                                 ) : (
-                                    <TouchableOpacity style={[styles.primaryButton, { flex: 0.6, backgroundColor: '#16a34a' }]} onPress={handleScheduleMaintenance}>
-                                        <Text style={styles.primaryButtonText}>Confirmar</Text>
+                                    <TouchableOpacity
+                                        style={[styles.primaryButton, { flex: 0.6, minHeight: 44, justifyContent: 'center', backgroundColor: colors.primary, opacity: submittingMaintenance ? 0.7 : 1 }]}
+                                        onPress={handleScheduleMaintenance}
+                                        disabled={submittingMaintenance}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={submittingMaintenance ? 'Confirmando agendamento, aguarde' : 'Confirmar agendamento'}
+                                        accessibilityState={{ disabled: submittingMaintenance, busy: submittingMaintenance }}
+                                    >
+                                        {submittingMaintenance ? (
+                                            <ActivityIndicator size="small" color={colors.onPrimary} />
+                                        ) : (
+                                            <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>Confirmar</Text>
+                                        )}
                                     </TouchableOpacity>
                                 )}
                             </View>
                         </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             {!expanded && (
                 <TouchableOpacity
                     style={{
-                        backgroundColor: isCritical ? '#dc2626' : isMedium ? '#ea580c' : isLow ? '#ca8a04' : colors.cardBackground,
+                        backgroundColor: isCritical ? '#b91c1c' : isMedium ? '#c2410c' : isLow ? '#854d0e' : colors.cardBackground,
+                        minHeight: 44,
                         flexDirection: 'row',
                         alignItems: 'center',
                         gap: 8,
@@ -3568,21 +4258,33 @@ const TelemetryWidget = React.forwardRef<any, { onAddMaintenance?: () => void, a
                         shadowColor: '#000',
                         shadowOpacity: 0.2,
                         borderWidth: 1,
-                        borderColor: isCritical ? '#b91c1c' : isMedium ? '#c2410c' : isLow ? '#a16207' : colors.border
+                        borderColor: isCritical ? '#991b1b' : isMedium ? '#9a3412' : isLow ? '#713f12' : colors.border
                     }}
                     onPress={() => setExpanded(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                        isCritical
+                            ? 'Alerta Crítico de sensores. Toque para abrir o monitoramento.'
+                            : isMedium
+                            ? 'Alerta Médio de sensores. Toque para abrir o monitoramento.'
+                            : isLow
+                            ? 'Atenção nos sensores. Toque para abrir o monitoramento.'
+                            : 'Monitoramento de sensores. Toque para abrir.'
+                    }
+                    accessibilityLiveRegion={isCritical ? 'assertive' : 'none'}
+                    accessibilityState={{ expanded }}
                 >
                     {isCritical ? (
-                        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                        <Animated.View style={{ transform: [{ scale: pulseAnim }] }} importantForAccessibility="no">
                             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff', position: 'absolute', top: -2, right: -2 }} />
                             <MaterialCommunityIcons name="alert" size={18} color="#fff" />
                         </Animated.View>
                     ) : isMedium ? (
-                        <MaterialCommunityIcons name="alert-outline" size={18} color="#fff" />
+                        <MaterialCommunityIcons name="alert-outline" size={18} color="#fff" importantForAccessibility="no" />
                     ) : isLow ? (
-                        <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#fff" />
+                        <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#fff" importantForAccessibility="no" />
                     ) : (
-                        <MaterialCommunityIcons name="access-point" size={18} color={colors.text} />
+                        <MaterialCommunityIcons name="access-point" size={18} color={colors.text} importantForAccessibility="no" />
                     )}
                     <Text style={{ fontWeight: '700', color: (isCritical || isMedium || isLow) ? '#fff' : colors.text, fontSize: 13 }}>
                         {isCritical ? 'Alerta Crítico' : isMedium ? 'Alerta Médio' : isLow ? 'Atenção' : 'Sensores'}
@@ -3603,59 +4305,54 @@ function MultiBar({ month, vals, selectedTab, isHighlight, onPress, details, isA
     details?: { waste: number, energy: number, tax: number },
     isAnySelected?: boolean
 }) {
-    const { colors } = useTheme();
+    const { colors, theme } = useTheme();
+    const isDark = theme === 'dark';
+    const energyColor = isDark ? '#facc15' : '#ca8a04';
+    const wasteColor = isDark ? '#4ade80' : '#15803d';
+    const taxColor = isDark ? '#60a5fa' : '#1d4ed8';
+
+    const spokenSummary = details
+        ? `${month}: Energia ${details.energy} quilowatt-hora, Resíduos ${details.waste} quilogramas, Benefícios ${details.tax} reais`
+        : month;
+
     return (
         <TouchableOpacity
             activeOpacity={0.8}
             onPress={onPress}
             style={styles.chartBarContainer}
+            accessibilityRole="button"
+            accessibilityLabel={spokenSummary}
+            accessibilityState={{ selected: !!isHighlight }}
         >
-            {isHighlight && details && (
-                <>
-                    <View style={{ position: 'absolute', top: 0, bottom: 20, width: 1, backgroundColor: colors.primary, opacity: 0.5, zIndex: 0 }} />
-                    <View style={{
-                        position: 'absolute',
-                        bottom: 110,
-                        backgroundColor: colors.cardBackground,
-                        padding: 8,
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                        width: 100,
-                        zIndex: 50,
-                        elevation: 4,
-                        shadowColor: '#000',
-                        shadowOpacity: 0.1,
-                        shadowRadius: 4
-                    }}>
-                        <Text style={{ fontSize: 9, color: colors.text, fontWeight: 'bold', marginBottom: 2 }}>{month}</Text>
-                        {(selectedTab === 'all' || selectedTab === 'energy') && <Text style={{ fontSize: 8, color: '#eab308' }}>⚡ {details.energy} kWh</Text>}
-                        {(selectedTab === 'all' || selectedTab === 'waste') && <Text style={{ fontSize: 8, color: '#22c55e' }}>◉ {details.waste} kg</Text>}
-                        {(selectedTab === 'all' || selectedTab === 'tax') && <Text style={{ fontSize: 8, color: '#3b82f6' }}>R$ {details.tax}</Text>}
-                    </View>
-                </>
+            {isHighlight && (
+                <View style={{ position: 'absolute', top: 0, bottom: 20, width: 1, backgroundColor: colors.primary, opacity: 0.5, zIndex: 0 }} importantForAccessibility="no" />
             )}
-            <View style={styles.barsArea}>
-                {(selectedTab === 'all' || selectedTab === 'energy') && <View style={[styles.chartBar, { height: `${vals[0]}%`, backgroundColor: '#eab308' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
-                {(selectedTab === 'all' || selectedTab === 'waste') && <View style={[styles.chartBar, { height: `${vals[1]}%`, backgroundColor: '#22c55e' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
-                {(selectedTab === 'all' || selectedTab === 'tax') && <View style={[styles.chartBar, { height: `${vals[2]}%`, backgroundColor: '#3b82f6' }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
+            <View style={styles.barsArea} importantForAccessibility="no-hide-descendants">
+                {(selectedTab === 'all' || selectedTab === 'energy') && <View style={[styles.chartBar, { height: `${vals[0]}%`, backgroundColor: energyColor }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
+                {(selectedTab === 'all' || selectedTab === 'waste') && <View style={[styles.chartBar, { height: `${vals[1]}%`, backgroundColor: wasteColor }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
+                {(selectedTab === 'all' || selectedTab === 'tax') && <View style={[styles.chartBar, { height: `${vals[2]}%`, backgroundColor: taxColor }, isHighlight && { opacity: 1 }, !isHighlight && isAnySelected && { opacity: 0.5 }]} />}
             </View>
             <Text style={[styles.chartLabel, { color: colors.textMuted }, isHighlight && { color: colors.primary, fontWeight: 'bold' }]}>{month}</Text>
         </TouchableOpacity>
     )
 }
 
-function StatCard({ title, value, unit, changePercent, increasing, iconName, iconProvider, color, bgColor }: any) {
+function StatCard({ title, value, unit, changePercent, increasing, iconName, color, bgColor }: any) {
     const { colors, theme } = useTheme();
-    // No modo escuro, os ícones de métrica podem ficar melhor combinados usando bgColor como semi-transparente 
-    // ou mantemos o original que já parece bem vibrante no design escuro.
-    const iconBackground = theme === 'dark' ? colors.iconBg : bgColor;
+    const isDark = theme === 'dark';
+    const iconBackground = isDark ? colors.iconBg : bgColor;
+    const trendColor = increasing ? (isDark ? '#4ade80' : '#15803d') : (isDark ? '#f87171' : '#b91c1c');
+    const spokenTrend = `${increasing ? 'aumento de' : 'queda de'} ${changePercent.trim()}`;
 
     return (
-        <View style={[styles.card, { width: '48%', backgroundColor: colors.cardBackground }]}>
+        <View
+            accessible
+            accessibilityLabel={`${title}: ${value}${unit ? ` ${unit}` : ''}, ${spokenTrend}`}
+            style={[styles.card, { width: '48%', backgroundColor: colors.cardBackground }]}
+        >
             <View style={styles.cardHeader}>
-                <View style={[styles.iconBg, { backgroundColor: iconBackground }]}>
-                    <MaterialCommunityIcons name={iconName || 'alert'} size={24} color={color} />
+                <View style={[styles.iconBg, { backgroundColor: iconBackground }]} importantForAccessibility="no">
+                    <MaterialCommunityIcons name={iconName || 'alert'} size={24} color={color} importantForAccessibility="no" />
                 </View>
             </View>
             <View style={styles.cardValue}>
@@ -3666,7 +4363,7 @@ function StatCard({ title, value, unit, changePercent, increasing, iconName, ico
                 <Text style={[styles.cardTitle, { color: colors.textMuted }]}>{title}</Text>
             </View>
             <View style={[styles.changeBadge, { marginTop: 8 }]}>
-                <Text style={{ color: increasing ? '#16a34a' : '#dc2626', fontSize: 11, fontWeight: '700' }}>
+                <Text style={{ color: trendColor, fontSize: 12, fontWeight: '700' }}>
                     {increasing ? '▲' : '▼'}{changePercent}
                 </Text>
             </View>
@@ -3748,8 +4445,7 @@ const styles = StyleSheet.create({
     },
     unitText: {
         fontSize: 12,
-        fontWeight: '500',
-        opacity: 0.7,
+        fontWeight: '600',
     },
     changeBadge: {
         flexDirection: 'row',
@@ -3832,7 +4528,7 @@ const styles = StyleSheet.create({
     statusPending: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#ca8a04',
+        color: '#854d0e',
         backgroundColor: '#fef08a',
         paddingHorizontal: 8,
         paddingVertical: 4,
@@ -3841,7 +4537,7 @@ const styles = StyleSheet.create({
     statusDone: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#16a34a',
+        color: '#15803d',
         backgroundColor: '#dcfce7',
         paddingHorizontal: 8,
         paddingVertical: 4,
@@ -3887,11 +4583,12 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     tab: {
+        minHeight: 40,
+        justifyContent: 'center',
         paddingHorizontal: 14,
         paddingVertical: 8,
         borderRadius: 20,
         marginRight: 8,
-        backgroundColor: '#f1f5f9',
     },
     tabText: {
         fontSize: 12,

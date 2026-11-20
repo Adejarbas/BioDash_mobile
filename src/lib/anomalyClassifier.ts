@@ -289,15 +289,19 @@ export function classifySensorReading(sensorType: string, value: number): Classi
 /**
  * Retorna as propriedades visuais padronizadas para cada nível de criticidade
  */
-export function getCriticalityBadgeInfo(alertLevel: string): BadgeStyleInfo {
+export function getCriticalityBadgeInfo(
+  alertLevel: string,
+  theme: 'light' | 'dark' = 'light'
+): BadgeStyleInfo {
   const norm = (alertLevel || '').toLowerCase().trim();
+  const isDark = theme === 'dark';
 
   if (norm === 'critical' || norm === 'critico') {
     return {
       label: 'Crítico',
-      color: '#dc2626',
-      bgColor: '#fee2e2',
-      borderColor: '#fca5a5',
+      color: isDark ? '#fca5a5' : '#b91c1c',
+      bgColor: isDark ? '#450a0a' : '#fee2e2',
+      borderColor: isDark ? '#991b1b' : '#fca5a5',
       iconName: 'alert-octagon',
       priorityLabel: 'Manutenção Urgente',
     };
@@ -306,9 +310,9 @@ export function getCriticalityBadgeInfo(alertLevel: string): BadgeStyleInfo {
   if (norm === 'medium' || norm === 'medio' || norm === 'alerta') {
     return {
       label: 'Alerta Médio',
-      color: '#ea580c',
-      bgColor: '#ffedd5',
-      borderColor: '#fdba74',
+      color: isDark ? '#fdba74' : '#c2410c',
+      bgColor: isDark ? '#431407' : '#ffedd5',
+      borderColor: isDark ? '#9a3412' : '#fdba74',
       iconName: 'alert',
       priorityLabel: 'Manutenção Alta',
     };
@@ -317,9 +321,9 @@ export function getCriticalityBadgeInfo(alertLevel: string): BadgeStyleInfo {
   if (norm === 'low' || norm === 'baixo' || norm === 'aviso') {
     return {
       label: 'Atenção',
-      color: '#ca8a04',
-      bgColor: '#fef9c3',
-      borderColor: '#fde047',
+      color: isDark ? '#fde047' : '#854d0e',
+      bgColor: isDark ? '#422006' : '#fef9c3',
+      borderColor: isDark ? '#854d0e' : '#fde047',
       iconName: 'alert-circle-outline',
       priorityLabel: 'Manutenção Média',
     };
@@ -328,9 +332,9 @@ export function getCriticalityBadgeInfo(alertLevel: string): BadgeStyleInfo {
   // info
   return {
     label: 'Normal',
-    color: '#0284c7',
-    bgColor: '#e0f2fe',
-    borderColor: '#bae6fd',
+    color: isDark ? '#7dd3fc' : '#0369a1',
+    bgColor: isDark ? '#082f49' : '#e0f2fe',
+    borderColor: isDark ? '#075985' : '#bae6fd',
     iconName: 'information-outline',
     priorityLabel: 'Baixa',
   };

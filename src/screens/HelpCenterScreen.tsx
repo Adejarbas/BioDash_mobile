@@ -1,79 +1,126 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Animated } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFadeInUp } from '../hooks/useFadeInUp';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, Colors } from '../context/ThemeContext';
+import { showAlert } from '../lib/feedback';
+import SubScreenHeader from '../components/SubScreenHeader';
 
 interface Props {
     onBack: () => void;
 }
 
+const SUPPORT_EMAIL = 'suporte@biodash.com';
+
+const FaqItem = ({
+    question,
+    answer,
+    colors,
+    isLast = false,
+}: {
+    question: string;
+    answer: string;
+    colors: Colors;
+    isLast?: boolean;
+}) => (
+    <View
+        style={[
+            styles.faqItem,
+            !isLast && { borderBottomWidth: 1, borderBottomColor: colors.border },
+        ]}
+    >
+        <Text style={[styles.faqQuestion, { color: colors.text }]} accessibilityRole="header">
+            {question}
+        </Text>
+        <Text style={[styles.faqAnswer, { color: colors.textMuted }]}>{answer}</Text>
+    </View>
+);
+
 export default function HelpCenterScreen({ onBack }: Props) {
     const { colors } = useTheme();
-    const { animatedStyle } = useFadeInUp()
+    const insets = useSafeAreaInsets();
+    const { animatedStyle } = useFadeInUp();
 
-    const handleContactSupport = () => {
-        Linking.openURL('mailto:suporte@biodash.com?subject=Suporte App BioDash');
+    const handleContactSupport = async () => {
+        const subject = encodeURIComponent('Suporte App BioDash');
+        const url = `mailto:${SUPPORT_EMAIL}?subject=${subject}`;
+        try {
+            const supported = await Linking.canOpenURL(url);
+            if (!supported) {
+                showAlert('Contato de Suporte', `Envie sua mensagem diretamente para: ${SUPPORT_EMAIL}`);
+                return;
+            }
+            await Linking.openURL(url);
+        } catch {
+            showAlert('Contato de Suporte', `Não foi possível abrir o app de e-mail. Escreva para: ${SUPPORT_EMAIL}`);
+        }
     };
-
-    const FaqItem = ({ question, answer }: { question: string, answer: string }) => (
-        <View style={[styles.faqItem, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.faqQuestion, { color: colors.text }]}>{question}</Text>
-            <Text style={[styles.faqAnswer, { color: colors.textMuted }]}>{answer}</Text>
-        </View>
-    );
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                <TouchableOpacity onPress={onBack} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
-                    <Text style={{ fontSize: 20, color: colors.text }}>{'<'}</Text>
-                </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>Voltar para Ajustes</Text>
-            </View>
+            <SubScreenHeader onBack={onBack} />
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 88 + insets.bottom }]}>
                 <Animated.View style={animatedStyle}>
-                <Text style={[styles.pageTitle, { color: colors.text }]}>Central de Ajuda</Text>
-                <Text style={[styles.pageSub, { color: colors.textMuted }]}>
-                    Dúvidas frequentes e suporte técnico.
-                </Text>
-
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <Text style={[styles.cardTitle, { color: colors.primary }]}>Perguntas Frequentes (FAQ)</Text>
-
-                    <FaqItem
-                        question="Como atualizo os dados do biodigestor?"
-                        answer="Os dados são atualizados automaticamente em tempo real caso tenha internet. Você também pode puxar a tela do Dashboard para baixo para forçar uma atualização."
-                    />
-                    <FaqItem
-                        question="O que significa o alerta de H2S?"
-                        answer="Indica que a concentração de Gás Sulfídrico está acima do normal. Verifique os filtros imediatamente."
-                    />
-                    <FaqItem
-                        question="Esqueci minha senha, e agora?"
-                        answer="Por motivos de segurança, se você esquecer a senha atual de Perfil, deverá solicitar a redefinição através do contato com o suporte."
-                    />
-                    <FaqItem
-                        question="Como exportar relatórios antigos?"
-                        answer="No Dashboard aba role até o final e clique em Gerar PDF ou Excel. Eles exportam a competência atual."
-                    />
-                </View>
-
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border, marginTop: 16 }]}>
-                    <Text style={[styles.cardTitle, { color: colors.primary, marginBottom: 8 }]}>Ainda precisa de ajuda?</Text>
-                    <Text style={[styles.paragraph, { color: colors.textMuted, marginBottom: 16 }]}>
-                        Nossa equipe técnica está pronta para ajudar com problemas operacionais ou dúvidas no aplicativo.
+                    <Text style={[styles.pageTitle, { color: colors.text }]} accessibilityRole="header">
+                        Central de Ajuda
+                    </Text>
+                    <Text style={[styles.pageSub, { color: colors.textMuted }]}>
+                        Dúvidas frequentes e suporte técnico.
                     </Text>
 
-                    <TouchableOpacity
-                        style={[styles.primaryBtn, { backgroundColor: colors.primary, gap: 8 }]}
-                        onPress={handleContactSupport}
-                    >
-                        <MaterialCommunityIcons name="email-outline" size={20} color="#fff" />
-                        <Text style={styles.primaryBtnText}>Contatar Suporte</Text>
-                    </TouchableOpacity>
-                </View>
+                    <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                        <Text style={[styles.cardTitle, { color: colors.primary }]} accessibilityRole="header">
+                            Perguntas Frequentes (FAQ)
+                        </Text>
+
+                        <FaqItem
+                            colors={colors}
+                            question="Como atualizo os dados do biodigestor?"
+                            answer="Os dados são atualizados automaticamente em tempo real caso tenha internet. Você também pode usar o botão Atualizar ou puxar a tela do Painel para baixo."
+                        />
+                        <FaqItem
+                            colors={colors}
+                            question="O que significa o alerta de H2S?"
+                            answer="Indica que a concentração de Gás Sulfídrico está acima do normal. Verifique os filtros imediatamente."
+                        />
+                        <FaqItem
+                            colors={colors}
+                            question="Como altero minha senha?"
+                            answer="Acesse Ajustes → Perfil da Empresa e preencha a seção Alterar Senha. Se estiver sem acesso à conta, entre em contato com o suporte."
+                        />
+                        <FaqItem
+                            colors={colors}
+                            isLast
+                            question="Como exportar relatórios antigos?"
+                            answer="Na aba Painel, role até o final e toque em Gerar PDF, Excel ou CSV para escolher o período desejado."
+                        />
+                    </View>
+
+                    <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border, marginTop: 16 }]}>
+                        <Text style={[styles.cardTitle, { color: colors.primary, marginBottom: 8 }]} accessibilityRole="header">
+                            Ainda precisa de ajuda?
+                        </Text>
+                        <Text style={[styles.paragraph, { color: colors.textMuted, marginBottom: 16 }]}>
+                            Nossa equipe técnica está pronta para ajudar com problemas operacionais ou dúvidas no aplicativo pelo e-mail{' '}
+                            <Text style={{ color: colors.text, fontWeight: '600' }} selectable>
+                                {SUPPORT_EMAIL}
+                            </Text>
+                            .
+                        </Text>
+
+                        <TouchableOpacity
+                            style={[styles.primaryBtn, { backgroundColor: colors.primary, gap: 8 }]}
+                            onPress={handleContactSupport}
+                            accessibilityRole="button"
+                            accessibilityLabel="Contatar Suporte"
+                            accessibilityHint={`Abre o aplicativo de e-mail para ${SUPPORT_EMAIL}`}
+                        >
+                            <MaterialCommunityIcons name="email-outline" size={20} color={colors.onPrimary} importantForAccessibility="no" />
+                            <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Contatar Suporte</Text>
+                        </TouchableOpacity>
+                    </View>
                 </Animated.View>
             </ScrollView>
         </View>
@@ -82,22 +129,7 @@ export default function HelpCenterScreen({ onBack }: Props) {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-    },
-    backButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-    },
-    headerTitle: { fontSize: 16, fontWeight: '600' },
-    scrollContent: { padding: 20, paddingBottom: 80 },
+    scrollContent: { padding: 20 },
     pageTitle: { fontSize: 26, fontWeight: '800', marginBottom: 4 },
     pageSub: { fontSize: 14, marginBottom: 24 },
     card: {
@@ -116,7 +148,6 @@ const styles = StyleSheet.create({
     },
     faqItem: {
         paddingVertical: 12,
-        borderBottomWidth: 1,
     },
     faqQuestion: {
         fontSize: 15,
@@ -132,6 +163,7 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     primaryBtn: {
+        minHeight: 44,
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderRadius: 8,
@@ -140,7 +172,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     primaryBtnText: {
-        color: '#fff',
         fontSize: 15,
         fontWeight: '700',
     },

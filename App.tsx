@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, SafeAreaView, Image } from 'react-native'
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Image, BackHandler } from 'react-native'
 import { authLib } from './src/lib/auth'
 import LandingScreen from './src/screens/LandingScreen'
 import LoginScreen from './src/screens/LoginScreen'
@@ -13,6 +13,7 @@ import HelpCenterScreen from './src/screens/HelpCenterScreen'
 import ChatbotScreen from './src/screens/ChatbotScreen'
 import { StatusBar } from 'expo-status-bar'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
+import { FeedbackHost } from './src/components/FeedbackHost'
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons'
 
@@ -27,12 +28,34 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
   const { theme, toggleTheme, colors } = useTheme();
   const insets = useSafeAreaInsets();
 
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (currentSubScreen !== 'none') {
+        setCurrentSubScreen('none')
+        return true
+      }
+      if (activeTab !== 'home') {
+        setActiveTab('home')
+        return true
+      }
+      return false
+    })
+    return () => subscription.remove()
+  }, [activeTab, currentSubScreen])
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header Fixo Global */}
       <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 16) }]}>
-        <Image source={require('./assets/logo-biodash.png')} style={{ width: 200, height: 100, marginRight: 12 }} resizeMode="contain" />
-        <View style={{ flex: 1 }}>
+        <Image
+          source={require('./assets/logo-biodash.png')}
+          style={{ width: 112, height: 42, marginRight: 10 }}
+          resizeMode="contain"
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel="BioDash"
+        />
+        <View style={{ flex: 1, flexShrink: 1 }}>
           <Text style={[styles.headerSub, { color: colors.textMuted }]}>Plataforma Sustentável</Text>
         </View>
 
@@ -42,13 +65,19 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
             setCurrentSubScreen('notifications');
           }}
           style={[styles.themeBtn, { backgroundColor: colors.iconBg, marginRight: 8 }]}
+          accessibilityRole="button"
           accessibilityLabel="Histórico de Alertas"
         >
-          <MaterialCommunityIcons name="bell-outline" size={22} color={colors.text} />
+          <MaterialCommunityIcons name="bell-outline" size={22} color={colors.text} importantForAccessibility="no" />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}>
-          <MaterialCommunityIcons name={theme === 'light' ? 'weather-night' : 'white-balance-sunny'} size={22} color={colors.text} />
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={[styles.themeBtn, { backgroundColor: colors.iconBg }]}
+          accessibilityRole="button"
+          accessibilityLabel={theme === 'light' ? 'Ativar modo escuro' : 'Ativar modo claro'}
+        >
+          <MaterialCommunityIcons name={theme === 'light' ? 'weather-night' : 'white-balance-sunny'} size={22} color={colors.text} importantForAccessibility="no" />
         </TouchableOpacity>
       </View>
 
@@ -68,7 +97,10 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
         ) : currentSubScreen === 'notifications' ? (
           <NotificationsScreen onBack={() => setCurrentSubScreen('none')} />
         ) : currentSubScreen === 'terms' ? (
-          <TermsScreen onBack={() => setCurrentSubScreen('none')} />
+          <TermsScreen
+            onBack={() => setCurrentSubScreen('none')}
+            onNavigateHelpCenter={() => setCurrentSubScreen('helpCenter')}
+          />
         ) : currentSubScreen === 'helpCenter' ? (
           <HelpCenterScreen onBack={() => setCurrentSubScreen('none')} />
         ) : (
@@ -83,7 +115,10 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
       </View>
 
       {/* Barra de Navegação */}
-      <View style={[styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View
+        style={[styles.tabBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 16) }]}
+        accessibilityRole="tablist"
+      >
         <TouchableOpacity
           style={styles.tabItem}
           onPress={() => {
@@ -92,9 +127,17 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
           }}
           activeOpacity={0.7}
           id="tab-home"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'home' }}
+          accessibilityLabel="Painel"
         >
-          <MaterialIcons name="dashboard" size={24} color={activeTab === 'home' ? colors.primary : colors.textMuted} />
-          <Text style={[styles.tabLabel, activeTab === 'home' && { color: colors.primary }]}>Painel</Text>
+          <MaterialIcons name="dashboard" size={24} color={activeTab === 'home' ? colors.primary : colors.textMuted} importantForAccessibility="no" />
+          <Text
+            style={[styles.tabLabel, { color: activeTab === 'home' ? colors.primary : colors.textMuted }]}
+            maxFontSizeMultiplier={1.3}
+          >
+            Painel
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -105,9 +148,17 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
           }}
           activeOpacity={0.7}
           id="tab-chatbot"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'chatbot' }}
+          accessibilityLabel="Assistente"
         >
-          <MaterialCommunityIcons name="robot-outline" size={24} color={activeTab === 'chatbot' ? colors.primary : colors.textMuted} />
-          <Text style={[styles.tabLabel, activeTab === 'chatbot' && { color: colors.primary }]}>Assistente</Text>
+          <MaterialCommunityIcons name="robot-outline" size={24} color={activeTab === 'chatbot' ? colors.primary : colors.textMuted} importantForAccessibility="no" />
+          <Text
+            style={[styles.tabLabel, { color: activeTab === 'chatbot' ? colors.primary : colors.textMuted }]}
+            maxFontSizeMultiplier={1.3}
+          >
+            Assistente
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -118,9 +169,17 @@ function MainTabs({ onLogout }: { onLogout: () => void }) {
           }}
           activeOpacity={0.7}
           id="tab-settings"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'settings' }}
+          accessibilityLabel="Ajustes"
         >
-          <MaterialIcons name="settings" size={24} color={activeTab === 'settings' ? colors.primary : colors.textMuted} />
-          <Text style={[styles.tabLabel, activeTab === 'settings' && { color: colors.primary }]}>Ajustes</Text>
+          <MaterialIcons name="settings" size={24} color={activeTab === 'settings' ? colors.primary : colors.textMuted} importantForAccessibility="no" />
+          <Text
+            style={[styles.tabLabel, { color: activeTab === 'settings' ? colors.primary : colors.textMuted }]}
+            maxFontSizeMultiplier={1.3}
+          >
+            Ajustes
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -146,10 +205,20 @@ function MainApp() {
     })
   }, [])
 
+  useEffect(() => {
+    if (session || currentScreen === 'landing') return
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setCurrentScreen('landing')
+      return true
+    })
+    return () => subscription.remove()
+  }, [session, currentScreen])
+
   if (loading) {
     return (
-      <View style={[styles.splash, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.splash, { backgroundColor: colors.background }]} accessible accessibilityLabel="Carregando BioDash">
+        <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+        <ActivityIndicator size="large" color={colors.primary} accessibilityLabel="Carregando BioDash" />
       </View>
     )
   }
@@ -166,8 +235,8 @@ function MainApp() {
 
   // Se não estiver logado, escolhe entre Login ou Cadastro
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+    <View style={{ flex: 1, backgroundColor: '#f0fdf4' }}>
+      <StatusBar style="dark" />
       {currentScreen === 'landing' ? (
         <LandingScreen
           onNavigateLogin={() => setCurrentScreen('login')}
@@ -200,6 +269,7 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <MainApp />
+        <FeedbackHost />
       </ThemeProvider>
     </SafeAreaProvider>
   )
@@ -232,9 +302,9 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   themeBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -269,8 +339,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100%',
-    paddingTop: 8,
+    minHeight: 48,
+    paddingTop: 4,
   },
   tabIcon: {
     fontSize: 22,
@@ -280,7 +350,7 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     marginTop: 4,
   },

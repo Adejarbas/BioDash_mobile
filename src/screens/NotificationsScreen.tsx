@@ -1,36 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    ScrollView,
-    TouchableOpacity,
+    AccessibilityInfo,
     ActivityIndicator,
     Animated,
+    KeyboardAvoidingView,
     Modal,
-    TextInput,
-    Alert,
+    Platform,
+    Pressable,
     RefreshControl,
-    Platform
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { useFadeInUp } from '../hooks/useFadeInUp';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFadeInUp } from '../hooks/useFadeInUp';
 import { useTheme } from '../context/ThemeContext';
 import { alertsApi, maintenanceApi, markersApi } from '../lib/api';
 import {
     getCriticalityBadgeInfo,
     getSensorDisplayInfo,
-    CriticalityLevel
 } from '../lib/anomalyClassifier';
-
-const showAlert = (title: string, message: string) => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-        window.alert(`${title}: ${message}`);
-    } else {
-        Alert.alert(title, message);
-    }
-};
+import { showAlert } from '../lib/feedback';
 
 interface AlertOccurrence {
     id: string;
@@ -54,12 +50,34 @@ interface Props {
     onBack: () => void;
 }
 
+function parseStrictPtBrDate(raw: string): string | null {
+    const match = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return null;
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+    const candidate = new Date(year, month - 1, day, 9, 0, 0);
+    if (
+        candidate.getFullYear() !== year ||
+        candidate.getMonth() !== month - 1 ||
+        candidate.getDate() !== day
+    ) {
+        return null;
+    }
+    return candidate.toISOString();
+}
+
 export default function NotificationsScreen({ onBack }: Props) {
-    const { colors } = useTheme();
+    const { colors, theme } = useTheme();
+    const insets = useSafeAreaInsets();
     const { animatedStyle } = useFadeInUp();
+    const isDark = theme === 'dark';
 
     const [alerts, setAlerts] = useState<AlertOccurrence[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [alertsEnabled, setAlertsEnabled] = useState(true);
 
@@ -75,6 +93,7 @@ export default function NotificationsScreen({ onBack }: Props) {
     const [resolveModalVisible, setResolveModalVisible] = useState(false);
     const [selectedAlertForResolve, setSelectedAlertForResolve] = useState<AlertOccurrence | null>(null);
     const [resolutionNotes, setResolutionNotes] = useState('');
+    const [resolveError, setResolveError] = useState<string | null>(null);
     const [submittingResolve, setSubmittingResolve] = useState(false);
 
     const [maintenanceModalVisible, setMaintenanceModalVisible] = useState(false);
@@ -82,34 +101,78 @@ export default function NotificationsScreen({ onBack }: Props) {
     const [maintenanceName, setMaintenanceName] = useState('');
     const [maintenancePriority, setMaintenancePriority] = useState('urgent');
     const [maintenanceDate, setMaintenanceDate] = useState('');
+    const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
     const [submittingMaintenance, setSubmittingMaintenance] = useState(false);
 
-    useEffect(() => {
-        loadAlertPreference();
-        loadBiodigesters();
+    const maintenanceDateRef = useRef<TextInput>(null);
+
+    const loadAlertPreference = useCallback(async () => {
+        try {
+            const saved = await AsyncStorage.getItem('@biodash_alerts_enabled');
+            if (saved !== null) setAlertsEnabled(JSON.parse(saved));
+        } catch {
+            // mantém preferência padrão
+        }
     }, []);
 
-    useEffect(() => {
-        fetchAlerts();
-    }, [selectedBiodigester, selectedLevel, selectedSensor, selectedStatus, selectedPeriod]);
-
-    const loadBiodigesters = async () => {
+    const loadBiodigesters = useCallback(async () => {
         try {
             const res = await markersApi.fetch();
             if (res.success && Array.isArray(res.data)) {
                 const list = res.data.map((m: any) => ({
                     id: (m.id || m._id)?.toString(),
-                    name: m.title || m.address?.title || m.name || `Biodigestor #${m.id || m._id}`
+                    name: m.title || m.address?.title || m.name || `Biodigestor #${m.id || m._id}`,
                 }));
                 setBiodigestersList(list);
             }
-        } catch (e) {
-            console.error('Erro ao buscar lista de biodigestores:', e);
+        } catch {
+            // lista será preenchida pelos alertas existentes quando disponível
         }
-    };
+    }, []);
 
-    // Lista unificada de biodigestores (cadastrados no mapa + presentes no histórico)
-    const availableBiodigesters = React.useMemo(() => {
+    const fetchAlerts = useCallback(async (silent = false) => {
+        if (!silent) setLoading(true);
+        setFetchError(null);
+        try {
+            const filters: any = {};
+            if (selectedBiodigester !== 'all') filters.biodigesterId = selectedBiodigester;
+            if (selectedLevel !== 'all') filters.level = selectedLevel;
+            if (selectedSensor !== 'all') filters.sensorType = selectedSensor;
+            if (selectedStatus !== 'all') filters.status = selectedStatus;
+
+            if (selectedPeriod === '24h') {
+                filters.startDate = new Date(Date.now() - 24 * 3600000).toISOString();
+            } else if (selectedPeriod === '7d') {
+                filters.startDate = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
+            } else if (selectedPeriod === '30d') {
+                filters.startDate = new Date(Date.now() - 30 * 24 * 3600000).toISOString();
+            }
+
+            const res = await alertsApi.fetch(filters);
+            if (res.success && res.data) {
+                const rawList = Array.isArray(res.data) ? res.data : (res.data.alerts || []);
+                setAlerts(rawList as AlertOccurrence[]);
+            } else {
+                setFetchError(res.error || 'Não foi possível carregar o histórico de alertas.');
+            }
+        } catch (err: any) {
+            setFetchError(err?.message || 'Erro de conexão ao buscar histórico de alertas.');
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, [selectedBiodigester, selectedLevel, selectedSensor, selectedStatus, selectedPeriod]);
+
+    useEffect(() => {
+        void loadAlertPreference();
+        void loadBiodigesters();
+    }, [loadAlertPreference, loadBiodigesters]);
+
+    useEffect(() => {
+        void fetchAlerts();
+    }, [fetchAlerts]);
+
+    const availableBiodigesters = useMemo(() => {
         const map = new Map<string, string>();
         biodigestersList.forEach((b) => {
             if (b.id && b.name) map.set(b.id, b.name);
@@ -135,81 +198,59 @@ export default function NotificationsScreen({ onBack }: Props) {
         return items;
     }, [biodigestersList, alerts]);
 
-    const loadAlertPreference = async () => {
+    const toggleAlerts = async (nextValue: boolean) => {
+        setAlertsEnabled(nextValue);
         try {
-            const saved = await AsyncStorage.getItem('@biodash_alerts_enabled');
-            if (saved !== null) setAlertsEnabled(JSON.parse(saved));
-        } catch (e) {
-            console.log(e);
-        }
-    };
-
-    const toggleAlerts = async () => {
-        try {
-            const newValue = !alertsEnabled;
-            setAlertsEnabled(newValue);
-            await AsyncStorage.setItem('@biodash_alerts_enabled', JSON.stringify(newValue));
-        } catch (e) {
-            console.log(e);
-        }
-    };
-
-    const fetchAlerts = async () => {
-        setLoading(true);
-        try {
-            const filters: any = {};
-            if (selectedBiodigester !== 'all') filters.biodigesterId = selectedBiodigester;
-            if (selectedLevel !== 'all') filters.level = selectedLevel;
-            if (selectedSensor !== 'all') filters.sensorType = selectedSensor;
-            if (selectedStatus !== 'all') filters.status = selectedStatus;
-
-            if (selectedPeriod === '24h') {
-                filters.startDate = new Date(Date.now() - 24 * 3600000).toISOString();
-            } else if (selectedPeriod === '7d') {
-                filters.startDate = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
-            } else if (selectedPeriod === '30d') {
-                filters.startDate = new Date(Date.now() - 30 * 24 * 3600000).toISOString();
-            }
-
-            const res = await alertsApi.fetch(filters);
-            if (res.success && res.data) {
-                // Suporta tanto array direto quanto { alerts, pagination }
-                const rawList = Array.isArray(res.data) ? res.data : (res.data.alerts || []);
-                setAlerts(rawList as AlertOccurrence[]);
-            } else {
-                setAlerts([]);
-            }
-        } catch (err) {
-            console.error('Erro ao buscar histórico de alertas:', err);
-            setAlerts([]);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
+            await AsyncStorage.setItem('@biodash_alerts_enabled', JSON.stringify(nextValue));
+        } catch {
+            // ignora falha de persistência local
         }
     };
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchAlerts();
+        void fetchAlerts();
+    };
+
+    const hasActiveFilters =
+        selectedBiodigester !== 'all' ||
+        selectedLevel !== 'all' ||
+        selectedSensor !== 'all' ||
+        selectedStatus !== 'all' ||
+        selectedPeriod !== 'all';
+
+    const clearAllFilters = () => {
+        setSelectedBiodigester('all');
+        setSelectedLevel('all');
+        setSelectedSensor('all');
+        setSelectedStatus('all');
+        setSelectedPeriod('all');
     };
 
     // Resolução de Ocorrência
     const handleOpenResolve = (alertItem: AlertOccurrence) => {
         setSelectedAlertForResolve(alertItem);
         setResolutionNotes('');
+        setResolveError(null);
         setResolveModalVisible(true);
+    };
+
+    const handleCloseResolveModal = () => {
+        if (submittingResolve) return;
+        setResolveError(null);
+        setResolveModalVisible(false);
     };
 
     const handleConfirmResolve = async () => {
         if (!selectedAlertForResolve) return;
         setSubmittingResolve(true);
+        setResolveError(null);
         const alertId = selectedAlertForResolve.id;
         const notes = resolutionNotes.trim();
 
         try {
             const res = await alertsApi.resolve(alertId, notes || undefined);
             if (res.success) {
-                // Atualização otimista imediata na lista visual com a nota técnica
                 setAlerts((prev) =>
                     prev.map((a) =>
                         a.id === alertId
@@ -222,14 +263,14 @@ export default function NotificationsScreen({ onBack }: Props) {
                             : a
                     )
                 );
-                // Conclui e fecha o modal diretamente sem disparar popup/alert
                 setResolveModalVisible(false);
-                fetchAlerts();
+                AccessibilityInfo.announceForAccessibility?.('Ocorrência marcada como resolvida.');
+                void fetchAlerts(true);
             } else {
-                console.warn('Falha ao resolver alerta:', res.error);
+                setResolveError(res.error || 'Não foi possível concluir a resolução do alerta.');
             }
         } catch (err: any) {
-            console.error('Erro ao resolver alerta:', err);
+            setResolveError(err?.message || 'Erro de conexão ao resolver o alerta.');
         } finally {
             setSubmittingResolve(false);
         }
@@ -240,40 +281,39 @@ export default function NotificationsScreen({ onBack }: Props) {
         setSelectedAlertForMaintenance(alertItem);
         const sensorInfo = getSensorDisplayInfo(alertItem.sensor_type);
         const isCrit = alertItem.alert_level === 'critical' || alertItem.alert_level === 'critico';
-        
+
         setMaintenanceName(`Inspeção Corretiva - ${sensorInfo.name} (${alertItem.biodigester_name || 'Biodigestor'})`);
         setMaintenancePriority(isCrit ? 'urgent' : 'high');
-        
-        // Data sugerida: hoje + 1 dia se urgente, + 3 dias se alta
+
         const sugDate = new Date();
         sugDate.setDate(sugDate.getDate() + (isCrit ? 1 : 3));
         const dd = String(sugDate.getDate()).padStart(2, '0');
         const mm = String(sugDate.getMonth() + 1).padStart(2, '0');
         const yyyy = sugDate.getFullYear();
         setMaintenanceDate(`${dd}/${mm}/${yyyy}`);
-        
+        setMaintenanceError(null);
         setMaintenanceModalVisible(true);
+    };
+
+    const handleCloseMaintenanceModal = () => {
+        if (submittingMaintenance) return;
+        setMaintenanceError(null);
+        setMaintenanceModalVisible(false);
     };
 
     const handleConfirmMaintenance = async () => {
         if (!selectedAlertForMaintenance || !maintenanceName.trim() || !maintenanceDate.trim()) {
-            showAlert('Aviso', 'Preencha todos os campos do agendamento.');
+            setMaintenanceError('Preencha o título e a data de agendamento.');
             return;
         }
 
-        let scheduledIso = '';
-        try {
-            const parts = maintenanceDate.split('/');
-            if (parts.length === 3) {
-                scheduledIso = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T09:00:00`).toISOString();
-            } else {
-                throw new Error('Data inválida');
-            }
-        } catch {
-            showAlert('Erro', 'Formato de data inválido. Use DD/MM/AAAA.');
+        const scheduledIso = parseStrictPtBrDate(maintenanceDate);
+        if (!scheduledIso) {
+            setMaintenanceError('Data inválida. Informe uma data real no formato DD/MM/AAAA.');
             return;
         }
 
+        setMaintenanceError(null);
         setSubmittingMaintenance(true);
         try {
             const res = await maintenanceApi.createSchedule({
@@ -283,90 +323,123 @@ export default function NotificationsScreen({ onBack }: Props) {
             });
 
             if (res.success) {
-                showAlert('Sucesso', 'Manutenção priorizada e agendada com sucesso!');
                 setMaintenanceModalVisible(false);
+                showAlert('Sucesso', 'Manutenção priorizada e agendada com sucesso!');
             } else {
-                showAlert('Erro', res.error || 'Não foi possível agendar.');
+                setMaintenanceError(res.error || 'Não foi possível agendar a manutenção.');
             }
         } catch (err: any) {
-            showAlert('Erro', err.message || 'Erro ao agendar manutenção.');
+            setMaintenanceError(err?.message || 'Erro ao agendar manutenção.');
         } finally {
             setSubmittingMaintenance(false);
         }
     };
 
-    // Filtro reativo no cliente para resposta instantânea ao trocar o biodigestor
-    const displayedAlerts = React.useMemo(() => {
+    const displayedAlerts = useMemo(() => {
         if (selectedBiodigester === 'all') return alerts;
         return alerts.filter((a) => {
             if (a.biodigester_id && String(a.biodigester_id) === selectedBiodigester) return true;
-            if (a.biodigester_name && (a.biodigester_name.toLowerCase().includes(selectedBiodigester.toLowerCase()) || selectedBiodigester.toLowerCase().includes(a.biodigester_name.toLowerCase()))) return true;
+            if (
+                a.biodigester_name &&
+                (a.biodigester_name.toLowerCase().includes(selectedBiodigester.toLowerCase()) ||
+                    selectedBiodigester.toLowerCase().includes(a.biodigester_name.toLowerCase()))
+            ) {
+                return true;
+            }
             return false;
         });
     }, [alerts, selectedBiodigester]);
 
-    // Contadores de status
     const totalCount = displayedAlerts.length;
     const activeCriticalCount = displayedAlerts.filter(
         (a) => (a.alert_level === 'critical' || a.alert_level === 'critico') && a.status === 'active'
     ).length;
     const resolvedCount = displayedAlerts.filter((a) => a.status === 'resolved').length;
 
+    const resolvedBadgeColors = isDark
+        ? { color: '#86efac', bgColor: '#052e16', borderColor: '#166534' }
+        : { color: '#15803d', bgColor: '#dcfce7', borderColor: '#86efac' };
+
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header Superior Fixo */}
             <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                <TouchableOpacity onPress={onBack} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
-                    <MaterialCommunityIcons name="chevron-left" size={26} color={colors.text} />
+                <TouchableOpacity
+                    onPress={onBack}
+                    style={[styles.headerIconBtn, { backgroundColor: colors.iconBg, marginRight: 10 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Voltar para Ajustes"
+                >
+                    <MaterialCommunityIcons name="chevron-left" size={26} color={colors.text} importantForAccessibility="no" />
                 </TouchableOpacity>
                 <View style={{ flex: 1 }}>
-                    <Text style={[styles.headerTitle, { color: colors.text }]}>Histórico de Alertas</Text>
-                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Ocorrências e análise de sensores</Text>
+                    <Text style={[styles.headerTitle, { color: colors.text }]} accessibilityRole="header">
+                        Histórico de Alertas
+                    </Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>Ocorrências e análise de sensores</Text>
                 </View>
                 <TouchableOpacity
-                    onPress={fetchAlerts}
-                    style={[styles.backButton, { backgroundColor: colors.iconBg }]}
+                    onPress={() => void fetchAlerts()}
+                    style={[styles.headerIconBtn, { backgroundColor: colors.iconBg, opacity: loading ? 0.6 : 1 }]}
                     disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel={loading ? 'Atualizando histórico de alertas' : 'Atualizar histórico de alertas'}
+                    accessibilityState={{ disabled: loading, busy: loading }}
                 >
-                    <MaterialCommunityIcons name="refresh" size={20} color={colors.primary} />
+                    {loading ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                        <MaterialCommunityIcons name="refresh" size={20} color={colors.primary} importantForAccessibility="no" />
+                    )}
                 </TouchableOpacity>
             </View>
 
             <ScrollView
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[styles.scrollContent, { paddingBottom: 88 + insets.bottom }]}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
             >
                 <Animated.View style={animatedStyle}>
-                    {/* Título e Resumo da Página */}
-                    <Text style={[styles.pageTitle, { color: colors.text }]}>Registro de Ocorrências</Text>
+                    <Text style={[styles.pageTitle, { color: colors.text }]} accessibilityRole="header">
+                        Registro de Ocorrências
+                    </Text>
                     <Text style={[styles.pageSub, { color: colors.textMuted }]}>
                         Histórico completo de anomalias classificadas por criticidade para apoiar a manutenção preventiva.
                     </Text>
 
                     {/* Cards de Métricas Rápidas */}
                     <View style={styles.kpiRow}>
-                        <View style={[styles.kpiCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                        <View
+                            accessible
+                            accessibilityLabel={`${totalCount} Total de ocorrências`}
+                            style={[styles.kpiCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
+                        >
                             <Text style={[styles.kpiNumber, { color: colors.text }]}>{totalCount}</Text>
                             <Text style={[styles.kpiLabel, { color: colors.textMuted }]}>Total Ocorrências</Text>
                         </View>
                         <View
+                            accessible
+                            accessibilityLabel={`${activeCriticalCount} Críticos ativos`}
                             style={[
                                 styles.kpiCard,
                                 {
-                                    backgroundColor: activeCriticalCount > 0 ? '#fee2e2' : colors.cardBackground,
-                                    borderColor: activeCriticalCount > 0 ? '#fca5a5' : colors.border,
+                                    backgroundColor: activeCriticalCount > 0 ? colors.dangerBg : colors.cardBackground,
+                                    borderColor: activeCriticalCount > 0 ? colors.dangerBorder : colors.border,
                                 },
                             ]}
                         >
-                            <Text style={[styles.kpiNumber, { color: activeCriticalCount > 0 ? '#dc2626' : colors.text }]}>
+                            <Text style={[styles.kpiNumber, { color: activeCriticalCount > 0 ? colors.danger : colors.text }]}>
                                 {activeCriticalCount}
                             </Text>
-                            <Text style={[styles.kpiLabel, { color: activeCriticalCount > 0 ? '#b91c1c' : colors.textMuted }]}>
+                            <Text style={[styles.kpiLabel, { color: activeCriticalCount > 0 ? colors.danger : colors.textMuted }]}>
                                 Críticos Ativos
                             </Text>
                         </View>
-                        <View style={[styles.kpiCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                            <Text style={[styles.kpiNumber, { color: '#16a34a' }]}>{resolvedCount}</Text>
+                        <View
+                            accessible
+                            accessibilityLabel={`${resolvedCount} Ocorrências resolvidas`}
+                            style={[styles.kpiCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
+                        >
+                            <Text style={[styles.kpiNumber, { color: colors.primary }]}>{resolvedCount}</Text>
                             <Text style={[styles.kpiLabel, { color: colors.textMuted }]}>Resolvidos</Text>
                         </View>
                     </View>
@@ -381,26 +454,20 @@ export default function NotificationsScreen({ onBack }: Props) {
                                 Abre o widget de telemetria em caso de temperatura ou sobrepressão de risco.
                             </Text>
                         </View>
-                        <TouchableOpacity
-                            onPress={toggleAlerts}
-                            style={[
-                                styles.toggleTrack,
-                                { backgroundColor: alertsEnabled ? colors.primary : '#ccc' }
-                            ]}
-                        >
-                            <View
-                                style={[
-                                    styles.toggleThumb,
-                                    { transform: [{ translateX: alertsEnabled ? 20 : 0 }] }
-                                ]}
-                            />
-                        </TouchableOpacity>
+                        <Switch
+                            value={alertsEnabled}
+                            onValueChange={(val) => void toggleAlerts(val)}
+                            trackColor={{ false: '#64748b', true: colors.primary }}
+                            thumbColor="#ffffff"
+                            accessibilityLabel="Expandir Alertas Críticos no Painel"
+                        />
                     </View>
 
                     {/* SEÇÃO DE FILTROS */}
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Filtros de Pesquisa</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]} accessibilityRole="header">
+                        Filtros de Pesquisa
+                    </Text>
 
-                    {/* Filtro por Biodigestor */}
                     <Text style={[styles.filterGroupLabel, { color: colors.textMuted }]}>BIODIGESTOR</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
                         {availableBiodigesters.map((b) => {
@@ -410,22 +477,26 @@ export default function NotificationsScreen({ onBack }: Props) {
                                     key={b.id}
                                     style={[
                                         styles.filterChip,
-                                        { borderColor: colors.border, backgroundColor: colors.cardBackground },
+                                        { borderColor: colors.inputBorder, backgroundColor: colors.cardBackground },
                                         isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
                                     ]}
                                     onPress={() => setSelectedBiodigester(b.id)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Filtrar por biodigestor ${b.name}`}
+                                    accessibilityState={{ selected: isSelected }}
                                 >
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                                         <MaterialCommunityIcons
                                             name="factory"
                                             size={14}
-                                            color={isSelected ? '#fff' : colors.primary}
+                                            color={isSelected ? colors.onPrimary : colors.primary}
+                                            importantForAccessibility="no"
                                         />
                                         <Text
                                             style={[
                                                 styles.filterChipText,
                                                 { color: colors.text },
-                                                isSelected && { color: '#fff', fontWeight: 'bold' },
+                                                isSelected && { color: colors.onPrimary, fontWeight: '700' },
                                             ]}
                                         >
                                             {b.name}
@@ -436,15 +507,14 @@ export default function NotificationsScreen({ onBack }: Props) {
                         })}
                     </ScrollView>
 
-                    {/* Filtro por Criticidade */}
                     <Text style={[styles.filterGroupLabel, { color: colors.textMuted, marginTop: 12 }]}>NÍVEL DE CRITICIDADE</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
                         {[
-                            { key: 'all', label: 'Todos' },
-                            { key: 'critical', label: '🚨 Crítico' },
-                            { key: 'medium', label: '⚠️ Alerta Médio' },
-                            { key: 'low', label: '⚡ Atenção' },
-                            { key: 'info', label: 'ℹ️ Informativo' },
+                            { key: 'all', label: 'Todos', spoken: 'Todos os níveis de criticidade' },
+                            { key: 'critical', label: '🚨 Crítico', spoken: 'Crítico' },
+                            { key: 'medium', label: '⚠️ Alerta Médio', spoken: 'Alerta Médio' },
+                            { key: 'low', label: '⚡ Atenção', spoken: 'Atenção' },
+                            { key: 'info', label: 'ℹ️ Informativo', spoken: 'Informativo' },
                         ].map((chip) => {
                             const isSelected = selectedLevel === chip.key;
                             return (
@@ -452,16 +522,19 @@ export default function NotificationsScreen({ onBack }: Props) {
                                     key={chip.key}
                                     style={[
                                         styles.filterChip,
-                                        { borderColor: colors.border, backgroundColor: colors.cardBackground },
+                                        { borderColor: colors.inputBorder, backgroundColor: colors.cardBackground },
                                         isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
                                     ]}
                                     onPress={() => setSelectedLevel(chip.key)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Criticidade: ${chip.spoken}`}
+                                    accessibilityState={{ selected: isSelected }}
                                 >
                                     <Text
                                         style={[
                                             styles.filterChipText,
                                             { color: colors.text },
-                                            isSelected && { color: '#fff', fontWeight: 'bold' },
+                                            isSelected && { color: colors.onPrimary, fontWeight: '700' },
                                         ]}
                                     >
                                         {chip.label}
@@ -471,15 +544,14 @@ export default function NotificationsScreen({ onBack }: Props) {
                         })}
                     </ScrollView>
 
-                    {/* Filtro por Sensor */}
                     <Text style={[styles.filterGroupLabel, { color: colors.textMuted, marginTop: 12 }]}>SENSOR AFETADO</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
                         {[
-                            { key: 'all', label: 'Todos os Sensores' },
-                            { key: 'temperatura', label: '🌡️ Temperatura' },
-                            { key: 'pressao', label: '⏱️ Pressão' },
-                            { key: 'ph', label: '💧 pH' },
-                            { key: 'h2s', label: '🧪 H2S' },
+                            { key: 'all', label: 'Todos os Sensores', spoken: 'Todos os sensores' },
+                            { key: 'temperatura', label: '🌡️ Temperatura', spoken: 'Temperatura' },
+                            { key: 'pressao', label: '⏱️ Pressão', spoken: 'Pressão' },
+                            { key: 'ph', label: '💧 pH', spoken: 'pH' },
+                            { key: 'h2s', label: '🧪 H2S', spoken: 'H2S' },
                         ].map((chip) => {
                             const isSelected = selectedSensor === chip.key;
                             return (
@@ -487,16 +559,19 @@ export default function NotificationsScreen({ onBack }: Props) {
                                     key={chip.key}
                                     style={[
                                         styles.filterChip,
-                                        { borderColor: colors.border, backgroundColor: colors.cardBackground },
+                                        { borderColor: colors.inputBorder, backgroundColor: colors.cardBackground },
                                         isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
                                     ]}
                                     onPress={() => setSelectedSensor(chip.key)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Sensor: ${chip.spoken}`}
+                                    accessibilityState={{ selected: isSelected }}
                                 >
                                     <Text
                                         style={[
                                             styles.filterChipText,
                                             { color: colors.text },
-                                            isSelected && { color: '#fff', fontWeight: 'bold' },
+                                            isSelected && { color: colors.onPrimary, fontWeight: '700' },
                                         ]}
                                     >
                                         {chip.label}
@@ -506,105 +581,141 @@ export default function NotificationsScreen({ onBack }: Props) {
                         })}
                     </ScrollView>
 
-                    {/* Filtro por Status e Período */}
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-                            {[
-                                { key: 'all', label: 'Status: Todos' },
-                                { key: 'active', label: 'Ativos' },
-                                { key: 'resolved', label: 'Resolvidos' },
-                            ].map((chip) => {
-                                const isSelected = selectedStatus === chip.key;
-                                return (
-                                    <TouchableOpacity
-                                        key={chip.key}
+                    <Text style={[styles.filterGroupLabel, { color: colors.textMuted, marginTop: 12 }]}>STATUS</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+                        {[
+                            { key: 'all', label: 'Todos' },
+                            { key: 'active', label: 'Ativos' },
+                            { key: 'resolved', label: 'Resolvidos' },
+                        ].map((chip) => {
+                            const isSelected = selectedStatus === chip.key;
+                            return (
+                                <TouchableOpacity
+                                    key={chip.key}
+                                    style={[
+                                        styles.filterChip,
+                                        { borderColor: colors.inputBorder, backgroundColor: colors.cardBackground },
+                                        isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                    ]}
+                                    onPress={() => setSelectedStatus(chip.key)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Status: ${chip.label}`}
+                                    accessibilityState={{ selected: isSelected }}
+                                >
+                                    <Text
                                         style={[
-                                            styles.filterChipSmall,
-                                            { borderColor: colors.border, backgroundColor: colors.cardBackground },
-                                            isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                            styles.filterChipText,
+                                            { color: colors.text },
+                                            isSelected && { color: colors.onPrimary, fontWeight: '700' },
                                         ]}
-                                        onPress={() => setSelectedStatus(chip.key)}
                                     >
-                                        <Text
-                                            style={[
-                                                styles.filterChipTextSmall,
-                                                { color: colors.text },
-                                                isSelected && { color: '#fff', fontWeight: 'bold' },
-                                            ]}
-                                        >
-                                            {chip.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </ScrollView>
+                                        {chip.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
 
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-                            {[
-                                { key: 'all', label: 'Qualquer data' },
-                                { key: '24h', label: '24h' },
-                                { key: '7d', label: '7 dias' },
-                                { key: '30d', label: '30 dias' },
-                            ].map((chip) => {
-                                const isSelected = selectedPeriod === chip.key;
-                                return (
-                                    <TouchableOpacity
-                                        key={chip.key}
+                    <Text style={[styles.filterGroupLabel, { color: colors.textMuted, marginTop: 12 }]}>PERÍODO</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+                        {[
+                            { key: 'all', label: 'Qualquer data' },
+                            { key: '24h', label: '24h' },
+                            { key: '7d', label: '7 dias' },
+                            { key: '30d', label: '30 dias' },
+                        ].map((chip) => {
+                            const isSelected = selectedPeriod === chip.key;
+                            return (
+                                <TouchableOpacity
+                                    key={chip.key}
+                                    style={[
+                                        styles.filterChip,
+                                        { borderColor: colors.inputBorder, backgroundColor: colors.cardBackground },
+                                        isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                    ]}
+                                    onPress={() => setSelectedPeriod(chip.key)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Período: ${chip.label}`}
+                                    accessibilityState={{ selected: isSelected }}
+                                >
+                                    <Text
                                         style={[
-                                            styles.filterChipSmall,
-                                            { borderColor: colors.border, backgroundColor: colors.cardBackground },
-                                            isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                            styles.filterChipText,
+                                            { color: colors.text },
+                                            isSelected && { color: colors.onPrimary, fontWeight: '700' },
                                         ]}
-                                        onPress={() => setSelectedPeriod(chip.key)}
                                     >
-                                        <Text
-                                            style={[
-                                                styles.filterChipTextSmall,
-                                                { color: colors.text },
-                                                isSelected && { color: '#fff', fontWeight: 'bold' },
-                                            ]}
-                                        >
-                                            {chip.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </ScrollView>
-                    </View>
+                                        {chip.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
 
                     {/* LISTAGEM DE HISTÓRICO */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 12 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        <Text
+                            style={{ fontSize: 13, fontWeight: '700', color: colors.text, textTransform: 'uppercase', letterSpacing: 0.5 }}
+                            accessibilityRole="header"
+                        >
                             Ocorrências Anteriores ({displayedAlerts.length})
                         </Text>
                     </View>
 
                     {loading ? (
-                        <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+                        <View style={styles.loadingBox} accessibilityLiveRegion="polite">
+                            <ActivityIndicator size="large" color={colors.primary} accessibilityLabel="Carregando histórico de alertas" />
+                            <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 10 }}>
+                                Carregando histórico de alertas...
+                            </Text>
+                        </View>
+                    ) : fetchError ? (
+                        <View
+                            style={[styles.emptyContainer, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}
+                            accessibilityRole="alert"
+                            accessibilityLiveRegion="assertive"
+                        >
+                            <MaterialCommunityIcons name="alert-circle-outline" size={44} color={colors.danger} importantForAccessibility="no" />
+                            <Text style={[styles.emptyTitle, { color: colors.danger }]}>Erro ao carregar alertas</Text>
+                            <Text style={[styles.emptySub, { color: colors.text }]}>{fetchError}</Text>
+                            <TouchableOpacity
+                                style={[styles.retryBtn, { backgroundColor: colors.primary }]}
+                                onPress={() => void fetchAlerts()}
+                                accessibilityRole="button"
+                                accessibilityLabel="Tentar novamente"
+                            >
+                                <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 14 }}>Tentar novamente</Text>
+                            </TouchableOpacity>
+                        </View>
                     ) : displayedAlerts.length === 0 ? (
                         <View style={[styles.emptyContainer, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                            <MaterialCommunityIcons name="check-circle-outline" size={48} color="#16a34a" />
+                            <MaterialCommunityIcons name="check-circle-outline" size={48} color={colors.primary} importantForAccessibility="no" />
                             <Text style={[styles.emptyTitle, { color: colors.text }]}>Nenhuma anomalia encontrada</Text>
                             <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-                                O sistema está operando dentro dos parâmetros de segurança para os filtros aplicados.
+                                {hasActiveFilters
+                                    ? 'Não há ocorrências para os filtros aplicados no momento.'
+                                    : 'O sistema está operando dentro dos parâmetros de segurança.'}
                             </Text>
+                            {hasActiveFilters && (
+                                <TouchableOpacity
+                                    style={[styles.retryBtn, { backgroundColor: colors.primary }]}
+                                    onPress={clearAllFilters}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Limpar filtros"
+                                >
+                                    <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 14 }}>Limpar filtros</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     ) : (
                         <View style={{ gap: 14 }}>
                             {displayedAlerts.map((item) => {
                                 const isResolved = item.status === 'resolved';
-                                const badgeInfo = isResolved
-                                    ? {
-                                          label: 'Resolvido',
-                                          color: '#16a34a',
-                                          bgColor: '#dcfce7',
-                                          borderColor: '#86efac',
-                                          iconName: 'check-circle',
-                                      }
-                                    : getCriticalityBadgeInfo(item.alert_level);
+                                const critBadge = getCriticalityBadgeInfo(item.alert_level, theme);
                                 const sensorInfo = getSensorDisplayInfo(item.sensor_type);
                                 const isCritical = item.alert_level === 'critical' || item.alert_level === 'critico';
                                 const isMedium = item.alert_level === 'medium';
+                                const deviceName = item.biodigester_name || 'Biodigestor Principal';
 
                                 const formattedDate = new Date(item.created_at).toLocaleString('pt-BR', {
                                     day: '2-digit',
@@ -621,30 +732,59 @@ export default function NotificationsScreen({ onBack }: Props) {
                                             styles.alertCard,
                                             {
                                                 backgroundColor: colors.cardBackground,
-                                                borderColor: isResolved ? '#86efac' : isCritical ? '#fca5a5' : colors.border,
+                                                borderColor: isResolved
+                                                    ? resolvedBadgeColors.borderColor
+                                                    : isCritical
+                                                    ? colors.dangerBorder
+                                                    : colors.border,
                                             },
                                         ]}
                                     >
-                                        {/* Header do Card com Badge e Data */}
+                                        {/* Header do Card com Badge de Criticidade + Status + Data */}
                                         <View style={styles.cardHeaderRow}>
-                                            <View
-                                                style={[
-                                                    styles.badge,
-                                                    { backgroundColor: badgeInfo.bgColor, borderColor: badgeInfo.borderColor },
-                                                ]}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name={badgeInfo.iconName as any}
-                                                    size={14}
-                                                    color={badgeInfo.color}
-                                                />
-                                                <Text style={[styles.badgeText, { color: badgeInfo.color }]}>
-                                                    {badgeInfo.label.toUpperCase()}
-                                                </Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+                                                <View
+                                                    style={[
+                                                        styles.badge,
+                                                        { backgroundColor: critBadge.bgColor, borderColor: critBadge.borderColor },
+                                                    ]}
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name={critBadge.iconName as any}
+                                                        size={14}
+                                                        color={critBadge.color}
+                                                        importantForAccessibility="no"
+                                                    />
+                                                    <Text style={[styles.badgeText, { color: critBadge.color }]}>
+                                                        {critBadge.label.toUpperCase()}
+                                                    </Text>
+                                                </View>
+
+                                                {isResolved && (
+                                                    <View
+                                                        style={[
+                                                            styles.badge,
+                                                            {
+                                                                backgroundColor: resolvedBadgeColors.bgColor,
+                                                                borderColor: resolvedBadgeColors.borderColor,
+                                                            },
+                                                        ]}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name="check-circle"
+                                                            size={14}
+                                                            color={resolvedBadgeColors.color}
+                                                            importantForAccessibility="no"
+                                                        />
+                                                        <Text style={[styles.badgeText, { color: resolvedBadgeColors.color }]}>
+                                                            RESOLVIDO
+                                                        </Text>
+                                                    </View>
+                                                )}
                                             </View>
 
                                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                <MaterialCommunityIcons name="clock-outline" size={13} color={colors.textMuted} />
+                                                <MaterialCommunityIcons name="clock-outline" size={13} color={colors.textMuted} importantForAccessibility="no" />
                                                 <Text style={[styles.dateText, { color: colors.textMuted }]}>
                                                     {formattedDate}
                                                 </Text>
@@ -654,9 +794,9 @@ export default function NotificationsScreen({ onBack }: Props) {
                                         {/* Associação: Biodigestor e Sensor */}
                                         <View style={styles.deviceRow}>
                                             <View style={styles.deviceTag}>
-                                                <MaterialCommunityIcons name="factory" size={14} color={colors.primary} />
+                                                <MaterialCommunityIcons name="factory" size={14} color={colors.primary} importantForAccessibility="no" />
                                                 <Text style={[styles.deviceText, { color: colors.text }]}>
-                                                    {item.biodigester_name || 'Biodigestor Principal'}
+                                                    {deviceName}
                                                 </Text>
                                             </View>
 
@@ -665,6 +805,7 @@ export default function NotificationsScreen({ onBack }: Props) {
                                                     name={sensorInfo.icon as any}
                                                     size={14}
                                                     color={sensorInfo.color}
+                                                    importantForAccessibility="no"
                                                 />
                                                 <Text style={[styles.deviceText, { color: colors.text }]}>
                                                     {sensorInfo.name} ({item.sensor_id || 'SN-01'})
@@ -676,8 +817,8 @@ export default function NotificationsScreen({ onBack }: Props) {
                                         {item.reading_value !== null && item.reading_value !== undefined && (
                                             <View style={[styles.metricBox, { backgroundColor: colors.background, borderColor: colors.border }]}>
                                                 <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-                                                    <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: '600' }}>VALOR REGISTRADO:</Text>
-                                                    <Text style={[styles.metricValue, { color: badgeInfo.color }]}>
+                                                    <Text style={{ fontSize: 12, color: colors.textMuted, fontWeight: '600' }}>VALOR REGISTRADO:</Text>
+                                                    <Text style={[styles.metricValue, { color: critBadge.color }]}>
                                                         {item.reading_value} {item.unit || ''}
                                                     </Text>
                                                 </View>
@@ -697,20 +838,28 @@ export default function NotificationsScreen({ onBack }: Props) {
 
                                         {/* Indicador de Resolução / Notas */}
                                         {isResolved && (
-                                            <View style={styles.resolvedBox}>
-                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                    <MaterialCommunityIcons name="check-circle" size={14} color="#16a34a" />
-                                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#16a34a' }}>
+                                            <View
+                                                style={[
+                                                    styles.resolvedBox,
+                                                    {
+                                                        backgroundColor: resolvedBadgeColors.bgColor,
+                                                        borderColor: resolvedBadgeColors.borderColor,
+                                                    },
+                                                ]}
+                                            >
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                                                    <MaterialCommunityIcons name="check-circle" size={14} color={resolvedBadgeColors.color} importantForAccessibility="no" />
+                                                    <Text style={{ fontSize: 12, fontWeight: '700', color: resolvedBadgeColors.color }}>
                                                         Ocorrência Resolvida
                                                     </Text>
                                                     {item.resolved_at && (
-                                                        <Text style={{ fontSize: 11, color: '#15803d' }}>
+                                                        <Text style={{ fontSize: 12, color: resolvedBadgeColors.color }}>
                                                             em {new Date(item.resolved_at).toLocaleDateString('pt-BR')}
                                                         </Text>
                                                     )}
                                                 </View>
                                                 {item.resolution_notes ? (
-                                                    <Text style={{ fontSize: 12, color: '#166534', marginTop: 3 }}>
+                                                    <Text style={{ fontSize: 12, color: colors.text, marginTop: 3 }}>
                                                         Nota técnica: {item.resolution_notes}
                                                     </Text>
                                                 ) : null}
@@ -719,12 +868,14 @@ export default function NotificationsScreen({ onBack }: Props) {
 
                                         {/* Rodapé de Ações do Alerta */}
                                         {!isResolved && (
-                                            <View style={styles.cardActionsRow}>
+                                            <View style={[styles.cardActionsRow, { borderTopColor: colors.border }]}>
                                                 <TouchableOpacity
-                                                    style={[styles.resolveBtn, { borderColor: colors.border }]}
+                                                    style={[styles.resolveBtn, { borderColor: colors.inputBorder }]}
                                                     onPress={() => handleOpenResolve(item)}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={`Resolver ocorrência de ${sensorInfo.name} em ${deviceName}`}
                                                 >
-                                                    <MaterialCommunityIcons name="check" size={16} color={colors.text} />
+                                                    <MaterialCommunityIcons name="check" size={16} color={colors.text} importantForAccessibility="no" />
                                                     <Text style={[styles.actionBtnText, { color: colors.text }]}>
                                                         Resolver Ocorrência
                                                     </Text>
@@ -734,11 +885,13 @@ export default function NotificationsScreen({ onBack }: Props) {
                                                     <TouchableOpacity
                                                         style={[
                                                             styles.maintenanceBtn,
-                                                            { backgroundColor: isCritical ? '#dc2626' : '#ea580c' },
+                                                            { backgroundColor: isCritical ? '#b91c1c' : '#c2410c' },
                                                         ]}
                                                         onPress={() => handleOpenMaintenance(item)}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`Agendar manutenção para ${sensorInfo.name} em ${deviceName}`}
                                                     >
-                                                        <MaterialCommunityIcons name="wrench-outline" size={15} color="#fff" />
+                                                        <MaterialCommunityIcons name="wrench-outline" size={15} color="#fff" importantForAccessibility="no" />
                                                         <Text style={[styles.actionBtnText, { color: '#fff', fontWeight: 'bold' }]}>
                                                             Agendar Manutenção
                                                         </Text>
@@ -757,162 +910,287 @@ export default function NotificationsScreen({ onBack }: Props) {
             {/* MODAL: RESOLVER OCORRÊNCIA */}
             <Modal
                 visible={resolveModalVisible}
-                transparent={true}
+                transparent
                 animationType="fade"
-                onRequestClose={() => setResolveModalVisible(false)}
+                onRequestClose={handleCloseResolveModal}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.modalCard, { backgroundColor: colors.cardBackground }]}>
-                        <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Resolver Ocorrência</Text>
-                            <TouchableOpacity onPress={() => setResolveModalVisible(false)}>
-                                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
-                            </TouchableOpacity>
-                        </View>
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    <Pressable
+                        style={StyleSheet.absoluteFill}
+                        accessible={false}
+                        onPress={handleCloseResolveModal}
+                    />
+                    <View
+                        accessibilityViewIsModal
+                        style={[styles.modalCard, { backgroundColor: colors.cardBackground }]}
+                    >
+                        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                            <View style={styles.modalHeader}>
+                                <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">
+                                    Resolver Ocorrência
+                                </Text>
+                                <TouchableOpacity
+                                    style={styles.modalCloseBtn}
+                                    onPress={handleCloseResolveModal}
+                                    disabled={submittingResolve}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Fechar resolução de ocorrência"
+                                >
+                                    <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} importantForAccessibility="no" />
+                                </TouchableOpacity>
+                            </View>
 
-                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12 }}>
-                            Insira notas técnicas sobre a correção aplicada para manter o histórico de rastreabilidade.
-                        </Text>
+                            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12 }}>
+                                Insira notas técnicas sobre a correção aplicada para manter o histórico de rastreabilidade.
+                            </Text>
 
-                        <TextInput
-                            style={[
-                                styles.textInputMultiline,
-                                { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
-                            ]}
-                            placeholder="Ex: Válvula de alívio checada e pressão normalizada."
-                            placeholderTextColor={colors.textMuted}
-                            multiline
-                            numberOfLines={4}
-                            textAlignVertical="top"
-                            value={resolutionNotes}
-                            onChangeText={setResolutionNotes}
-                        />
+                            <Text style={[styles.formLabel, { color: colors.text }]}>Notas Técnicas (Opcional)</Text>
+                            <TextInput
+                                style={[
+                                    styles.textInputMultiline,
+                                    { backgroundColor: colors.background, color: colors.text, borderColor: colors.inputBorder },
+                                ]}
+                                placeholder="Ex: Válvula de alívio checada e pressão normalizada."
+                                placeholderTextColor={colors.textMuted}
+                                multiline
+                                numberOfLines={4}
+                                textAlignVertical="top"
+                                accessibilityLabel="Notas técnicas da resolução"
+                                value={resolutionNotes}
+                                onChangeText={setResolutionNotes}
+                            />
 
-                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-                            <TouchableOpacity
-                                style={[styles.modalSecondaryBtn, { borderColor: colors.border }]}
-                                onPress={() => setResolveModalVisible(false)}
-                            >
-                                <Text style={{ color: colors.text, fontWeight: '600' }}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalPrimaryBtn, { backgroundColor: '#16a34a' }]}
-                                onPress={handleConfirmResolve}
-                                disabled={submittingResolve}
-                            >
-                                {submittingResolve ? (
-                                    <ActivityIndicator size="small" color="#fff" />
-                                ) : (
-                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Concluir</Text>
-                                )}
-                            </TouchableOpacity>
-                        </View>
+                            {resolveError ? (
+                                <View
+                                    style={[styles.inlineErrorBox, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}
+                                    accessibilityRole="alert"
+                                    accessibilityLiveRegion="assertive"
+                                >
+                                    <Text style={[styles.inlineErrorText, { color: colors.danger }]}>{resolveError}</Text>
+                                </View>
+                            ) : null}
+
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                                <TouchableOpacity
+                                    style={[styles.modalSecondaryBtn, { borderColor: colors.inputBorder, opacity: submittingResolve ? 0.6 : 1 }]}
+                                    onPress={handleCloseResolveModal}
+                                    disabled={submittingResolve}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Cancelar"
+                                    accessibilityState={{ disabled: submittingResolve }}
+                                >
+                                    <Text style={{ color: colors.text, fontWeight: '600' }}>Cancelar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.modalPrimaryBtn, { backgroundColor: '#15803d', opacity: submittingResolve ? 0.7 : 1 }]}
+                                    onPress={handleConfirmResolve}
+                                    disabled={submittingResolve}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={submittingResolve ? 'Concluindo resolução, aguarde' : 'Concluir resolução'}
+                                    accessibilityState={{ disabled: submittingResolve, busy: submittingResolve }}
+                                >
+                                    {submittingResolve ? (
+                                        <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>Concluir</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             {/* MODAL: AGENDAR MANUTENÇÃO A PARTIR DA ANOMALIA */}
             <Modal
                 visible={maintenanceModalVisible}
-                transparent={true}
+                transparent
                 animationType="fade"
-                onRequestClose={() => setMaintenanceModalVisible(false)}
+                onRequestClose={handleCloseMaintenanceModal}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.modalCard, { backgroundColor: colors.cardBackground }]}>
-                        <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Priorizar Ação de Manutenção</Text>
-                            <TouchableOpacity onPress={() => setMaintenanceModalVisible(false)}>
-                                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
-                            </TouchableOpacity>
-                        </View>
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    <Pressable
+                        style={StyleSheet.absoluteFill}
+                        accessible={false}
+                        onPress={handleCloseMaintenanceModal}
+                    />
+                    <View
+                        accessibilityViewIsModal
+                        style={[styles.modalCard, { backgroundColor: colors.cardBackground }]}
+                    >
+                        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                            <View style={styles.modalHeader}>
+                                <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">
+                                    Priorizar Ação de Manutenção
+                                </Text>
+                                <TouchableOpacity
+                                    style={styles.modalCloseBtn}
+                                    onPress={handleCloseMaintenanceModal}
+                                    disabled={submittingMaintenance}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Fechar agendamento de manutenção"
+                                >
+                                    <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} importantForAccessibility="no" />
+                                </TouchableOpacity>
+                            </View>
 
-                        <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
-                            Agende uma ação corretiva imediata vinculada à criticidade detectada.
-                        </Text>
+                            <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
+                                Agende uma ação corretiva imediata vinculada à criticidade detectada.
+                            </Text>
 
-                        <Text style={[styles.formLabel, { color: colors.text }]}>Título da Manutenção</Text>
-                        <TextInput
-                            style={[
-                                styles.textInput,
-                                { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
-                            ]}
-                            value={maintenanceName}
-                            onChangeText={setMaintenanceName}
-                        />
+                            <Text style={[styles.formLabel, { color: colors.text }]}>Título da Manutenção *</Text>
+                            <TextInput
+                                style={[
+                                    styles.textInput,
+                                    { backgroundColor: colors.background, color: colors.text, borderColor: colors.inputBorder },
+                                ]}
+                                returnKeyType="next"
+                                blurOnSubmit={false}
+                                onSubmitEditing={() => maintenanceDateRef.current?.focus()}
+                                accessibilityLabel="Título da manutenção obrigatório"
+                                value={maintenanceName}
+                                onChangeText={(t) => {
+                                    setMaintenanceName(t);
+                                    if (maintenanceError) setMaintenanceError(null);
+                                }}
+                            />
 
-                        <Text style={[styles.formLabel, { color: colors.text, marginTop: 12 }]}>Prioridade Sugerida</Text>
-                        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
-                            {['urgent', 'high', 'medium', 'low'].map((p) => {
-                                const isSel = maintenancePriority === p;
-                                const pLabels: Record<string, string> = {
-                                    urgent: 'Urgente',
-                                    high: 'Alta',
-                                    medium: 'Média',
-                                    low: 'Baixa',
-                                };
-                                return (
-                                    <TouchableOpacity
-                                        key={p}
-                                        style={[
-                                            styles.priorityBtn,
-                                            { borderColor: colors.border },
-                                            isSel && {
-                                                backgroundColor: p === 'urgent' ? '#fee2e2' : p === 'high' ? '#ffedd5' : colors.primaryLight,
-                                                borderColor: p === 'urgent' ? '#ef4444' : p === 'high' ? '#ea580c' : colors.primary,
-                                            },
-                                        ]}
-                                        onPress={() => setMaintenancePriority(p)}
-                                    >
-                                        <Text
+                            <Text style={[styles.formLabel, { color: colors.text, marginTop: 12 }]}>Prioridade Sugerida</Text>
+                            <View
+                                style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}
+                                accessibilityRole="radiogroup"
+                                accessibilityLabel="Prioridade sugerida"
+                            >
+                                {['urgent', 'high', 'medium', 'low'].map((p) => {
+                                    const isSel = maintenancePriority === p;
+                                    const pLabels: Record<string, string> = {
+                                        urgent: 'Urgente',
+                                        high: 'Alta',
+                                        medium: 'Média',
+                                        low: 'Baixa',
+                                    };
+                                    const selBg =
+                                        p === 'urgent'
+                                            ? colors.dangerBg
+                                            : p === 'high'
+                                            ? isDark
+                                                ? '#431407'
+                                                : '#ffedd5'
+                                            : colors.primaryLight;
+                                    const selBorder =
+                                        p === 'urgent'
+                                            ? colors.danger
+                                            : p === 'high'
+                                            ? isDark
+                                                ? '#fdba74'
+                                                : '#c2410c'
+                                            : colors.primary;
+                                    const selText =
+                                        p === 'urgent'
+                                            ? colors.danger
+                                            : p === 'high'
+                                            ? isDark
+                                                ? '#fdba74'
+                                                : '#c2410c'
+                                            : isDark
+                                            ? '#86efac'
+                                            : '#15803d';
+
+                                    return (
+                                        <TouchableOpacity
+                                            key={p}
                                             style={[
-                                                { fontSize: 12, color: colors.text },
+                                                styles.priorityBtn,
+                                                { borderColor: colors.inputBorder },
                                                 isSel && {
-                                                    fontWeight: 'bold',
-                                                    color: p === 'urgent' ? '#dc2626' : p === 'high' ? '#ea580c' : colors.primary,
+                                                    backgroundColor: selBg,
+                                                    borderColor: selBorder,
                                                 },
                                             ]}
+                                            onPress={() => setMaintenancePriority(p)}
+                                            accessibilityRole="radio"
+                                            accessibilityLabel={`Prioridade ${pLabels[p]}`}
+                                            accessibilityState={{ selected: isSel, checked: isSel }}
                                         >
-                                            {pLabels[p]}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
+                                            <Text
+                                                style={[
+                                                    { fontSize: 12, color: colors.text },
+                                                    isSel && { fontWeight: 'bold', color: selText },
+                                                ]}
+                                            >
+                                                {pLabels[p]}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
 
-                        <Text style={[styles.formLabel, { color: colors.text }]}>Data de Agendamento (DD/MM/AAAA)</Text>
-                        <TextInput
-                            style={[
-                                styles.textInput,
-                                { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
-                            ]}
-                            value={maintenanceDate}
-                            placeholder="DD/MM/AAAA"
-                            placeholderTextColor={colors.textMuted}
-                            onChangeText={setMaintenanceDate}
-                        />
+                            <Text style={[styles.formLabel, { color: colors.text }]}>Data de Agendamento (DD/MM/AAAA) *</Text>
+                            <TextInput
+                                ref={maintenanceDateRef}
+                                style={[
+                                    styles.textInput,
+                                    { backgroundColor: colors.background, color: colors.text, borderColor: colors.inputBorder },
+                                ]}
+                                value={maintenanceDate}
+                                placeholder="DD/MM/AAAA"
+                                placeholderTextColor={colors.textMuted}
+                                keyboardType="numbers-and-punctuation"
+                                maxLength={10}
+                                returnKeyType="done"
+                                onSubmitEditing={handleConfirmMaintenance}
+                                accessibilityLabel="Data de agendamento no formato dia, mês e ano"
+                                onChangeText={(t) => {
+                                    setMaintenanceDate(t);
+                                    if (maintenanceError) setMaintenanceError(null);
+                                }}
+                            />
 
-                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
-                            <TouchableOpacity
-                                style={[styles.modalSecondaryBtn, { borderColor: colors.border }]}
-                                onPress={() => setMaintenanceModalVisible(false)}
-                            >
-                                <Text style={{ color: colors.text, fontWeight: '600' }}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalPrimaryBtn, { backgroundColor: colors.primary }]}
-                                onPress={handleConfirmMaintenance}
-                                disabled={submittingMaintenance}
-                            >
-                                {submittingMaintenance ? (
-                                    <ActivityIndicator size="small" color="#fff" />
-                                ) : (
-                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Confirmar Agendamento</Text>
-                                )}
-                            </TouchableOpacity>
-                        </View>
+                            {maintenanceError ? (
+                                <View
+                                    style={[styles.inlineErrorBox, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}
+                                    accessibilityRole="alert"
+                                    accessibilityLiveRegion="assertive"
+                                >
+                                    <Text style={[styles.inlineErrorText, { color: colors.danger }]}>{maintenanceError}</Text>
+                                </View>
+                            ) : null}
+
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+                                <TouchableOpacity
+                                    style={[styles.modalSecondaryBtn, { borderColor: colors.inputBorder, opacity: submittingMaintenance ? 0.6 : 1 }]}
+                                    onPress={handleCloseMaintenanceModal}
+                                    disabled={submittingMaintenance}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Cancelar"
+                                    accessibilityState={{ disabled: submittingMaintenance }}
+                                >
+                                    <Text style={{ color: colors.text, fontWeight: '600' }}>Cancelar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.modalPrimaryBtn, { backgroundColor: colors.primary, opacity: submittingMaintenance ? 0.7 : 1 }]}
+                                    onPress={handleConfirmMaintenance}
+                                    disabled={submittingMaintenance}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={submittingMaintenance ? 'Confirmando agendamento, aguarde' : 'Confirmar Agendamento'}
+                                    accessibilityState={{ disabled: submittingMaintenance, busy: submittingMaintenance }}
+                                >
+                                    {submittingMaintenance ? (
+                                        <ActivityIndicator size="small" color={colors.onPrimary} />
+                                    ) : (
+                                        <Text style={{ color: colors.onPrimary, fontWeight: 'bold' }}>Confirmar Agendamento</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
         </View>
     );
@@ -927,16 +1205,15 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         borderBottomWidth: 1,
     },
-    backButton: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+    headerIconBtn: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 10,
     },
     headerTitle: { fontSize: 16, fontWeight: '700' },
-    scrollContent: { padding: 18, paddingBottom: 90 },
+    scrollContent: { padding: 18 },
     pageTitle: { fontSize: 24, fontWeight: '800', marginBottom: 4 },
     pageSub: { fontSize: 13, lineHeight: 18, marginBottom: 18 },
     kpiRow: {
@@ -952,7 +1229,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     kpiNumber: { fontSize: 22, fontWeight: '800', marginBottom: 2 },
-    kpiLabel: { fontSize: 11, textAlign: 'center', fontWeight: '500' },
+    kpiLabel: { fontSize: 12, textAlign: 'center', fontWeight: '500' },
     prefCard: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -962,26 +1239,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         marginBottom: 20,
     },
-    toggleTrack: {
-        width: 48,
-        height: 28,
-        borderRadius: 14,
-        padding: 3,
-        justifyContent: 'center',
-    },
-    toggleThumb: {
-        width: 22,
-        height: 22,
-        borderRadius: 11,
-        backgroundColor: '#fff',
-    },
     sectionTitle: {
         fontSize: 14,
         fontWeight: '700',
         marginBottom: 8,
     },
     filterGroupLabel: {
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: '700',
         letterSpacing: 0.5,
         marginBottom: 6,
@@ -991,21 +1255,20 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     filterChip: {
+        minHeight: 44,
+        justifyContent: 'center',
         paddingHorizontal: 14,
         paddingVertical: 8,
-        borderRadius: 20,
+        borderRadius: 22,
         borderWidth: 1,
         marginRight: 8,
     },
     filterChipText: { fontSize: 13, fontWeight: '500' },
-    filterChipSmall: {
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 14,
-        borderWidth: 1,
-        marginRight: 6,
+    loadingBox: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 40,
     },
-    filterChipTextSmall: { fontSize: 11, fontWeight: '500' },
     emptyContainer: {
         padding: 32,
         borderRadius: 16,
@@ -1013,8 +1276,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginTop: 10,
     },
-    emptyTitle: { fontSize: 16, fontWeight: '700', marginTop: 12, marginBottom: 4 },
+    emptyTitle: { fontSize: 16, fontWeight: '700', marginTop: 12, marginBottom: 4, textAlign: 'center' },
     emptySub: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
+    retryBtn: {
+        marginTop: 16,
+        minHeight: 44,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     alertCard: {
         borderRadius: 16,
         borderWidth: 1,
@@ -1028,6 +1300,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: 8,
         marginBottom: 10,
     },
     badge: {
@@ -1066,14 +1339,12 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     metricValue: { fontSize: 15, fontWeight: '800' },
-    thresholdText: { fontSize: 11 },
+    thresholdText: { fontSize: 12 },
     alertMessage: { fontSize: 13, lineHeight: 18, marginBottom: 10 },
     resolvedBox: {
-        backgroundColor: '#dcfce7',
         borderRadius: 8,
         padding: 10,
         borderWidth: 1,
-        borderColor: '#bbf7d0',
         marginBottom: 6,
     },
     cardActionsRow: {
@@ -1081,26 +1352,29 @@ const styles = StyleSheet.create({
         gap: 8,
         marginTop: 8,
         borderTopWidth: 1,
-        borderTopColor: '#f3f4f6',
         paddingTop: 10,
     },
     resolveBtn: {
         flex: 1,
+        minHeight: 44,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
-        paddingVertical: 9,
+        paddingVertical: 10,
+        paddingHorizontal: 8,
         borderRadius: 8,
         borderWidth: 1,
     },
     maintenanceBtn: {
         flex: 1.2,
+        minHeight: 44,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
-        paddingVertical: 9,
+        paddingVertical: 10,
+        paddingHorizontal: 8,
         borderRadius: 8,
     },
     actionBtnText: { fontSize: 12, fontWeight: '600' },
@@ -1114,6 +1388,7 @@ const styles = StyleSheet.create({
     modalCard: {
         width: '100%',
         maxWidth: 420,
+        maxHeight: '90%',
         borderRadius: 16,
         padding: 20,
         elevation: 6,
@@ -1124,7 +1399,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 12,
     },
-    modalTitle: { fontSize: 16, fontWeight: '700' },
+    modalCloseBtn: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: -10,
+    },
+    modalTitle: { fontSize: 16, fontWeight: '700', flex: 1 },
     formLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
     textInput: {
         borderWidth: 1,
@@ -1140,21 +1422,37 @@ const styles = StyleSheet.create({
         fontSize: 13,
         height: 100,
     },
+    inlineErrorBox: {
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 10,
+        marginTop: 12,
+    },
+    inlineErrorText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
     priorityBtn: {
         flex: 1,
-        paddingVertical: 7,
-        borderRadius: 6,
+        minHeight: 44,
+        justifyContent: 'center',
+        paddingVertical: 8,
+        borderRadius: 8,
         borderWidth: 1,
         alignItems: 'center',
     },
     modalPrimaryBtn: {
         flex: 1,
+        minHeight: 44,
+        justifyContent: 'center',
         paddingVertical: 12,
         borderRadius: 8,
         alignItems: 'center',
     },
     modalSecondaryBtn: {
         flex: 1,
+        minHeight: 44,
+        justifyContent: 'center',
         paddingVertical: 12,
         borderRadius: 8,
         borderWidth: 1,

@@ -24,12 +24,13 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
-    Alert,
+    AccessibilityInfo,
     Animated,
     Keyboard,
     Linking,
     Image,
     Modal,
+    Pressable,
     ScrollView,
 } from 'react-native'
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'
@@ -38,6 +39,8 @@ import { useTheme } from '../context/ThemeContext'
 import { chatbotApi, semanticSearchApi, ChatMessagePayload, ChatContextPayload, QuickSuggestionPayload } from '../lib/api'
 import { indicatorsApi, markersApi, maintenanceApi } from '../lib/api'
 import { authLib } from '../lib/auth'
+import { showAlert } from '../lib/feedback'
+import { parseInlineMarkdown, stripMarkdown } from '../lib/markdownText'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import * as FileSystem from 'expo-file-system/legacy'
@@ -226,13 +229,28 @@ const isCancel = (text: string): boolean =>
 
 const padDate = (n: number) => String(n).padStart(2, '0')
 
+const FLOW_LABELS: Record<FlowType, string> = {
+    agendar_manutencao: 'Agendar manutenção',
+    incluir_metrica: 'Registrar métrica',
+    editar_metrica: 'Editar métrica',
+    adicionar_endereco: 'Cadastrar biodigestor',
+    relatorio_periodo: 'Relatório por período',
+}
+
 // ─── Componente de Animação de Digitação (Typing Dots) ─────────────────────
-function TypingDots({ color }: { color: string }) {
+function TypingDots({ color, reduceMotion }: { color: string; reduceMotion?: boolean }) {
     const dot1 = useRef(new Animated.Value(0)).current
     const dot2 = useRef(new Animated.Value(0)).current
     const dot3 = useRef(new Animated.Value(0)).current
 
     useEffect(() => {
+        if (reduceMotion) {
+            dot1.setValue(0)
+            dot2.setValue(0)
+            dot3.setValue(0)
+            return
+        }
+
         const createBounce = (anim: Animated.Value, delay: number) => {
             return Animated.sequence([
                 Animated.delay(delay),
@@ -267,10 +285,10 @@ function TypingDots({ color }: { color: string }) {
             a2.stop()
             a3.stop()
         }
-    }, [dot1, dot2, dot3])
+    }, [dot1, dot2, dot3, reduceMotion])
 
     return (
-        <View style={styles.typingDotsRow}>
+        <View style={styles.typingDotsRow} importantForAccessibility="no-hide-descendants">
             <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot1 }] }]} />
             <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot2 }] }]} />
             <Animated.View style={[styles.typingDot, { backgroundColor: color, transform: [{ translateY: dot3 }] }]} />
@@ -309,9 +327,12 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState<any[]>([])
     const [isSearching, setIsSearching] = useState(false)
+    const [hasSearched, setHasSearched] = useState(false)
     const [showSearch, setShowSearch] = useState(false)
     const [showActionsModal, setShowActionsModal] = useState(false)
     const [activeFlow, setActiveFlow] = useState<FlowState | null>(null)
+    const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false)
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false)
 
     // Dados em cache para evitar múltiplas requisições
     const cachedMarkers = useRef<any[]>([])
@@ -335,8 +356,25 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const recordingLimitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const recordingStartedAtRef = useRef<number>(0)
     const stopVoiceRecognitionRef = useRef<() => void>(() => {})
+    const warningAnnouncedRef = useRef(false)
     const nativeSessionActiveRef = useRef(false)
     const nativeVoiceHandledRef = useRef(false)
+
+    useEffect(() => {
+        let mounted = true
+        AccessibilityInfo.isReduceMotionEnabled()
+            .then((enabled) => {
+                if (mounted) setReduceMotionEnabled(enabled)
+            })
+            .catch(() => {})
+        const showSub = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true))
+        const hideSub = Keyboard.addListener('keyboardDidHide', () => setIsKeyboardVisible(false))
+        return () => {
+            mounted = false
+            showSub.remove()
+            hideSub.remove()
+        }
+    }, [])
 
     const clearRecordingTimers = useCallback((resetSeconds = true) => {
         if (recordingIntervalRef.current) {
@@ -362,15 +400,22 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         setIsListening(listening)
         if (listening) {
             clearRecordingTimers()
+            warningAnnouncedRef.current = false
             recordingStartedAtRef.current = Date.now()
+            AccessibilityInfo.announceForAccessibility?.('Gravação de voz iniciada. Fale agora.')
             recordingIntervalRef.current = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000)
-                setRecordingSeconds(Math.min(MAX_VOICE_DURATION_SEC, elapsed))
+                const clamped = Math.min(MAX_VOICE_DURATION_SEC, elapsed)
+                setRecordingSeconds(clamped)
+                if (clamped >= VOICE_WARNING_SEC && !warningAnnouncedRef.current) {
+                    warningAnnouncedRef.current = true
+                    AccessibilityInfo.announceForAccessibility?.('Atenção: restam 3 segundos de gravação.')
+                }
             }, 1000)
             recordingLimitTimeoutRef.current = setTimeout(() => {
                 if (!isListeningRef.current) return
                 stopVoiceRecognitionRef.current()
-                Alert.alert(
+                showAlert(
                     'Tempo limite atingido',
                     'A gravação foi encerrada automaticamente ao atingir o máximo de 12 segundos.'
                 )
@@ -410,7 +455,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
     // ─── Animação de pulse do microfone ─────────────────────────────────────
     useEffect(() => {
-        if (isListening) {
+        if (isListening && !reduceMotionEnabled) {
             Animated.loop(
                 Animated.sequence([
                     Animated.timing(micPulse, { toValue: 1.3, duration: 600, useNativeDriver: true }),
@@ -421,7 +466,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             micPulse.stopAnimation()
             micPulse.setValue(1)
         }
-    }, [isListening, micPulse])
+    }, [isListening, micPulse, reduceMotionEnabled])
 
     // ─── Cleanup do reconhecimento de voz ao desmontar ───────────────────────
     useEffect(() => {
@@ -465,6 +510,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             timestamp: new Date(),
             suggestions,
         }])
+        AccessibilityInfo.announceForAccessibility?.(`Assistente BioDash disse: ${stripMarkdown(text)}`)
         scrollToBottom()
     }
 
@@ -509,7 +555,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             'aborted': '',
         }
         const msg = errorMessages[event.error as string] ?? `Erro: ${event.error}`
-        if (msg) Alert.alert('Microfone', msg)
+        if (msg) showAlert('Microfone', msg)
     })
 
     useSpeechRecognitionEvent('end', () => {
@@ -538,7 +584,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
             if (!window.isSecureContext) {
                 updateVoiceMode(null)
-                Alert.alert(
+                showAlert(
                     'Microfone bloqueado',
                     'O navegador só libera o microfone em HTTPS ou quando o site é aberto por localhost.'
                 )
@@ -599,7 +645,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         stream.getTracks().forEach(track => track.stop())
                         webMediaStreamRef.current = null
                         webMediaRecorderRef.current = null
-                        Alert.alert('Microfone', 'Não foi possível gravar o áudio neste navegador.')
+                        showAlert('Microfone', 'Não foi possível gravar o áudio neste navegador.')
                     }
                     recorder.onstop = async () => {
                         const chunks = webAudioChunksRef.current
@@ -622,7 +668,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         }
 
                         if (audio.size > MAX_AUDIO_BYTES) {
-                            Alert.alert(
+                            showAlert(
                                 'Áudio muito longo',
                                 'O áudio excedeu o limite máximo de 12 segundos (400 KB). Por favor, envie comandos mais curtos.'
                             )
@@ -630,6 +676,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         }
 
                         setIsTranscribing(true)
+                        AccessibilityInfo.announceForAccessibility?.('Transcrevendo áudio...')
                         try {
                             const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`, durationSec)
                             if (!response.success) {
@@ -643,7 +690,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                             setInputText(transcript)
                             await sendMessage(transcript)
                         } catch (error: any) {
-                            Alert.alert('Transcrição', error?.message || 'Não foi possível transcrever o áudio.')
+                            showAlert('Transcrição', error?.message || 'Não foi possível transcrever o áudio.')
                         } finally {
                             setIsTranscribing(false)
                         }
@@ -652,7 +699,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 } catch (error: any) {
                     updateListeningState(false)
                     const denied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
-                    Alert.alert(
+                    showAlert(
                         'Microfone',
                         denied
                             ? 'Permissão de microfone negada. Libere o acesso nas configurações do navegador.'
@@ -664,7 +711,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
             if (!SpeechRecognitionAPI) {
                 updateVoiceMode(null)
-                Alert.alert(
+                showAlert(
                     'Microfone indisponível',
                     'Este navegador não expõe acesso ao microfone. Abra o BioDash diretamente no Chrome, Edge, Safari ou Firefox.'
                 )
@@ -741,7 +788,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     }
                     const msg = msgs[event.error]
                     console.warn('[Microfone Web] Erro no reconhecimento:', event.error, event.message || '')
-                    if (msg) Alert.alert('Microfone', msg)
+                    if (msg) showAlert('Microfone', msg)
                 }
 
                 recognition.onend = () => {
@@ -769,7 +816,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     webRecognitionRef.current = null
                     webShouldKeepListeningRef.current = false
                     updateListeningState(false)
-                    Alert.alert('Erro ao iniciar microfone', e?.message || String(e))
+                    showAlert('Erro ao iniciar microfone', e?.message || String(e))
                 }
             }
 
@@ -780,7 +827,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         // ── Nativo (iOS / Android) via expo-speech-recognition ─────────────
         if (!isSpeechRecognitionAvailable || !ExpoSpeechRecognitionModule) {
             updateVoiceMode(null)
-            Alert.alert(
+            showAlert(
                 'Reconhecimento de Voz',
                 'O reconhecimento de voz nativo requer uma Development Build (APK de desenvolvimento) e não é suportado no Expo Go padrão.\n\nPara utilizar o microfone no celular, gere a build de desenvolvimento com:\nnpx expo run:android\n\nNo Expo Go, você pode utilizar o chat normalmente digitando mensagens.'
             )
@@ -791,7 +838,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
         if (!result.granted) {
             updateVoiceMode(null)
-            Alert.alert(
+            showAlert(
                 'Permissão negada',
                 'O acesso ao microfone é necessário para o ditado por voz.\n\nVá em Configurações → Aplicativos → BioDash → Permissões → Microfone.'
             )
@@ -817,7 +864,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         } catch (e: any) {
             nativeSessionActiveRef.current = false
             updateListeningState(false)
-            Alert.alert('Erro ao iniciar microfone', e?.message || String(e))
+            showAlert('Erro ao iniciar microfone', e?.message || String(e))
         }
     }
 
@@ -907,10 +954,9 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
         // Ações de direcionamento operacional
         if (action === 'view_alerts') {
-            Alert.alert(
-                '🚨 Alertas Operacionais',
-                'Consulte os sensores e alertas de H2S, temperatura e pressão em tempo real na aba Painel do aplicativo.',
-                [{ text: 'OK' }]
+            showAlert(
+                'Alertas Operacionais',
+                'Consulte os sensores e alertas de H2S, temperatura e pressão em tempo real na aba Painel ou no Histórico de Alertas.'
             )
             return
         }
@@ -1393,6 +1439,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             }
 
             setMessages(prev => [...prev, botMsg])
+            AccessibilityInfo.announceForAccessibility?.(`Assistente BioDash disse: ${stripMarkdown(botMsg.text)}`)
 
             // Dispara a ação automática se existir
             const action = botMsg.action
@@ -1428,7 +1475,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const [isInputFocused, setIsInputFocused] = useState(false)
 
     useEffect(() => {
-        if (inputText || isListening || isInputFocused) return
+        if (reduceMotionEnabled || inputText || isListening || isInputFocused) return
 
         const currentWord = TYPING_PLACEHOLDERS[placeholderIndex]
         let timer: ReturnType<typeof setTimeout>
@@ -1455,12 +1502,12 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         }
 
         return () => clearTimeout(timer)
-    }, [animatedPlaceholder, isDeletingPlaceholder, placeholderIndex, inputText, isListening, isInputFocused])
+    }, [animatedPlaceholder, isDeletingPlaceholder, placeholderIndex, inputText, isListening, isInputFocused, reduceMotionEnabled])
 
     const getPlaceholder = () => {
-        if (isListening) return '🔴 Ouvindo... fale agora'
+        if (isListening) return 'Ouvindo... fale agora'
         if (isTranscribing) return 'Transcrevendo áudio...'
-        if (isInputFocused) return 'Digite sua mensagem...'
+        if (reduceMotionEnabled || isInputFocused) return 'Digite sua mensagem...'
         return animatedPlaceholder || 'Digite sua mensagem...'
     }
 
@@ -1470,14 +1517,14 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     useEffect(() => {
         Animated.timing(inputBorderAnim, {
             toValue: isInputFocused || inputText.length > 0 ? 1 : 0,
-            duration: 200,
+            duration: reduceMotionEnabled ? 0 : 200,
             useNativeDriver: false,
         }).start()
-    }, [isInputFocused, inputText, inputBorderAnim])
+    }, [isInputFocused, inputText, inputBorderAnim, reduceMotionEnabled])
 
     const animatedBorderColor = inputBorderAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: [colors.border, colors.primary],
+        outputRange: [colors.inputBorder, colors.primary],
     })
 
     // ─── Handler de Teclado (Enter para enviar, Ctrl+Enter pula linha) ───────
@@ -1509,6 +1556,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const handleSemanticSearch = async () => {
         if (!searchQuery.trim()) return
         setIsSearching(true)
+        setHasSearched(true)
         setSearchResults([])
         try {
             await loadUserData()
@@ -1521,7 +1569,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 setSearchResults([])
             }
         } catch (err) {
-            Alert.alert('Erro', 'Não foi possível realizar a busca semântica.')
+            showAlert('Erro', 'Não foi possível realizar a busca semântica.')
         } finally {
             setIsSearching(false)
         }
@@ -1530,6 +1578,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     // ─── Render de cada bolha de mensagem ────────────────────────────────────
     const renderMessage = ({ item }: { item: Message }) => {
         const isUser = item.role === 'user'
+        const timeStr = item.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        const segments = parseInlineMarkdown(item.text)
+        const senderLabel = isUser ? 'Você' : 'Assistente BioDash'
+
         return (
             <View style={{ marginBottom: 12 }}>
                 <View style={[
@@ -1537,29 +1589,52 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     isUser ? styles.userWrapper : styles.botWrapper
                 ]}>
                     {!isUser && (
-                        <View style={styles.botAvatar}>
+                        <View style={styles.botAvatar} importantForAccessibility="no-hide-descendants">
                             <Image
-                            source={require('../../assets/biodash-assistent.png')}
-                            style={styles.botAvatarImage}
-                            resizeMode="cover"
-                        />
+                                source={require('../../assets/biodash-assistent.png')}
+                                style={styles.botAvatarImage}
+                                resizeMode="cover"
+                                accessible={false}
+                                importantForAccessibility="no"
+                            />
                         </View>
                     )}
-                    <View style={[
-                        styles.bubble,
-                        isUser
-                            ? [styles.userBubble, { backgroundColor: colors.primary }]
-                            : [styles.botBubble, { backgroundColor: colors.cardBackground, borderColor: colors.border }]
-                    ]}>
-                        <Text style={[
-                            styles.bubbleText,
-                            { color: isUser ? '#fff' : colors.text }
-                        ]}>{item.text}</Text>
+                    <View
+                        accessible
+                        accessibilityLabel={`${senderLabel} disse: ${stripMarkdown(item.text)}, às ${timeStr}`}
+                        style={[
+                            styles.bubble,
+                            isUser
+                                ? [styles.userBubble, { backgroundColor: colors.primary }]
+                                : [styles.botBubble, { backgroundColor: colors.cardBackground, borderColor: colors.border }]
+                        ]}
+                    >
+                        <Text
+                            selectable
+                            style={[
+                                styles.bubbleText,
+                                { color: isUser ? colors.onPrimary : colors.text }
+                            ]}
+                        >
+                            {segments.length > 0
+                                ? segments.map((seg, idx) => (
+                                      <Text
+                                          key={idx}
+                                          style={[
+                                              seg.bold && { fontWeight: '700' },
+                                              seg.italic && { fontStyle: 'italic' },
+                                          ]}
+                                      >
+                                          {seg.text}
+                                      </Text>
+                                  ))
+                                : item.text}
+                        </Text>
                         <Text style={[
                             styles.bubbleTime,
-                            { color: isUser ? 'rgba(255,255,255,0.6)' : colors.textMuted }
+                            { color: isUser ? colors.onPrimary : colors.textMuted, opacity: isUser ? 0.85 : 1 }
                         ]}>
-                            {item.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            {timeStr}
                         </Text>
                     </View>
                 </View>
@@ -1568,7 +1643,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 {!isUser && item.suggestions && item.suggestions.length > 0 && (
                     <View style={styles.inlineSuggestionsContainer}>
                         <View style={styles.inlineSuggestionsHeader}>
-                            <MaterialIcons name="auto-awesome" size={13} color={colors.primary} />
+                            <MaterialIcons name="auto-awesome" size={13} color={colors.primary} importantForAccessibility="no" />
                             <Text style={[styles.inlineSuggestionsTitle, { color: colors.primary }]}>
                                 Sugestões
                             </Text>
@@ -1580,11 +1655,15 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                                     style={[
                                         styles.inlineSuggestionBtn,
                                         {
-                                            borderColor: theme === 'dark' ? 'rgba(74, 222, 128, 0.35)' : 'rgba(22, 163, 74, 0.25)',
+                                            borderColor: theme === 'dark' ? 'rgba(74, 222, 128, 0.35)' : 'rgba(21, 128, 61, 0.35)',
                                             backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.15)' : '#f0fdf4',
+                                            opacity: isLoading ? 0.55 : 1,
                                         }
                                     ]}
                                     disabled={isLoading}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={sug.label}
+                                    accessibilityState={{ disabled: isLoading }}
                                     onPress={() => {
                                         if (sug.action_type === 'action') {
                                             handleChatAction(sug.value)
@@ -1643,14 +1722,18 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
     // ─── Render ───────────────────────────────────────────────────────────────
     const isNearLimit = recordingSeconds >= VOICE_WARNING_SEC
-    const statusColor = isNearLimit ? '#f59e0b' : '#ef4444'
+    const statusColor = isNearLimit
+        ? (theme === 'dark' ? '#fbbf24' : '#b45309')
+        : colors.danger
+    const canSend = Boolean(inputText.trim()) && !isLoading && !isTranscribing
+    const canSearch = Boolean(searchQuery.trim()) && !isSearching
 
     return (
-        <View style={{ flex: 1, backgroundColor: colors.background, paddingBottom: TAB_BAR_HEIGHT }}>
+        <View style={{ flex: 1, backgroundColor: colors.background, paddingBottom: isKeyboardVisible ? 0 : TAB_BAR_HEIGHT }}>
         <KeyboardAvoidingView
             style={{ flex: 1, backgroundColor: colors.background }}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 10}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 68 : 0}
         >
             {/* Header */}
             <View style={[styles.header, {
@@ -1659,41 +1742,46 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 paddingTop: 12,
             }]}>
                 {onBack && (
-                    <TouchableOpacity onPress={onBack} style={styles.backBtn} id="chatbot-back-button">
-                        <MaterialIcons name="arrow-back" size={22} color={colors.text} />
+                    <TouchableOpacity
+                        onPress={onBack}
+                        style={styles.backBtn}
+                        id="chatbot-back-button"
+                        accessibilityRole="button"
+                        accessibilityLabel="Voltar"
+                    >
+                        <MaterialIcons name="arrow-back" size={22} color={colors.text} importantForAccessibility="no" />
                     </TouchableOpacity>
                 )}
                 <View style={styles.headerInfo}>
-                    <View style={styles.avatarContainer}>
+                    <View style={styles.avatarContainer} importantForAccessibility="no-hide-descendants">
                         <Image
                             source={require('../../assets/biodash-assistent.png')}
                             style={styles.avatarImage}
                             resizeMode="cover"
+                            accessible={false}
+                            importantForAccessibility="no"
                         />
                     </View>
                     <View>
-                        <Text style={[styles.headerTitle, { color: colors.text }]}>Assistente BioDash</Text>
+                        <Text style={[styles.headerTitle, { color: colors.text }]} accessibilityRole="header">
+                            Assistente BioDash
+                        </Text>
                         <View style={styles.onlineIndicator}>
-                            <View style={styles.onlineDot} />
+                            <View style={styles.onlineDot} importantForAccessibility="no" />
                             <Text style={[styles.onlineText, { color: colors.textMuted }]}>Online · TF-IDF + SVM</Text>
                         </View>
                     </View>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <TouchableOpacity
-                        onPress={() => setShowActionsModal(true)}
-                        style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
-                        id="chatbot-actions-header-button"
-                        accessibilityLabel="Menu de ações rápidas"
-                    >
-                        <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
                         onPress={() => setShowSearch(!showSearch)}
                         style={[styles.searchToggleBtn, { backgroundColor: colors.iconBg }]}
                         id="chatbot-search-toggle"
+                        accessibilityRole="button"
+                        accessibilityLabel={showSearch ? 'Fechar busca semântica' : 'Abrir busca semântica'}
+                        accessibilityState={{ expanded: showSearch }}
                     >
-                        <MaterialIcons name="search" size={20} color={colors.text} />
+                        <MaterialIcons name={showSearch ? 'close' : 'search'} size={20} color={colors.text} importantForAccessibility="no" />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -1701,25 +1789,50 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             {/* Busca Semântica (colapsável) */}
             {showSearch && (
                 <View style={[styles.searchPanel, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                    <Text style={[styles.searchTitle, { color: colors.text }]}>🔍 Busca Semântica de Biodigestores</Text>
-                    <View style={[styles.searchInputRow, { borderColor: colors.border }]}>
+                    <Text style={[styles.searchTitle, { color: colors.text }]} accessibilityRole="header">
+                        Busca Semântica de Biodigestores
+                    </Text>
+                    <View style={[styles.searchInputRow, { borderColor: colors.inputBorder }]}>
                         <TextInput
                             style={[styles.searchInput, { color: colors.text }]}
                             placeholder="Ex: biodigestor perto do rio..."
                             placeholderTextColor={colors.textMuted}
                             value={searchQuery}
-                            onChangeText={setSearchQuery}
+                            onChangeText={(text) => {
+                                setSearchQuery(text)
+                                setHasSearched(false)
+                            }}
+                            returnKeyType="search"
                             onSubmitEditing={handleSemanticSearch}
+                            accessibilityLabel="Campo de busca semântica de biodigestores"
                             id="chatbot-semantic-search-input"
                         />
+                        {searchQuery.length > 0 && (
+                            <TouchableOpacity
+                                onPress={() => {
+                                    setSearchQuery('')
+                                    setSearchResults([])
+                                    setHasSearched(false)
+                                }}
+                                style={styles.clearSearchBtn}
+                                accessibilityRole="button"
+                                accessibilityLabel="Limpar busca"
+                            >
+                                <MaterialIcons name="close" size={18} color={colors.textMuted} importantForAccessibility="no" />
+                            </TouchableOpacity>
+                        )}
                         <TouchableOpacity
                             onPress={handleSemanticSearch}
-                            style={[styles.searchBtn, { backgroundColor: colors.primary }]}
+                            disabled={!canSearch}
+                            style={[styles.searchBtn, { backgroundColor: colors.primary, opacity: canSearch ? 1 : 0.5 }]}
                             id="chatbot-semantic-search-button"
+                            accessibilityRole="button"
+                            accessibilityLabel={isSearching ? 'Buscando biodigestores' : 'Executar busca semântica'}
+                            accessibilityState={{ disabled: !canSearch, busy: isSearching }}
                         >
                             {isSearching
-                                ? <ActivityIndicator size="small" color="#fff" />
-                                : <MaterialIcons name="search" size={18} color="#fff" />
+                                ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                                : <MaterialIcons name="search" size={18} color={colors.onPrimary} importantForAccessibility="no" />
                             }
                         </TouchableOpacity>
                     </View>
@@ -1733,6 +1846,9 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                                         setShowSearch(false)
                                         sendMessage(`Qual o endereço do biodigestor ${r.title}?`)
                                     }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`${r.title}, relevância ${(r.similarity_score * 100).toFixed(0)} por cento`}
+                                    accessibilityHint="Toque para perguntar o endereço deste biodigestor"
                                     id={`search-result-${i}`}
                                 >
                                     <Text style={[styles.searchResultTitle, { color: colors.text }]}>📍 {r.title}</Text>
@@ -1743,8 +1859,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                             ))}
                         </View>
                     )}
-                    {!isSearching && searchQuery && searchResults.length === 0 && (
-                        <Text style={[styles.noResults, { color: colors.textMuted }]}>Nenhum biodigestor encontrado para esta busca.</Text>
+                    {!isSearching && hasSearched && searchQuery.trim().length > 0 && searchResults.length === 0 && (
+                        <Text style={[styles.noResults, { color: colors.textMuted }]} accessibilityLiveRegion="polite">
+                            Nenhum biodigestor encontrado para esta busca.
+                        </Text>
                     )}
                 </View>
             )}
@@ -1758,13 +1876,43 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 contentContainerStyle={styles.messageList}
                 onContentSizeChange={scrollToBottom}
                 showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
             />
 
             {/* Indicador de digitando */}
             {isLoading && (
-                <View style={[styles.typingIndicator, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <TypingDots color={colors.primary} />
+                <View
+                    style={[styles.typingIndicator, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
+                    accessibilityLiveRegion="polite"
+                >
+                    <TypingDots color={colors.primary} reduceMotion={reduceMotionEnabled} />
                     <Text style={[styles.typingText, { color: colors.textMuted }]}>Assistente digitando...</Text>
+                </View>
+            )}
+
+            {/* Barra de fluxo conversacional ativo */}
+            {activeFlow && (
+                <View
+                    style={[styles.activeFlowBar, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}
+                    accessibilityLiveRegion="polite"
+                >
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.activeFlowText, { color: colors.text }]}>
+                            Fluxo ativo: {FLOW_LABELS[activeFlow.type]}
+                        </Text>
+                    </View>
+                    <TouchableOpacity
+                        style={[styles.activeFlowCancelBtn, { borderColor: colors.danger }]}
+                        onPress={() => {
+                            setActiveFlow(null)
+                            addBotMessage('❌ Operação cancelada. Como posso ajudar?')
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancelar fluxo atual"
+                    >
+                        <Text style={[styles.activeFlowCancelText, { color: colors.danger }]}>Cancelar</Text>
+                    </TouchableOpacity>
                 </View>
             )}
 
@@ -1775,7 +1923,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             }]}>
                 {isListening && (
                     <View style={styles.micStatusRow}>
-                        <View style={[styles.micStatusDot, { backgroundColor: statusColor }]} />
+                        <View style={[styles.micStatusDot, { backgroundColor: statusColor }]} importantForAccessibility="no" />
                         <Text style={[styles.micStatusText, { color: statusColor }]}>
                             {`Gravando 00:${padDate(recordingSeconds)} / 00:${padDate(MAX_VOICE_DURATION_SEC)} — ${
                                 voiceInputMode === 'hold'
@@ -1786,7 +1934,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     </View>
                 )}
                 {isTranscribing && (
-                    <View style={styles.micStatusRow}>
+                    <View style={styles.micStatusRow} accessibilityLiveRegion="polite">
                         <ActivityIndicator size="small" color={colors.primary} />
                         <Text style={[styles.micStatusText, { color: colors.primary }]}>Transcrevendo áudio...</Text>
                     </View>
@@ -1797,19 +1945,21 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         style={[styles.actionMenuBtn, { backgroundColor: colors.iconBg }]}
                         onPress={() => setShowActionsModal(true)}
                         id="chatbot-actions-input-button"
+                        accessibilityRole="button"
                         accessibilityLabel="Menu de ações rápidas"
+                        accessibilityState={{ expanded: showActionsModal }}
                     >
-                        <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                        <MaterialIcons name="add-circle-outline" size={22} color={colors.primary} importantForAccessibility="no" />
                     </TouchableOpacity>
 
                     <TextInput
                         style={[
                             styles.textInput,
                             { color: colors.text },
-                            isListening && { color: '#ef4444' }
+                            isListening && { color: colors.danger }
                         ]}
                         placeholder={getPlaceholder()}
-                        placeholderTextColor={isListening ? '#ef4444' : colors.textMuted}
+                        placeholderTextColor={isListening ? colors.danger : colors.textMuted}
                         value={inputText}
                         onChangeText={setInputText}
                         onFocus={() => setIsInputFocused(true)}
@@ -1820,6 +1970,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         blurOnSubmit={false}
                         maxLength={500}
                         editable={!isTranscribing}
+                        accessibilityLabel="Mensagem para o assistente"
                         id="chatbot-message-input"
                     />
 
@@ -1828,16 +1979,22 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         <TouchableOpacity
                             style={[
                                 styles.micBtn,
-                                { backgroundColor: isListening ? '#ef4444' : colors.iconBg }
+                                { backgroundColor: isListening ? '#b91c1c' : colors.iconBg }
                             ]}
                             onPress={handleMicPress}
                             onLongPress={handleMicLongPress}
                             onPressOut={handleMicPressOut}
                             delayLongPress={350}
                             accessibilityRole="button"
-                            accessibilityLabel="Microfone"
+                            accessibilityLabel={
+                                isTranscribing
+                                    ? 'Transcrevendo áudio'
+                                    : isListening
+                                    ? 'Parar gravação de voz'
+                                    : 'Gravar mensagem de voz'
+                            }
                             accessibilityHint="Toque para iniciar ou concluir. Mantenha pressionado para gravar e solte para concluir."
-                            accessibilityState={{ selected: isListening, disabled: isTranscribing }}
+                            accessibilityState={{ selected: isListening, disabled: isTranscribing, busy: isTranscribing }}
                             disabled={isTranscribing}
                             id="chatbot-mic-button"
                         >
@@ -1845,18 +2002,22 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                                 name={isListening ? 'microphone' : 'microphone-outline'}
                                 size={20}
                                 color={isListening ? '#fff' : colors.text}
+                                importantForAccessibility="no"
                             />
                         </TouchableOpacity>
                     </Animated.View>
 
                     {/* Botão de Enviar */}
                     <TouchableOpacity
-                        style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: (!inputText.trim() || isLoading || isTranscribing) ? 0.5 : 1 }]}
+                        style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: canSend ? 1 : 0.5 }]}
                         onPress={() => sendMessage()}
-                        disabled={!inputText.trim() || isLoading || isTranscribing}
+                        disabled={!canSend}
+                        accessibilityRole="button"
+                        accessibilityLabel="Enviar mensagem"
+                        accessibilityState={{ disabled: !canSend }}
                         id="chatbot-send-button"
                     >
-                        <MaterialIcons name="send" size={18} color="#fff" />
+                        <MaterialIcons name="send" size={18} color={colors.onPrimary} importantForAccessibility="no" />
                     </TouchableOpacity>
                 </Animated.View>
             </View>
@@ -1869,13 +2030,14 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             animationType="slide"
             onRequestClose={() => setShowActionsModal(false)}
         >
-            <TouchableOpacity
-                style={styles.modalBackdrop}
-                activeOpacity={1}
-                onPress={() => setShowActionsModal(false)}
-            >
-                <TouchableOpacity
-                    activeOpacity={1}
+            <View style={styles.modalBackdrop}>
+                <Pressable
+                    style={StyleSheet.absoluteFill}
+                    accessible={false}
+                    onPress={() => setShowActionsModal(false)}
+                />
+                <View
+                    accessibilityViewIsModal
                     style={[
                         styles.modalContent,
                         {
@@ -1885,31 +2047,35 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                     ]}
                 >
                     {/* Drag Handle */}
-                    <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+                    <View style={[styles.modalHandle, { backgroundColor: colors.border }]} importantForAccessibility="no" />
 
                     {/* Header do Modal */}
                     <View style={styles.modalHeader}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <View style={[styles.modalHeaderIcon, { backgroundColor: colors.iconBg }]}>
-                                <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                            <View style={[styles.modalHeaderIcon, { backgroundColor: colors.iconBg }]} importantForAccessibility="no">
+                                <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} importantForAccessibility="no" />
                             </View>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Menu de Ações Rápidas</Text>
+                            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">
+                                Menu de Ações Rápidas
+                            </Text>
                         </View>
                         <TouchableOpacity
                             onPress={() => setShowActionsModal(false)}
                             style={[styles.modalCloseBtn, { backgroundColor: colors.iconBg }]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Fechar menu de ações rápidas"
                         >
-                            <MaterialIcons name="close" size={20} color={colors.textMuted} />
+                            <MaterialIcons name="close" size={20} color={colors.textMuted} importantForAccessibility="no" />
                         </TouchableOpacity>
                     </View>
 
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: 28 }}
+                        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
                     >
                         {quickActionCategories.map((category, catIdx) => (
                             <View key={catIdx} style={styles.categorySection}>
-                                <Text style={[styles.categoryTitle, { color: colors.textMuted }]}>
+                                <Text style={[styles.categoryTitle, { color: colors.textMuted }]} accessibilityRole="header">
                                     {category.title}
                                 </Text>
                                 <View style={styles.categoryGrid}>
@@ -1923,13 +2089,15 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                                                     borderColor: colors.border,
                                                 }
                                             ]}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={action.label}
                                             onPress={() => {
                                                 setShowActionsModal(false)
                                                 sendMessage(action.text)
                                             }}
                                         >
-                                            <View style={[styles.actionIconContainer, { backgroundColor: colors.iconBg }]}>
-                                                <MaterialIcons name={action.icon as any} size={18} color={colors.primary} />
+                                            <View style={[styles.actionIconContainer, { backgroundColor: colors.iconBg }]} importantForAccessibility="no">
+                                                <MaterialIcons name={action.icon as any} size={18} color={colors.primary} importantForAccessibility="no" />
                                             </View>
                                             <Text style={[styles.actionCardText, { color: colors.text }]}>
                                                 {action.label}
@@ -1940,8 +2108,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                             </View>
                         ))}
                     </ScrollView>
-                </TouchableOpacity>
-            </TouchableOpacity>
+                </View>
+            </View>
         </Modal>
         </View>
     )
@@ -1962,8 +2130,11 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     backBtn: {
-        marginRight: 8,
-        padding: 4,
+        marginRight: 4,
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerInfo: {
         flex: 1,
@@ -2002,12 +2173,12 @@ const styles = StyleSheet.create({
         backgroundColor: '#22c55e',
     },
     onlineText: {
-        fontSize: 11,
+        fontSize: 12,
     },
     searchToggleBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -2033,9 +2204,16 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         fontSize: 14,
     },
+    clearSearchBtn: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     searchBtn: {
+        minWidth: 44,
+        minHeight: 44,
         paddingHorizontal: 14,
-        paddingVertical: 10,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -2046,14 +2224,16 @@ const styles = StyleSheet.create({
     searchResultItem: {
         borderWidth: 1,
         borderRadius: 8,
-        padding: 10,
+        padding: 12,
+        minHeight: 44,
+        justifyContent: 'center',
     },
     searchResultTitle: {
         fontSize: 13,
         fontWeight: '600',
     },
     searchResultScore: {
-        fontSize: 11,
+        fontSize: 12,
         marginTop: 2,
     },
     noResults: {
@@ -2111,7 +2291,7 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     bubbleTime: {
-        fontSize: 10,
+        fontSize: 12,
         marginTop: 4,
         alignSelf: 'flex-end',
     },
@@ -2143,11 +2323,35 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     actionMenuBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    activeFlowBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderTopWidth: 1,
+        gap: 12,
+    },
+    activeFlowText: {
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    activeFlowCancelBtn: {
+        minHeight: 44,
+        paddingHorizontal: 14,
+        borderRadius: 8,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    activeFlowCancelText: {
+        fontSize: 13,
+        fontWeight: '700',
     },
     inputContainer: {
         paddingHorizontal: 16,
@@ -2193,16 +2397,16 @@ const styles = StyleSheet.create({
         ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
     },
     micBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
     },
     sendBtn: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -2218,7 +2422,7 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     inlineSuggestionsTitle: {
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: '700',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
@@ -2230,9 +2434,11 @@ const styles = StyleSheet.create({
     },
     inlineSuggestionBtn: {
         borderWidth: 1,
-        borderRadius: 16,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        borderRadius: 20,
+        minHeight: 40,
+        justifyContent: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
     },
     inlineSuggestionText: {
         fontSize: 12,
@@ -2276,9 +2482,9 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     modalCloseBtn: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
     },
