@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Animated, Easing } from 'react-native'
+import { AccessibilityInfo, Animated, Easing } from 'react-native'
 
 interface FadeInUpOptions {
     duration?: number
@@ -16,23 +16,49 @@ export function useFadeInUp({
     const translateYAnim = useRef(new Animated.Value(translateY)).current
 
     useEffect(() => {
-        Animated.parallel([
-            Animated.timing(opacity, {
-                toValue: 1,
-                duration,
-                delay,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-            }),
-            Animated.timing(translateYAnim, {
-                toValue: 0,
-                duration,
-                delay,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-            }),
-        ]).start()
-    }, [])
+        let mounted = true
+        let anim: Animated.CompositeAnimation | null = null
+
+        const startAnimation = () => {
+            anim = Animated.parallel([
+                Animated.timing(opacity, {
+                    toValue: 1,
+                    duration,
+                    delay,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(translateYAnim, {
+                    toValue: 0,
+                    duration,
+                    delay,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+            ])
+            anim.start()
+        }
+
+        AccessibilityInfo.isReduceMotionEnabled()
+            .then((reduceMotionEnabled) => {
+                if (!mounted) return
+                if (reduceMotionEnabled) {
+                    opacity.setValue(1)
+                    translateYAnim.setValue(0)
+                    return
+                }
+                startAnimation()
+            })
+            .catch(() => {
+                if (!mounted) return
+                startAnimation()
+            })
+
+        return () => {
+            mounted = false
+            anim?.stop()
+        }
+    }, [delay, duration, opacity, translateYAnim])
 
     return {
         animatedStyle: {

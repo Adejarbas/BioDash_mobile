@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import {
     View,
     Text,
@@ -9,10 +9,10 @@ import {
     KeyboardAvoidingView,
     Platform,
     ScrollView,
-    Alert,
     Image,
     Animated,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { authLib } from '../lib/auth'
@@ -24,6 +24,8 @@ interface Props {
 }
 
 export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Props) {
+    const insets = useSafeAreaInsets()
+    const passwordRef = useRef<TextInput>(null)
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
@@ -31,20 +33,17 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
     const [error, setError] = useState<string | null>(null)
 
     const handleLogin = async () => {
-        if (!email || !password) {
+        if (!email.trim() || !password) {
             setError('Preencha o email e a senha.')
             return
         }
         setLoading(true)
         setError(null)
 
-            try {
-            console.log("Tentando logar com:", email.trim());
+        try {
             await authLib.signIn(email.trim(), password.trim());
-            console.log("Login OK!");
             onLogin()
         } catch (e: any) {
-            console.log("Erro no login:", e.message);
             setError(e.message === 'Email ou senha inválidos.' ? 'Email ou Senha inválidos.' : (e.message || 'Erro inesperado.'))
         } finally {
             setLoading(false)
@@ -59,26 +58,44 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
             <ScrollView
-                contentContainerStyle={styles.scroll}
+                contentContainerStyle={[
+                    styles.scroll,
+                    {
+                        paddingTop: Math.max(insets.top + 12, 24),
+                        paddingBottom: Math.max(insets.bottom + 16, 24),
+                    },
+                ]}
                 keyboardShouldPersistTaps="handled"
             >
                 <Animated.View style={animatedStyle}>
                 {/* Botão de Voltar */}
                 {onBack && (
-                    <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
-                        <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar para a tela inicial</Text>
+                    <TouchableOpacity
+                        style={styles.backNavBtn}
+                        onPress={onBack}
+                        accessibilityRole="button"
+                        accessibilityLabel="Voltar para a tela inicial"
+                    >
+                        <Text style={styles.backNavText}>← Voltar para a tela inicial</Text>
                     </TouchableOpacity>
                 )}
 
                 {/* Logo */}
                 <View style={styles.logoSection}>
-                    <Image source={require('../../assets/logo-biodash.png')} style={{ width: 200, height: 100 }} resizeMode="contain" />
+                    <Image
+                        source={require('../../assets/logo-biodash.png')}
+                        style={{ width: 200, height: 100 }}
+                        resizeMode="contain"
+                        accessible
+                        accessibilityRole="image"
+                        accessibilityLabel="BioDash"
+                    />
                     <Text style={styles.logoSubtitle}>Monitoramento de Biodigestores</Text>
                 </View>
 
                 {/* Card de Login */}
                 <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Entrar</Text>
+                    <Text style={styles.cardTitle} accessibilityRole="header">Entrar</Text>
                     <Text style={styles.cardSubtitle}>
                         Entre com seu email para acessar o dashboard
                     </Text>
@@ -89,12 +106,21 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                         <TextInput
                             style={styles.input}
                             placeholder="usuario@email.com"
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor="#475569"
                             keyboardType="email-address"
                             autoCapitalize="none"
                             autoCorrect={false}
+                            textContentType="emailAddress"
+                            autoComplete="email"
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => passwordRef.current?.focus()}
+                            accessibilityLabel="Email"
                             value={email}
-                            onChangeText={setEmail}
+                            onChangeText={(text) => {
+                                setEmail(text)
+                                if (error) setError(null)
+                            }}
                         />
                     </View>
 
@@ -103,27 +129,43 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                         <Text style={styles.label}>Senha</Text>
                         <View style={styles.passwordRow}>
                             <TextInput
+                                ref={passwordRef}
                                 style={[styles.input, styles.passwordInput]}
                                 placeholder="••••••••"
-                                placeholderTextColor="#94a3b8"
+                                placeholderTextColor="#475569"
                                 secureTextEntry={!showPassword}
                                 autoCapitalize="none"
+                                autoCorrect={false}
+                                textContentType="password"
+                                autoComplete="password"
+                                returnKeyType="done"
+                                onSubmitEditing={handleLogin}
+                                accessibilityLabel="Senha"
                                 value={password}
-                                onChangeText={setPassword}
+                                onChangeText={(text) => {
+                                    setPassword(text)
+                                    if (error) setError(null)
+                                }}
                             />
                             <TouchableOpacity
                                 style={styles.eyeButton}
                                 onPress={() => setShowPassword(!showPassword)}
+                                accessibilityRole="button"
+                                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                             >
-                                <MaterialCommunityIcons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#94a3b8" />
+                                <MaterialCommunityIcons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#475569" importantForAccessibility="no" />
                             </TouchableOpacity>
                         </View>
                     </View>
 
                     {/* Erro */}
                     {error ? (
-                        <View style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}>
-                            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#dc2626" style={{ marginRight: 6 }} />
+                        <View
+                            style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}
+                            accessibilityRole="alert"
+                            accessibilityLiveRegion="polite"
+                        >
+                            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#b91c1c" style={{ marginRight: 6 }} importantForAccessibility="no" />
                             <Text style={styles.errorText}>{error}</Text>
                         </View>
                     ) : null}
@@ -134,6 +176,9 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
                         onPress={handleLogin}
                         disabled={loading}
                         activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityLabel={loading ? 'Entrando, aguarde' : 'Entrar'}
+                        accessibilityState={{ disabled: loading, busy: loading }}
                     >
                         {loading ? (
                             <ActivityIndicator color="#fff" size="small" />
@@ -144,11 +189,13 @@ export default function LoginScreen({ onLogin, onNavigateRegister, onBack }: Pro
 
                     {/* Link para Cadastro */}
                     <TouchableOpacity
-                        style={{ marginTop: 24, alignItems: 'center' }}
+                        style={styles.registerLinkBtn}
                         onPress={onNavigateRegister}
+                        accessibilityRole="button"
+                        accessibilityLabel="Não tem uma conta? Cadastre-se"
                     >
-                        <Text style={{ fontSize: 14, color: '#64748b' }}>
-                            Não tem uma conta? <Text style={{ fontWeight: 'bold', color: '#16a34a' }}>Cadastre-se</Text>
+                        <Text style={{ fontSize: 14, color: '#475569' }}>
+                            Não tem uma conta? <Text style={{ fontWeight: 'bold', color: '#15803d' }}>Cadastre-se</Text>
                         </Text>
                     </TouchableOpacity>
                 </View>
@@ -168,7 +215,19 @@ const styles = StyleSheet.create({
     scroll: {
         flexGrow: 1,
         justifyContent: 'center',
-        padding: 24,
+        paddingHorizontal: 24,
+    },
+    backNavBtn: {
+        minHeight: 44,
+        justifyContent: 'center',
+        alignSelf: 'flex-start',
+        marginBottom: 12,
+        paddingVertical: 8,
+    },
+    backNavText: {
+        fontSize: 16,
+        color: '#15803d',
+        fontWeight: '600',
     },
     logoSection: {
         alignItems: 'center',
@@ -182,7 +241,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 12,
-        shadowColor: '#16a34a',
+        shadowColor: '#15803d',
         shadowOpacity: 0.25,
         shadowRadius: 12,
         elevation: 4,
@@ -198,9 +257,9 @@ const styles = StyleSheet.create({
     },
     logoSubtitle: {
         fontSize: 14,
-        color: '#4ade80',
+        color: '#166534',
         marginTop: 4,
-        fontWeight: '500',
+        fontWeight: '600',
     },
     card: {
         backgroundColor: '#ffffff',
@@ -219,7 +278,7 @@ const styles = StyleSheet.create({
     },
     cardSubtitle: {
         fontSize: 13,
-        color: '#64748b',
+        color: '#475569',
         marginBottom: 24,
     },
     field: {
@@ -233,7 +292,7 @@ const styles = StyleSheet.create({
     },
     input: {
         borderWidth: 1,
-        borderColor: '#cbd5e1',
+        borderColor: '#64748b',
         borderRadius: 10,
         paddingHorizontal: 14,
         paddingVertical: 12,
@@ -243,7 +302,7 @@ const styles = StyleSheet.create({
     },
     passwordRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'stretch',
     },
     passwordInput: {
         flex: 1,
@@ -252,12 +311,14 @@ const styles = StyleSheet.create({
     },
     eyeButton: {
         borderWidth: 1,
-        borderColor: '#cbd5e1',
+        borderColor: '#64748b',
         borderLeftWidth: 0,
         borderTopRightRadius: 10,
         borderBottomRightRadius: 10,
         paddingHorizontal: 12,
-        paddingVertical: 12,
+        minWidth: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
         backgroundColor: '#f8fafc',
     },
     eyeEmoji: {
@@ -272,16 +333,19 @@ const styles = StyleSheet.create({
         borderColor: '#fecaca',
     },
     errorText: {
-        color: '#dc2626',
+        color: '#b91c1c',
         fontSize: 13,
         textAlign: 'center',
+        flexShrink: 1,
     },
     button: {
-        backgroundColor: '#16a34a',
+        backgroundColor: '#15803d',
         borderRadius: 12,
         paddingVertical: 14,
+        minHeight: 48,
+        justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#16a34a',
+        shadowColor: '#15803d',
         shadowOpacity: 0.35,
         shadowRadius: 8,
         elevation: 3,
@@ -296,9 +360,15 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 0.3,
     },
+    registerLinkBtn: {
+        marginTop: 16,
+        minHeight: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     footer: {
         textAlign: 'center',
-        color: '#86efac',
+        color: '#475569',
         fontSize: 12,
         marginTop: 24,
     },

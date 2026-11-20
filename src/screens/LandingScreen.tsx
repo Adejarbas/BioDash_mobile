@@ -5,12 +5,12 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
-  Platform,
   Image,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFadeInUp } from '../hooks/useFadeInUp';
+import { showAlert } from '../lib/feedback';
 
 interface Props {
   onNavigateLogin: () => void;
@@ -23,13 +23,30 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <Image source={require('../../assets/logo-biodash.png')} style={{ width: 100, height: 70 }} resizeMode="contain" />
+          <Image
+            source={require('../../assets/logo-biodash.png')}
+            style={{ width: 100, height: 56 }}
+            resizeMode="contain"
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel="BioDash"
+          />
         </View>
         <View style={styles.headerButtons}>
-          <TouchableOpacity style={styles.loginButton} onPress={onNavigateLogin}>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={onNavigateLogin}
+            accessibilityRole="button"
+            accessibilityLabel="Entrar"
+          >
             <Text style={styles.loginButtonText}>Entrar</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.registerButton} onPress={onNavigateRegister}>
+          <TouchableOpacity
+            style={styles.registerButton}
+            onPress={onNavigateRegister}
+            accessibilityRole="button"
+            accessibilityLabel="Cadastre-se"
+          >
             <Text style={styles.registerButtonText}>Cadastre-se</Text>
           </TouchableOpacity>
         </View>
@@ -39,7 +56,7 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
           <Animated.View style={[styles.webContainer, animatedStyle]}>
           {/* Hero Section */}
           <View style={styles.heroSection}>
-            <Text style={styles.heroTitle}>Sistema de Gestão de Biodigestores</Text>
+            <Text style={styles.heroTitle} accessibilityRole="header">Sistema de Gestão de Biodigestores</Text>
             <Text style={styles.heroSubtitle}>
               Monitore e otimize o desempenho do seu biodigestor com nosso dashboard completo e intuitivo.
             </Text>
@@ -47,12 +64,15 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
               source={require('../../assets/hero-banner.png')}
               style={styles.imagePlaceholderHero}
               resizeMode="cover"
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel="Painel ilustrativo de monitoramento de biodigestores"
             />
           </View>
 
           {/* Sobre o Projeto */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Sobre o Projeto BioGen</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">Sobre o Projeto BioGen</Text>
             <Text style={styles.sectionText}>
               Uma solução sustentável para o tratamento de resíduos orgânicos, transformando-os em biogás por meio de biodigestores para a geração de energia elétrica limpa e biofertilizantes.
             </Text>
@@ -60,43 +80,57 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
 
           {/* ODS */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Objetivos de Desenvolvimento Sustentável</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">Objetivos de Desenvolvimento Sustentável</Text>
             <View style={styles.odsGrid}>
-              <View style={styles.odsItem}><Text style={styles.odsText}>ODS 7</Text></View>
-              <View style={styles.odsItem}><Text style={styles.odsText}>ODS 10</Text></View>
-              <View style={styles.odsItem}><Text style={styles.odsText}>ODS 12</Text></View>
-              <View style={styles.odsItem}><Text style={styles.odsText}>ODS 13</Text></View>
+              <View style={styles.odsItem} accessible accessibilityLabel="ODS 7: Energia Limpa e Acessível">
+                <Text style={styles.odsText}>ODS 7</Text>
+              </View>
+              <View style={styles.odsItem} accessible accessibilityLabel="ODS 10: Redução das Desigualdades">
+                <Text style={styles.odsText}>ODS 10</Text>
+              </View>
+              <View style={styles.odsItem} accessible accessibilityLabel="ODS 12: Consumo e Produção Responsáveis">
+                <Text style={styles.odsText}>ODS 12</Text>
+              </View>
+              <View style={styles.odsItem} accessible accessibilityLabel="ODS 13: Ação Contra a Mudança Global do Clima">
+                <Text style={styles.odsText}>ODS 13</Text>
+              </View>
             </View>
           </View>
 
           {/* Diferenciais */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Nossos Diferenciais</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">Nossos Diferenciais</Text>
             <View style={styles.featureCard}>
-              <Text style={styles.featureTitle}>Rastreamento de Resíduos</Text>
+              <Text style={styles.featureTitle} accessibilityRole="header">Rastreamento de Resíduos</Text>
               <Text style={styles.featureDesc}>Monitore a quantidade de resíduos processados em tempo real.</Text>
               <Image
                 source={require('../../assets/residuos-banner.png')}
                 style={styles.imagePlaceholderSmall}
                 resizeMode="cover"
+                accessible={false}
+                importantForAccessibility="no"
               />
             </View>
             <View style={styles.featureCard}>
-              <Text style={styles.featureTitle}>Geração de Energia</Text>
+              <Text style={styles.featureTitle} accessibilityRole="header">Geração de Energia</Text>
               <Text style={styles.featureDesc}>Acompanhe a energia produzida pelo seu sistema com análises detalhadas.</Text>
               <Image
                 source={require('../../assets/energia-banner.png')}
                 style={styles.imagePlaceholderSmall}
                 resizeMode="cover"
+                accessible={false}
+                importantForAccessibility="no"
               />
             </View>
             <View style={styles.featureCard}>
-              <Text style={styles.featureTitle}>Benefícios Fiscais</Text>
+              <Text style={styles.featureTitle} accessibilityRole="header">Benefícios Fiscais</Text>
               <Text style={styles.featureDesc}>Calcule e visualize os benefícios fiscais da sua produção de energia sustentável.</Text>
               <Image
                 source={require('../../assets/beneficio-banner.png')}
                 style={styles.imagePlaceholderSmall}
                 resizeMode="cover"
+                accessible={false}
+                importantForAccessibility="no"
               />
             </View>
           </View>
@@ -105,9 +139,45 @@ export default function LandingScreen({ onNavigateLogin, onNavigateRegister }: P
           <View style={styles.footer}>
             <Text style={styles.footerText}>©️ 2024 BioDash. Todos os direitos reservados.</Text>
             <View style={styles.footerLinks}>
-              <TouchableOpacity><Text style={styles.footerLink}>Termos</Text></TouchableOpacity>
-              <TouchableOpacity><Text style={styles.footerLink}>Privacidade</Text></TouchableOpacity>
-              <TouchableOpacity><Text style={styles.footerLink}>Contato</Text></TouchableOpacity>
+              <TouchableOpacity
+                style={styles.footerLinkBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Termos de Uso"
+                onPress={() =>
+                  showAlert(
+                    'Termos de Uso',
+                    'Ao utilizar o BioDash Mobile, você concorda com o monitoramento responsável dos seus biodigestores e métricas operacionais.'
+                  )
+                }
+              >
+                <Text style={styles.footerLink}>Termos</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.footerLinkBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Política de Privacidade"
+                onPress={() =>
+                  showAlert(
+                    'Privacidade',
+                    'Os dados da sua empresa, sensores e localização são protegidos por autenticação JWT e utilizados apenas na operação do sistema.'
+                  )
+                }
+              >
+                <Text style={styles.footerLink}>Privacidade</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.footerLinkBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Contato"
+                onPress={() =>
+                  showAlert(
+                    'Contato',
+                    'Para suporte técnico ou dúvidas comerciais, entre em contato pelo e-mail: suporte@biodash.com'
+                  )
+                }
+              >
+                <Text style={styles.footerLink}>Contato</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Animated.View>
@@ -120,14 +190,15 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#f0fdf4',
-    paddingTop: Platform.OS === 'android' ? 25 : 0,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 12,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
@@ -152,22 +223,28 @@ const styles = StyleSheet.create({
   },
   headerButtons: {
     flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: 8,
   },
   loginButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 8,
-    marginRight: 4,
+    paddingHorizontal: 12,
     borderRadius: 8,
   },
   loginButtonText: {
-    color: '#16a34a',
+    color: '#15803d',
     fontWeight: '600',
     fontSize: 14,
   },
   registerButton: {
-    backgroundColor: '#16a34a',
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: '#15803d',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     borderRadius: 8,
   },
   registerButtonText: {
@@ -187,6 +264,7 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     alignItems: 'center',
+    paddingHorizontal: 20,
     paddingVertical: 40,
     backgroundColor: '#ffffff',
   },
@@ -267,12 +345,12 @@ const styles = StyleSheet.create({
   featureTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#16a34a',
+    color: '#15803d',
     marginBottom: 8,
   },
   featureDesc: {
     fontSize: 14,
-    color: '#64748b',
+    color: '#475569',
     marginBottom: 16,
     lineHeight: 20,
   },
@@ -293,16 +371,21 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: 10,
   },
   footerLinks: {
     flexDirection: 'row',
-    gap: 15,
+    gap: 8,
+  },
+  footerLinkBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
   footerLink: {
-    fontSize: 13,
-    color: '#16a34a',
-    fontWeight: '500',
+    fontSize: 14,
+    color: '#15803d',
+    fontWeight: '600',
   },
 });

@@ -1,28 +1,31 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    View,
-    Text,
-    TouchableOpacity,
-    StyleSheet,
-    ScrollView,
-    TextInput,
-    Image,
+    AccessibilityInfo,
     ActivityIndicator,
     Alert,
     Animated,
+    Image,
+    KeyboardAvoidingView,
     Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TextInputProps,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { useFadeInUp } from '../hooks/useFadeInUp';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import { decode } from 'base64-arraybuffer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTheme } from '../context/ThemeContext';
+import { useFadeInUp } from '../hooks/useFadeInUp';
+import { useTheme, Colors } from '../context/ThemeContext';
 import { authLib } from '../lib/auth';
 import { profileApi } from '../lib/api';
 import { uploadFile, getDownloadUrl } from '../lib/storage';
+import { showAlert } from '../lib/feedback';
+import SubScreenHeader from '../components/SubScreenHeader';
 
-// ─── Funções de máscara ────────────────────────────────────────────
 const maskCNPJ = (value: string): string => {
     const digits = value.replace(/\D/g, '').slice(0, 14);
     return digits
@@ -49,47 +52,91 @@ const maskCEP = (value: string): string => {
     return digits.replace(/(\d{5})(\d)/, '$1-$2');
 };
 
-const showAlert = (title: string, message: string) => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert(`${title}: ${message}`);
-    } else {
-        Alert.alert(title, message);
-    }
+interface ProfileFormData {
+    nome: string;
+    nomeFantasia: string;
+    razaoSocial: string;
+    cnpj: string;
+    email: string;
+    endereco: string;
+    numero: string;
+    cidade: string;
+    estado: string;
+    cep: string;
+    telefone: string;
+}
+
+const EMPTY_PROFILE: ProfileFormData = {
+    nome: '',
+    nomeFantasia: '',
+    razaoSocial: '',
+    cnpj: '',
+    email: '',
+    endereco: '',
+    numero: '',
+    cidade: '',
+    estado: '',
+    cep: '',
+    telefone: '',
 };
 
-const InputLabel = ({ label, colors }: { label: string, colors: any }) => (
+const InputLabel = ({ label, colors }: { label: string; colors: Colors }) => (
     <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{label}</Text>
 );
 
-const CustomInput = ({ value, onChangeText, placeholder, style, secure = false, colors }: any) => (
+interface CustomInputProps extends Omit<TextInputProps, 'style'> {
+    colors: Colors;
+    inputRef?: React.RefObject<TextInput | null>;
+    style?: TextInputProps['style'];
+}
+
+const CustomInput = ({
+    colors,
+    inputRef,
+    style,
+    placeholderTextColor,
+    ...rest
+}: CustomInputProps) => (
     <TextInput
+        ref={inputRef}
         style={[
             styles.input,
             {
-                backgroundColor: colors.background, // Fundo levemente contrastante
-                borderColor: colors.border,
-                color: colors.text
+                backgroundColor: colors.background,
+                borderColor: colors.inputBorder,
+                color: colors.text,
             },
-            style
+            style,
         ]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textMuted}
-        secureTextEntry={secure}
+        placeholderTextColor={placeholderTextColor ?? colors.textMuted}
+        {...rest}
     />
 );
 
-const InfoRow = ({ label1, val1, label2, val2, colors }: any) => (
+const InfoRow = ({
+    label1,
+    val1,
+    label2,
+    val2,
+    colors,
+}: {
+    label1: string;
+    val1: string;
+    label2?: string;
+    val2?: string;
+    colors: Colors;
+}) => (
     <View style={styles.twoCols}>
         <View style={styles.col}>
             <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label1}</Text>
             <Text style={[styles.infoVal, { color: colors.text }]}>{val1 || '—'}</Text>
         </View>
-        <View style={styles.col}>
-            <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label2}</Text>
-            <Text style={[styles.infoVal, { color: colors.text }]}>{val2 || '—'}</Text>
-        </View>
+        {label2 ? (
+            <View style={styles.col}>
+                <Text style={[styles.infoLabel, { color: colors.textMuted }]}>{label2}</Text>
+                <Text style={[styles.infoVal, { color: colors.text }]}>{val2 || '—'}</Text>
+            </View>
+        ) : null}
     </View>
 );
 
@@ -98,31 +145,99 @@ interface Props {
 }
 
 export default function CompanyProfileScreen({ onBack }: Props) {
-    const { colors, theme } = useTheme();
-    const { animatedStyle } = useFadeInUp()
-    const [loading, setLoading] = useState(false);
+    const { colors } = useTheme();
+    const insets = useSafeAreaInsets();
+    const { animatedStyle } = useFadeInUp();
+
+    const [isInitialLoading, setIsInitialLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [isSavingProfile, setIsSavingProfile] = useState(false);
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
+    const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
     const [cepLoading, setCepLoading] = useState(false);
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
-    const [formData, setFormData] = useState({
-        nome: '',
-        nomeFantasia: '',
-        razaoSocial: '',
-        cnpj: '',
-        email: '',
-        endereco: '',
-        numero: '',
-        cidade: '',
-        estado: '',
-        cep: '',
-        telefone: '',
-    });
+    const [savedProfile, setSavedProfile] = useState<ProfileFormData>(EMPTY_PROFILE);
+    const [formData, setFormData] = useState<ProfileFormData>(EMPTY_PROFILE);
 
     const [passwordData, setPasswordData] = useState({
-        atual: '',
         nova: '',
-        confirmar: ''
+        confirmar: '',
     });
+    const [showNewPassword, setShowNewPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+    const nomeFantasiaRef = useRef<TextInput>(null);
+    const razaoSocialRef = useRef<TextInput>(null);
+    const cnpjRef = useRef<TextInput>(null);
+    const emailRef = useRef<TextInput>(null);
+    const enderecoRef = useRef<TextInput>(null);
+    const numeroRef = useRef<TextInput>(null);
+    const cidadeRef = useRef<TextInput>(null);
+    const estadoRef = useRef<TextInput>(null);
+    const cepRef = useRef<TextInput>(null);
+    const telefoneRef = useRef<TextInput>(null);
+    const confirmPasswordRef = useRef<TextInput>(null);
+
+    const loadProfile = useCallback(async () => {
+        setIsInitialLoading(true);
+        setLoadError(null);
+        try {
+            const user = await authLib.getUser();
+            if (!user) {
+                setLoadError('Sessão não encontrada. Faça login novamente.');
+                return;
+            }
+
+            const res = await profileApi.fetch();
+            if (!res.success && !res.data) {
+                setLoadError(res.error || 'Não foi possível carregar os dados do perfil.');
+                return;
+            }
+
+            const profile = res.data;
+
+            if (profile?.avatar_url) {
+                let key = profile.avatar_url;
+                if (key.startsWith('http://') || key.startsWith('https://')) {
+                    try {
+                        const urlObj = new URL(key);
+                        const parts = urlObj.pathname.split('/').filter(Boolean);
+                        key = parts.length > 1 ? parts.slice(1).join('/') : (parts[0] || key);
+                    } catch {
+                        // Mantém a key original se não for uma URL válida
+                    }
+                }
+                const downloadUrl = await getDownloadUrl(key);
+                if (downloadUrl) setAvatarUri(downloadUrl);
+            }
+
+            const loaded: ProfileFormData = {
+                nome: profile?.name || '',
+                nomeFantasia: profile?.company || '',
+                razaoSocial: profile?.razao_social || '',
+                cnpj: maskCNPJ(profile?.cnpj || ''),
+                email: profile?.email || user.email || '',
+                endereco: profile?.address || '',
+                numero: profile?.numero?.toString() || '',
+                cidade: profile?.city || '',
+                estado: profile?.state || '',
+                cep: maskCEP(profile?.zip_code || ''),
+                telefone: maskPhone(profile?.phone || ''),
+            };
+
+            setSavedProfile(loaded);
+            setFormData(loaded);
+        } catch (err: any) {
+            setLoadError(err?.message || 'Erro ao carregar os dados do perfil.');
+        } finally {
+            setIsInitialLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        void loadProfile();
+    }, [loadProfile]);
 
     const handleFetchCep = async (rawCep: string) => {
         const clean = rawCep.replace(/\D/g, '');
@@ -132,75 +247,26 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
             const data = await res.json();
             if (data.erro) {
-                Alert.alert('Aviso', 'CEP não encontrado.');
+                showAlert('Aviso', 'CEP não encontrado.');
                 return;
             }
-            setFormData(prev => ({
+            const nextAddress = [data.logradouro, data.bairro].filter(Boolean).join(', ');
+            setFormData((prev) => ({
                 ...prev,
-                endereco: [data.logradouro, data.bairro].filter(Boolean).join(', '),
+                endereco: nextAddress || prev.endereco,
                 cidade: data.localidade || prev.cidade,
                 estado: data.uf || prev.estado,
             }));
+            AccessibilityInfo.announceForAccessibility?.('Endereço preenchido automaticamente pelo CEP.');
         } catch {
-            Alert.alert('Erro', 'Falha ao consultar o ViaCEP.');
+            showAlert('Erro', 'Falha ao consultar o ViaCEP.');
         } finally {
             setCepLoading(false);
         }
     };
 
-    React.useEffect(() => {
-        const loadProfile = async () => {
-            try {
-                const user = await authLib.getUser();
-                console.log('[Profile] Usuário autenticado:', user?.email);
-
-                if (!user) {
-                    console.warn('[Profile] Nenhum usuário logado.');
-                    return;
-                }
-
-                const res = await profileApi.fetch();
-                console.log('[Profile] Resposta da API:', JSON.stringify(res));
-
-                const profile = res.data;
-
-                if (profile?.avatar_url) {
-                    let key = profile.avatar_url;
-                    if (key.startsWith('http://') || key.startsWith('https://')) {
-                        try {
-                            const urlObj = new URL(key);
-                            const parts = urlObj.pathname.split('/').filter(Boolean);
-                            key = parts.length > 1 ? parts.slice(1).join('/') : (parts[0] || key);
-                        } catch {
-                            // Mantém a key como está caso não seja URL completa válida
-                        }
-                    }
-                    const downloadUrl = await getDownloadUrl(key);
-                    if (downloadUrl) setAvatarUri(downloadUrl);
-                }
-
-                setFormData({
-                    nome: profile?.name || '',
-                    nomeFantasia: profile?.company || '',
-                    razaoSocial: profile?.razao_social || '',
-                    cnpj: maskCNPJ(profile?.cnpj || ''),
-                    email: profile?.email || user.email || '',
-                    endereco: profile?.address || '',
-                    numero: profile?.numero?.toString() || '',
-                    cidade: profile?.city || '',
-                    estado: profile?.state || '',
-                    cep: maskCEP(profile?.zip_code || ''),
-                    telefone: maskPhone(profile?.phone || ''),
-                });
-            } catch (err) {
-                console.error('[Profile] Erro ao carregar perfil:', err);
-            }
-        };
-        loadProfile();
-    }, []);
-
-        const handleSaveProfile = async () => {
-        setLoading(true);
+    const handleSaveProfile = async () => {
+        setIsSavingProfile(true);
         try {
             await profileApi.update({
                 name: formData.nome || null,
@@ -215,22 +281,16 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                 phone: formData.telefone || null,
                 email: formData.email || null,
             });
-            Alert.alert('Sucesso', 'Informações atualizadas com sucesso!');
+            setSavedProfile(formData);
+            showAlert('Sucesso', 'Informações atualizadas com sucesso!');
         } catch (e: any) {
-            Alert.alert('Erro', e.message || 'Falha ao atualizar o perfil.');
+            showAlert('Erro', e.message || 'Falha ao atualizar o perfil.');
         } finally {
-            setLoading(false);
+            setIsSavingProfile(false);
         }
     };
 
     const handleChangePassword = async () => {
-        console.log('[DEBUG] Botão Alterar Senha clicado!', {
-            atual: passwordData.atual ? '***' : '(vazio)',
-            nova: passwordData.nova ? '***' : '(vazio)',
-            confirmar: passwordData.confirmar ? '***' : '(vazio)',
-            tamanhoNova: passwordData.nova?.length || 0,
-        });
-
         if (!passwordData.nova && !passwordData.confirmar) {
             showAlert('Aviso', 'Por favor, digite a nova senha e confirme-a.');
             return;
@@ -246,35 +306,30 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             return;
         }
 
-        setLoading(true);
+        setIsChangingPassword(true);
         try {
-            console.log('[DEBUG] Enviando requisição de alteração de senha...');
             await authLib.updatePassword(passwordData.nova);
             showAlert('Sucesso', 'Senha alterada com sucesso!');
-            setPasswordData({ atual: '', nova: '', confirmar: '' });
+            setPasswordData({ nova: '', confirmar: '' });
         } catch (e: any) {
-            console.error('[DEBUG] Falha ao alterar senha:', e);
             showAlert('Erro', e.message || 'Falha ao alterar senha.');
         } finally {
-            setLoading(false);
+            setIsChangingPassword(false);
         }
     };
 
     const uploadAvatar = async (uri: string) => {
         try {
-            setLoading(true);
+            setIsUploadingAvatar(true);
             const user = await authLib.getUser();
-            if (!user) throw new Error("Usuário não logado.");
+            if (!user) throw new Error('Usuário não logado.');
 
-            // Detecta a extensão real — ignora 'blob' e 'undefined'
             const rawExt = uri.substring(uri.lastIndexOf('.') + 1).toLowerCase();
             const ext = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(rawExt) ? rawExt : 'jpg';
             const unique = Math.random().toString(36).slice(2);
             const fileName = `${user.id}/${unique}.${ext}`;
 
             if (Platform.OS === 'web') {
-                // Na web, expo-file-system não funciona.
-                // Convertemos o blob URI para base64 via FileReader e enviamos ao storage.
                 const response = await fetch(uri);
                 const blob = await response.blob();
                 const base64String: string = await new Promise((resolve, reject) => {
@@ -283,13 +338,11 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                     reader.onerror = reject;
                     reader.readAsDataURL(blob);
                 });
-                // base64String já é "data:image/jpeg;base64,XXXX" — precisamos só do conteúdo
+                setAvatarUri(base64String);
                 const storageKey = await uploadFile(uri, fileName);
                 await profileApi.update({ avatarUrl: storageKey });
                 const downloadUrl = await getDownloadUrl(storageKey);
                 if (downloadUrl) setAvatarUri(downloadUrl);
-                // Exibe preview imediato enquanto aguarda a URL do storage
-                setAvatarUri(base64String);
             } else {
                 const storageKey = await uploadFile(uri, fileName);
                 await profileApi.update({ avatarUrl: storageKey });
@@ -297,19 +350,18 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                 if (downloadUrl) setAvatarUri(downloadUrl);
             }
 
-            Alert.alert("Sucesso", "Foto atualizada com sucesso!");
+            showAlert('Sucesso', 'Foto atualizada com sucesso!');
         } catch (e: any) {
-            console.error('Erro ao atualizar foto:', e);
-            Alert.alert("Erro", e.message || "Falha ao atualizar a foto de perfil.");
+            showAlert('Erro', e.message || 'Falha ao atualizar a foto de perfil.');
         } finally {
-            setLoading(false);
+            setIsUploadingAvatar(false);
         }
     };
 
     const handlePickImage = async () => {
+        if (isUploadingAvatar) return;
+
         if (Platform.OS === 'web') {
-            // Na web, câmera não está disponível via expo-image-picker e Alert com múltiplas opções
-            // não funciona. Vai direto para a seleção de arquivo.
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ['images'],
                 allowsEditing: true,
@@ -322,17 +374,16 @@ export default function CompanyProfileScreen({ onBack }: Props) {
             return;
         }
 
-        // Nativo: mostra opção de câmera ou galeria
         Alert.alert(
-            "Foto de Perfil",
-            "Escolha de onde quer adicionar sua foto:",
+            'Foto de Perfil',
+            'Escolha de onde quer adicionar sua foto:',
             [
                 {
-                    text: "Tirar Foto (Câmera)",
+                    text: 'Tirar Foto (Câmera)',
                     onPress: async () => {
                         const { status } = await ImagePicker.requestCameraPermissionsAsync();
                         if (status !== 'granted') {
-                            Alert.alert('Permissão Negada', 'Precisamos de acesso à câmera.');
+                            showAlert('Permissão Negada', 'Precisamos de acesso à câmera.');
                             return;
                         }
                         const result = await ImagePicker.launchCameraAsync({
@@ -344,14 +395,14 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                         if (!result.canceled && result.assets[0].uri) {
                             await uploadAvatar(result.assets[0].uri);
                         }
-                    }
+                    },
                 },
                 {
-                    text: "Escolher da Galeria",
+                    text: 'Escolher da Galeria',
                     onPress: async () => {
                         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
                         if (status !== 'granted') {
-                            Alert.alert('Permissão Negada', 'Precisamos de acesso à galeria.');
+                            showAlert('Permissão Negada', 'Precisamos de acesso à galeria.');
                             return;
                         }
                         const result = await ImagePicker.launchImageLibraryAsync({
@@ -363,222 +414,479 @@ export default function CompanyProfileScreen({ onBack }: Props) {
                         if (!result.canceled && result.assets[0].uri) {
                             await uploadAvatar(result.assets[0].uri);
                         }
-                    }
+                    },
                 },
-                { text: "Cancelar", style: "cancel" }
+                { text: 'Cancelar', style: 'cancel' },
             ]
         );
     };
 
+    const savedFormattedAddress = [savedProfile.endereco, savedProfile.numero].filter(Boolean).join(', ');
+
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            {/* HEADER */}
-            <View style={[styles.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
-                <TouchableOpacity onPress={onBack} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
-                    <Text style={{ fontSize: 20, color: colors.text }}>{'<'}</Text>
-                </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>Voltar para Ajustes</Text>
-            </View>
+            <SubScreenHeader onBack={onBack} />
 
-            <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-                <Animated.View style={animatedStyle}>
-                {/* TÍTULO DA PÁGINA */}
-                <Text style={[styles.pageTitle, { color: colors.text }]}>Configurações</Text>
-                <Text style={[styles.pageSub, { color: colors.textMuted }]}>
-                    Gerencie suas informações pessoais e configurações da conta
-                </Text>
+            <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
+                <ScrollView
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: 88 + insets.bottom }]}
+                    keyboardShouldPersistTaps="handled"
+                >
+                    <Animated.View style={animatedStyle}>
+                        <Text style={[styles.pageTitle, { color: colors.text }]} accessibilityRole="header">
+                            Perfil da Empresa
+                        </Text>
+                        <Text style={[styles.pageSub, { color: colors.textMuted }]}>
+                            Gerencie suas informações pessoais e configurações da conta
+                        </Text>
 
-                {/* =========================================
-            CARD 1: RESUMO DO PERFIL
-        =========================================== */}
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <Text style={[styles.cardTitle, { color: colors.primary }]}>Resumo do Perfil</Text>
-                    <Text style={[styles.cardSub, { color: colors.textMuted }]}>Informações atuais salvas no banco</Text>
-
-                    <View style={styles.avatarRow}>
-                        {avatarUri ? (
-                            <Image source={{ uri: avatarUri }} style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]} />
+                        {isInitialLoading ? (
+                            <View
+                                style={[styles.statusCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
+                                accessibilityLiveRegion="polite"
+                            >
+                                <ActivityIndicator size="large" color={colors.primary} accessibilityLabel="Carregando perfil" />
+                                <Text style={[styles.statusText, { color: colors.textMuted }]}>Carregando perfil da empresa...</Text>
+                            </View>
+                        ) : loadError ? (
+                            <View
+                                style={[styles.statusCard, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}
+                                accessibilityRole="alert"
+                                accessibilityLiveRegion="assertive"
+                            >
+                                <MaterialCommunityIcons name="alert-circle-outline" size={28} color={colors.danger} importantForAccessibility="no" />
+                                <Text style={[styles.statusText, { color: colors.danger, fontWeight: '600' }]}>{loadError}</Text>
+                                <TouchableOpacity
+                                    style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+                                    onPress={() => void loadProfile()}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Tentar novamente"
+                                >
+                                    <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Tentar novamente</Text>
+                                </TouchableOpacity>
+                            </View>
                         ) : (
-                            <View style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]}>
-                                <MaterialCommunityIcons name="account-outline" size={30} color={colors.textMuted} />
-                            </View>
+                            <>
+                                {/* CARD 1: RESUMO DO PERFIL */}
+                                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                                    <Text style={[styles.cardTitle, { color: colors.primary }]} accessibilityRole="header">
+                                        Resumo do Perfil
+                                    </Text>
+                                    <Text style={[styles.cardSub, { color: colors.textMuted }]}>
+                                        Informações atuais salvas no banco
+                                    </Text>
+
+                                    <View style={styles.avatarRow}>
+                                        {avatarUri ? (
+                                            <Image
+                                                source={{ uri: avatarUri }}
+                                                style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]}
+                                                accessible
+                                                accessibilityRole="image"
+                                                accessibilityLabel="Foto de perfil da empresa"
+                                            />
+                                        ) : (
+                                            <View style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]} importantForAccessibility="no">
+                                                <MaterialCommunityIcons name="account-outline" size={30} color={colors.textMuted} importantForAccessibility="no" />
+                                            </View>
+                                        )}
+                                        <View style={styles.avatarInfo}>
+                                            <Text style={[styles.avatarName, { color: colors.text }]}>{savedProfile.nome || '—'}</Text>
+                                            <Text style={[styles.avatarEmail, { color: colors.textMuted }]}>{savedProfile.email || '—'}</Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.infoBlock}>
+                                        <InfoRow colors={colors} label1="RAZÃO SOCIAL" val1={savedProfile.razaoSocial} label2="CNPJ" val2={savedProfile.cnpj} />
+                                        <InfoRow colors={colors} label1="ENDEREÇO" val1={savedFormattedAddress} label2="CIDADE" val2={savedProfile.cidade} />
+                                        <InfoRow colors={colors} label1="ESTADO" val1={savedProfile.estado} label2="CEP" val2={savedProfile.cep} />
+                                        <InfoRow colors={colors} label1="TELEFONE" val1={savedProfile.telefone} />
+                                    </View>
+                                </View>
+
+                                {/* CARD 2: INFORMAÇÕES DO PERFIL (EDITÁVEL) */}
+                                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                                    <Text style={[styles.cardTitle, { color: colors.primary }]} accessibilityRole="header">
+                                        Informações do Perfil
+                                    </Text>
+                                    <Text style={[styles.cardSub, { color: colors.textMuted }]}>
+                                        Atualize suas informações pessoais e da empresa
+                                    </Text>
+
+                                    <View style={[styles.avatarRow, { marginBottom: 24 }]}>
+                                        {avatarUri ? (
+                                            <Image
+                                                source={{ uri: avatarUri }}
+                                                style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]}
+                                                accessible
+                                                accessibilityRole="image"
+                                                accessibilityLabel="Pré-visualização da foto de perfil"
+                                            />
+                                        ) : (
+                                            <View style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]} importantForAccessibility="no">
+                                                <MaterialCommunityIcons name="account-outline" size={30} color={colors.textMuted} importantForAccessibility="no" />
+                                            </View>
+                                        )}
+                                        <View style={styles.avatarInfo}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.outlineBtn,
+                                                    { borderColor: colors.inputBorder, opacity: isUploadingAvatar ? 0.6 : 1 },
+                                                ]}
+                                                onPress={handlePickImage}
+                                                disabled={isUploadingAvatar}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={isUploadingAvatar ? 'Enviando foto, aguarde' : 'Alterar Foto'}
+                                                accessibilityState={{ disabled: isUploadingAvatar, busy: isUploadingAvatar }}
+                                            >
+                                                {isUploadingAvatar ? (
+                                                    <ActivityIndicator size="small" color={colors.primary} />
+                                                ) : (
+                                                    <Text style={[styles.outlineBtnText, { color: colors.primary }]}>Alterar Foto</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                            <Text style={[styles.helperText, { color: colors.textMuted }]}>JPG, PNG ou GIF (máx. 2MB)</Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.twoCols}>
+                                        <View style={styles.col}>
+                                            <InputLabel colors={colors} label="Nome do Usuário" />
+                                            <CustomInput
+                                                colors={colors}
+                                                value={formData.nome}
+                                                accessibilityLabel="Nome do Usuário"
+                                                autoComplete="name"
+                                                textContentType="name"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => nomeFantasiaRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, nome: t })}
+                                            />
+                                        </View>
+                                        <View style={styles.col}>
+                                            <InputLabel colors={colors} label="Nome Fantasia" />
+                                            <CustomInput
+                                                inputRef={nomeFantasiaRef}
+                                                colors={colors}
+                                                value={formData.nomeFantasia}
+                                                accessibilityLabel="Nome Fantasia"
+                                                textContentType="organizationName"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => razaoSocialRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, nomeFantasia: t })}
+                                            />
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.twoCols}>
+                                        <View style={styles.col}>
+                                            <InputLabel colors={colors} label="Razão Social" />
+                                            <CustomInput
+                                                inputRef={razaoSocialRef}
+                                                colors={colors}
+                                                value={formData.razaoSocial}
+                                                accessibilityLabel="Razão Social"
+                                                textContentType="organizationName"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => cnpjRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, razaoSocial: t })}
+                                            />
+                                        </View>
+                                        <View style={styles.col}>
+                                            <InputLabel colors={colors} label="CNPJ" />
+                                            <CustomInput
+                                                inputRef={cnpjRef}
+                                                colors={colors}
+                                                value={formData.cnpj}
+                                                placeholder="XX.XXX.XXX/XXXX-XX"
+                                                keyboardType="numeric"
+                                                maxLength={18}
+                                                accessibilityLabel="CNPJ"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => emailRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, cnpj: maskCNPJ(t) })}
+                                            />
+                                        </View>
+                                    </View>
+
+                                    <InputLabel colors={colors} label="Email" />
+                                    <CustomInput
+                                        inputRef={emailRef}
+                                        colors={colors}
+                                        value={formData.email}
+                                        keyboardType="email-address"
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                        autoComplete="email"
+                                        textContentType="emailAddress"
+                                        accessibilityLabel="Email"
+                                        returnKeyType="next"
+                                        blurOnSubmit={false}
+                                        onSubmitEditing={() => enderecoRef.current?.focus()}
+                                        onChangeText={(t) => setFormData({ ...formData, email: t })}
+                                    />
+
+                                    <Text style={[styles.sectionHeading, { color: colors.text, marginTop: 12 }]} accessibilityRole="header">
+                                        Endereço da Empresa
+                                    </Text>
+
+                                    <InputLabel colors={colors} label="Endereço Completo" />
+                                    <CustomInput
+                                        inputRef={enderecoRef}
+                                        colors={colors}
+                                        value={formData.endereco}
+                                        autoComplete="street-address"
+                                        textContentType="fullStreetAddress"
+                                        accessibilityLabel="Endereço Completo"
+                                        returnKeyType="next"
+                                        blurOnSubmit={false}
+                                        onSubmitEditing={() => numeroRef.current?.focus()}
+                                        onChangeText={(t) => setFormData({ ...formData, endereco: t })}
+                                    />
+
+                                    <View style={styles.twoCols}>
+                                        <View style={[styles.col, { flex: 0.4 }]}>
+                                            <InputLabel colors={colors} label="Número" />
+                                            <CustomInput
+                                                inputRef={numeroRef}
+                                                colors={colors}
+                                                value={formData.numero}
+                                                accessibilityLabel="Número"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => cidadeRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, numero: t })}
+                                            />
+                                        </View>
+                                        <View style={[styles.col, { flex: 0.6 }]}>
+                                            <InputLabel colors={colors} label="Cidade" />
+                                            <CustomInput
+                                                inputRef={cidadeRef}
+                                                colors={colors}
+                                                value={formData.cidade}
+                                                textContentType="addressCity"
+                                                accessibilityLabel="Cidade"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => estadoRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, cidade: t })}
+                                            />
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.twoCols}>
+                                        <View style={styles.col}>
+                                            <InputLabel colors={colors} label="Estado" />
+                                            <CustomInput
+                                                inputRef={estadoRef}
+                                                colors={colors}
+                                                value={formData.estado}
+                                                autoCapitalize="characters"
+                                                maxLength={2}
+                                                textContentType="addressState"
+                                                accessibilityLabel="Estado"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => cepRef.current?.focus()}
+                                                onChangeText={(t) => setFormData({ ...formData, estado: t.toUpperCase() })}
+                                            />
+                                        </View>
+                                        <View style={styles.col}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                                <Text style={[styles.inputLabel, { color: colors.textMuted, marginBottom: 0 }]}>CEP</Text>
+                                                {cepLoading && (
+                                                    <ActivityIndicator
+                                                        size="small"
+                                                        color={colors.primary}
+                                                        style={{ marginLeft: 8 }}
+                                                        accessibilityLabel="Consultando CEP"
+                                                    />
+                                                )}
+                                            </View>
+                                            <CustomInput
+                                                inputRef={cepRef}
+                                                colors={colors}
+                                                value={formData.cep}
+                                                placeholder="XXXXX-XXX"
+                                                keyboardType="numeric"
+                                                maxLength={9}
+                                                autoComplete="postal-code"
+                                                textContentType="postalCode"
+                                                accessibilityLabel="CEP"
+                                                returnKeyType="next"
+                                                blurOnSubmit={false}
+                                                onSubmitEditing={() => telefoneRef.current?.focus()}
+                                                onChangeText={(t) => {
+                                                    const masked = maskCEP(t);
+                                                    setFormData((prev) => ({ ...prev, cep: masked }));
+                                                    if (masked.replace(/\D/g, '').length === 8) {
+                                                        void handleFetchCep(masked);
+                                                    }
+                                                }}
+                                            />
+                                        </View>
+                                    </View>
+
+                                    <InputLabel colors={colors} label="Telefone" />
+                                    <CustomInput
+                                        inputRef={telefoneRef}
+                                        colors={colors}
+                                        value={formData.telefone}
+                                        placeholder="(XX) XXXXX-XXXX"
+                                        keyboardType="phone-pad"
+                                        autoComplete="tel"
+                                        textContentType="telephoneNumber"
+                                        accessibilityLabel="Telefone"
+                                        returnKeyType="done"
+                                        onChangeText={(t) => setFormData({ ...formData, telefone: maskPhone(t) })}
+                                    />
+
+                                    <View style={styles.actionRow}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.primaryBtn,
+                                                { backgroundColor: colors.primary, opacity: isSavingProfile ? 0.7 : 1 },
+                                            ]}
+                                            onPress={handleSaveProfile}
+                                            disabled={isSavingProfile}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={isSavingProfile ? 'Salvando alterações, aguarde' : 'Salvar Alterações'}
+                                            accessibilityState={{ disabled: isSavingProfile, busy: isSavingProfile }}
+                                        >
+                                            {isSavingProfile ? (
+                                                <ActivityIndicator size="small" color={colors.onPrimary} />
+                                            ) : (
+                                                <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Salvar Alterações</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
+                                {/* CARD 3: ALTERAR SENHA */}
+                                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                                    <Text style={[styles.cardTitle, { color: colors.primary }]} accessibilityRole="header">
+                                        Alterar Senha
+                                    </Text>
+                                    <Text style={[styles.cardSub, { color: colors.textMuted }]}>
+                                        Mantenha sua conta segura com uma senha forte
+                                    </Text>
+
+                                    <InputLabel colors={colors} label="Nova Senha" />
+                                    <View style={styles.passwordRow}>
+                                        <TextInput
+                                            style={[
+                                                styles.input,
+                                                styles.passwordInput,
+                                                {
+                                                    backgroundColor: colors.background,
+                                                    borderColor: colors.inputBorder,
+                                                    color: colors.text,
+                                                },
+                                            ]}
+                                            secureTextEntry={!showNewPassword}
+                                            autoCapitalize="none"
+                                            autoCorrect={false}
+                                            autoComplete="new-password"
+                                            textContentType="newPassword"
+                                            accessibilityLabel="Nova Senha"
+                                            returnKeyType="next"
+                                            blurOnSubmit={false}
+                                            onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                                            value={passwordData.nova}
+                                            onChangeText={(t) => setPasswordData({ ...passwordData, nova: t })}
+                                        />
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.eyeBtn,
+                                                { backgroundColor: colors.background, borderColor: colors.inputBorder },
+                                            ]}
+                                            onPress={() => setShowNewPassword((prev) => !prev)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={showNewPassword ? 'Ocultar nova senha' : 'Mostrar nova senha'}
+                                        >
+                                            <MaterialCommunityIcons
+                                                name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
+                                                size={20}
+                                                color={colors.textMuted}
+                                                importantForAccessibility="no"
+                                            />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <InputLabel colors={colors} label="Confirmar Nova Senha" />
+                                    <View style={styles.passwordRow}>
+                                        <TextInput
+                                            ref={confirmPasswordRef}
+                                            style={[
+                                                styles.input,
+                                                styles.passwordInput,
+                                                {
+                                                    backgroundColor: colors.background,
+                                                    borderColor: colors.inputBorder,
+                                                    color: colors.text,
+                                                },
+                                            ]}
+                                            secureTextEntry={!showConfirmPassword}
+                                            autoCapitalize="none"
+                                            autoCorrect={false}
+                                            autoComplete="new-password"
+                                            textContentType="newPassword"
+                                            accessibilityLabel="Confirmar Nova Senha"
+                                            returnKeyType="done"
+                                            onSubmitEditing={handleChangePassword}
+                                            value={passwordData.confirmar}
+                                            onChangeText={(t) => setPasswordData({ ...passwordData, confirmar: t })}
+                                        />
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.eyeBtn,
+                                                { backgroundColor: colors.background, borderColor: colors.inputBorder },
+                                            ]}
+                                            onPress={() => setShowConfirmPassword((prev) => !prev)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={showConfirmPassword ? 'Ocultar confirmação de senha' : 'Mostrar confirmação de senha'}
+                                        >
+                                            <MaterialCommunityIcons
+                                                name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                                                size={20}
+                                                color={colors.textMuted}
+                                                importantForAccessibility="no"
+                                            />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <View style={styles.actionRow}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.primaryBtn,
+                                                { backgroundColor: colors.primary, opacity: isChangingPassword ? 0.7 : 1 },
+                                            ]}
+                                            onPress={handleChangePassword}
+                                            disabled={isChangingPassword}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={isChangingPassword ? 'Alterando senha, aguarde' : 'Alterar Senha'}
+                                            accessibilityState={{ disabled: isChangingPassword, busy: isChangingPassword }}
+                                        >
+                                            {isChangingPassword ? (
+                                                <ActivityIndicator size="small" color={colors.onPrimary} />
+                                            ) : (
+                                                <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Alterar Senha</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            </>
                         )}
-                        <View style={{ marginLeft: 16 }}>
-                            <Text style={[styles.avatarName, { color: colors.text }]}>{formData.nome}</Text>
-                            <Text style={[styles.avatarEmail, { color: colors.textMuted }]}>{formData.email}</Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.infoBlock}>
-                        <InfoRow colors={colors} label1="RAZÃO SOCIAL" val1={formData.razaoSocial} label2="CNPJ" val2={formData.cnpj} />
-                        <InfoRow colors={colors} label1="ENDEREÇO" val1={`${formData.endereco}, ${formData.numero} `} label2="CIDADE" val2={formData.cidade} />
-                        <InfoRow colors={colors} label1="ESTADO" val1={formData.estado} label2="CEP" val2={formData.cep} />
-                        <InfoRow colors={colors} label1="TELEFONE" val1={formData.telefone} label2="" val2="" />
-                    </View>
-                </View>
-
-                {/* =========================================
-            CARD 2: INFORMAÇÕES DO PERFIL (EDITÁVEL)
-        =========================================== */}
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <Text style={[styles.cardTitle, { color: colors.primary }]}>Informações do Perfil</Text>
-                    <Text style={[styles.cardSub, { color: colors.textMuted }]}>Atualize suas informações pessoais e da empresa</Text>
-
-                    {/* Trocar Foto */}
-                    <View style={[styles.avatarRow, { marginBottom: 24 }]}>
-                        {avatarUri ? (
-                            <Image source={{ uri: avatarUri }} style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]} />
-                        ) : (
-                            <View style={[styles.avatarDummy, { backgroundColor: colors.iconBg }]}>
-                                <MaterialCommunityIcons name="account-outline" size={30} color={colors.textMuted} />
-                            </View>
-                        )}
-                        <View style={{ marginLeft: 16 }}>
-                            <TouchableOpacity style={[styles.outlineBtn, { borderColor: colors.border }]} onPress={handlePickImage}>
-                                <Text style={[styles.outlineBtnText, { color: colors.primary }]}>Alterar Foto</Text>
-                            </TouchableOpacity>
-                            <Text style={[styles.helperText, { color: colors.primary }]}>JPG, PNG ou GIF (máx. 2MB)</Text>
-                        </View>
-                    </View>
-
-                    {/* Campos Pessoais / Fantasia */}
-                    <View style={styles.twoCols}>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="Nome do Usuário" />
-                            <CustomInput colors={colors} value={formData.nome} onChangeText={(t: string) => setFormData({ ...formData, nome: t })} />
-                        </View>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="Nome Fantasia" />
-                            <CustomInput colors={colors} value={formData.nomeFantasia} onChangeText={(t: string) => setFormData({ ...formData, nomeFantasia: t })} />
-                        </View>
-                    </View>
-
-                    {/* Razão Social / CNPJ */}
-                    <View style={styles.twoCols}>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="Razão Social" />
-                            <CustomInput colors={colors} value={formData.razaoSocial} onChangeText={(t: string) => setFormData({ ...formData, razaoSocial: t })} />
-                        </View>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="CNPJ" />
-                            <CustomInput
-                                colors={colors}
-                                value={formData.cnpj}
-                                placeholder="XX.XXX.XXX/XXXX-XX"
-                                onChangeText={(t: string) =>
-                                    setFormData({ ...formData, cnpj: maskCNPJ(t) })
-                                }
-                            />
-                        </View>
-                    </View>
-
-                    {/* Email */}
-                    <InputLabel colors={colors} label="Email" />
-                    <CustomInput colors={colors} value={formData.email} onChangeText={(t: string) => setFormData({ ...formData, email: t })} />
-
-                    <Text style={[styles.sectionHeading, { color: colors.text, marginTop: 12 }]}>Endereço da Empresa</Text>
-
-                    {/* Endereço / Numero / Cidade (Adaptação mobile, 2 num linha, 1 noutra pra caber) */}
-                    <InputLabel colors={colors} label="Endereço Completo" />
-                    <CustomInput colors={colors} value={formData.endereco} onChangeText={(t: string) => setFormData({ ...formData, endereco: t })} />
-
-                    <View style={styles.twoCols}>
-                        <View style={[styles.col, { flex: 0.4 }]}>
-                            <InputLabel colors={colors} label="Número" />
-                            <CustomInput colors={colors} value={formData.numero} onChangeText={(t: string) => setFormData({ ...formData, numero: t })} />
-                        </View>
-                        <View style={[styles.col, { flex: 0.6 }]}>
-                            <InputLabel colors={colors} label="Cidade" />
-                            <CustomInput colors={colors} value={formData.cidade} onChangeText={(t: string) => setFormData({ ...formData, cidade: t })} />
-                        </View>
-                    </View>
-
-                    <View style={styles.twoCols}>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="Estado" />
-                            <CustomInput colors={colors} value={formData.estado} onChangeText={(t: string) => setFormData({ ...formData, estado: t })} />
-                        </View>
-                        <View style={styles.col}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                                <Text style={[styles.inputLabel, { color: colors.textMuted }]}>CEP</Text>
-                                {cepLoading && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />}
-                            </View>
-                            <TextInput
-                                style={[
-                                    styles.input,
-                                    { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }
-                                ]}
-                                value={formData.cep}
-                                placeholder="XXXXX-XXX"
-                                placeholderTextColor={colors.textMuted}
-                                keyboardType="numeric"
-                                onChangeText={(t: string) => {
-                                    const masked = maskCEP(t);
-                                    setFormData(prev => ({ ...prev, cep: masked }));
-                                    if (masked.replace(/\D/g, '').length === 8) {
-                                        handleFetchCep(masked);
-                                    }
-                                }}
-                            />
-                        </View>
-                    </View>
-
-                    <InputLabel colors={colors} label="Telefone" />
-                    <CustomInput
-                        colors={colors}
-                        value={formData.telefone}
-                        placeholder="(XX) XXXXX-XXXX"
-                        onChangeText={(t: string) =>
-                            setFormData({ ...formData, telefone: maskPhone(t) })
-                        }
-                    />
-
-                    {/* Botão Salvar */}
-                    <View style={styles.actionRow}>
-                        <TouchableOpacity
-                            style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                            onPress={handleSaveProfile}
-                            disabled={loading}
-                        >
-                            {loading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnText}>Salvar Alterações</Text>}
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* =========================================
-            CARD 3: ALTERAR SENHA
-        =========================================== */}
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <Text style={[styles.cardTitle, { color: colors.primary }]}>Alterar Senha</Text>
-                    <Text style={[styles.cardSub, { color: colors.textMuted }]}>Mantenha sua conta segura com uma senha forte</Text>
-
-                    <InputLabel colors={colors} label="Senha Atual" />
-                    <CustomInput colors={colors} secure value={passwordData.atual} onChangeText={(t: string) => setPasswordData({ ...passwordData, atual: t })} />
-
-                    <View style={styles.twoCols}>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="Nova Senha" />
-                            <CustomInput colors={colors} secure value={passwordData.nova} onChangeText={(t: string) => setPasswordData({ ...passwordData, nova: t })} />
-                        </View>
-                        <View style={styles.col}>
-                            <InputLabel colors={colors} label="Confirmar Nova Senha" />
-                            <CustomInput colors={colors} secure value={passwordData.confirmar} onChangeText={(t: string) => setPasswordData({ ...passwordData, confirmar: t })} />
-                        </View>
-                    </View>
-
-                    <View style={styles.actionRow}>
-                        <TouchableOpacity
-                            style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                            onPress={handleChangePassword}
-                            disabled={loading}
-                        >
-                            <Text style={styles.primaryBtnText}>Alterar Senha</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                </Animated.View>
-            </ScrollView>
+                    </Animated.View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </View>
     );
 }
@@ -587,27 +895,8 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-    },
-    backButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-    },
-    headerTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-    },
     scrollContent: {
         padding: 20,
-        paddingBottom: 80,
     },
     pageTitle: {
         fontSize: 26,
@@ -618,12 +907,23 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginBottom: 24,
     },
+    statusCard: {
+        padding: 24,
+        borderRadius: 16,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+    },
+    statusText: {
+        fontSize: 14,
+        textAlign: 'center',
+    },
     card: {
         padding: 20,
         borderRadius: 16,
         borderWidth: 1,
         marginBottom: 24,
-        // Sombra suave para os cards
         shadowColor: '#000',
         shadowOpacity: 0.04,
         shadowRadius: 10,
@@ -644,6 +944,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 20,
     },
+    avatarInfo: {
+        flex: 1,
+        marginLeft: 16,
+    },
     avatarDummy: {
         width: 60,
         height: 60,
@@ -661,10 +965,12 @@ const styles = StyleSheet.create({
     },
     outlineBtn: {
         borderWidth: 1,
+        minHeight: 44,
         paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingVertical: 10,
         borderRadius: 8,
         alignSelf: 'flex-start',
+        justifyContent: 'center',
         marginBottom: 6,
     },
     outlineBtnText: {
@@ -672,15 +978,13 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     helperText: {
-        fontSize: 10,
-        opacity: 0.8,
+        fontSize: 12,
     },
-    // INFORMAÇÕES DE LEITURA (Card 1)
     infoBlock: {
         marginTop: 8,
     },
     infoLabel: {
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: '700',
         marginBottom: 4,
         textTransform: 'uppercase',
@@ -690,7 +994,6 @@ const styles = StyleSheet.create({
         fontWeight: '500',
         marginBottom: 16,
     },
-    // FORMULÁRIO (Card 2 e 3)
     sectionHeading: {
         fontSize: 16,
         fontWeight: '700',
@@ -709,6 +1012,27 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginBottom: 16,
     },
+    passwordRow: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        marginBottom: 16,
+    },
+    passwordInput: {
+        flex: 1,
+        marginBottom: 0,
+        borderTopRightRadius: 0,
+        borderBottomRightRadius: 0,
+    },
+    eyeBtn: {
+        borderWidth: 1,
+        borderLeftWidth: 0,
+        borderTopRightRadius: 8,
+        borderBottomRightRadius: 8,
+        minWidth: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+    },
     twoCols: {
         flexDirection: 'row',
         gap: 12,
@@ -718,19 +1042,19 @@ const styles = StyleSheet.create({
     },
     actionRow: {
         marginTop: 8,
-        alignItems: 'flex-start', // Igual Web: botão justificado a esquerda
+        alignItems: 'flex-start',
     },
     primaryBtn: {
         paddingHorizontal: 20,
         paddingVertical: 12,
+        minHeight: 44,
         borderRadius: 8,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: 140,
+        minWidth: 150,
     },
     primaryBtnText: {
-        color: '#fff',
         fontSize: 14,
         fontWeight: '700',
     },

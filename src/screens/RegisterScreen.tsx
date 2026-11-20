@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import {
     View,
     Text,
@@ -12,6 +12,7 @@ import {
     Image,
     Animated,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFadeInUp } from '../hooks/useFadeInUp'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { authLib } from '../lib/auth'
@@ -23,6 +24,15 @@ interface Props {
 }
 
 export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBack }: Props) {
+    const insets = useSafeAreaInsets()
+    const emailRef = useRef<TextInput>(null)
+    const passwordRef = useRef<TextInput>(null)
+    const razaoSocialRef = useRef<TextInput>(null)
+    const cnpjRef = useRef<TextInput>(null)
+    const cepRef = useRef<TextInput>(null)
+    const numeroRef = useRef<TextInput>(null)
+    const enderecoRef = useRef<TextInput>(null)
+
     const [name, setName] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -31,36 +41,47 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
     const [cep, setCep] = useState('')
     const [numero, setNumero] = useState('')
     const [endereco, setEndereco] = useState('')
+    const [cepLoading, setCepLoading] = useState(false)
+    const [cepError, setCepError] = useState<string | null>(null)
 
     const handleCnpjChange = (text: string) => {
         let value = text.replace(/\D/g, '');
         if (value.length > 14) value = value.slice(0, 14);
-        
+
         value = value.replace(/^(\d{2})(\d)/, '$1.$2');
         value = value.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
         value = value.replace(/\.(\d{3})(\d)/, '.$1/$2');
         value = value.replace(/(\d{4})(\d)/, '$1-$2');
-        
+
         setCnpj(value);
+        if (error) setError(null)
     }
 
     const handleCepChange = async (text: string) => {
         let value = text.replace(/\D/g, '');
         if (value.length > 8) value = value.slice(0, 8);
-        
+
         value = value.replace(/^(\d{5})(\d)/, '$1-$2');
         setCep(value);
+        setCepError(null);
 
         const pureCep = value.replace(/\D/g, '');
         if (pureCep.length === 8) {
+            setCepLoading(true);
             try {
                 const response = await fetch(`https://viacep.com.br/ws/${pureCep}/json/`);
                 const data = await response.json();
-                if (!data.erro) {
-                    setEndereco(`${data.logradouro}, ${data.bairro}, ${data.localidade} - ${data.uf}`);
+                if (data.erro) {
+                    setCepError('CEP não encontrado. Preencha o logradouro manualmente.');
+                } else {
+                    const streetPart = [data.logradouro, data.bairro].filter(Boolean).join(', ');
+                    const cityPart = [data.localidade, data.uf].filter(Boolean).join(' - ');
+                    setEndereco([streetPart, cityPart].filter(Boolean).join(', '));
                 }
-            } catch (err) {
-                console.log("Erro ao buscar CEP:", err);
+            } catch {
+                setCepError('Não foi possível consultar o CEP. Preencha o logradouro manualmente.');
+            } finally {
+                setCepLoading(false);
             }
         }
     }
@@ -70,20 +91,37 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
     const [error, setError] = useState<string | null>(null)
 
     const handleRegister = async () => {
-        if (!name || !email || !password || !razaoSocial || !cnpj) {
-            setError('Preencha pelo menos os dados principais obrigatórios.')
+        const missing: string[] = []
+        if (!name.trim()) missing.push('Nome Completo')
+        if (!email.trim()) missing.push('E-mail')
+        if (!password) missing.push('Senha')
+        if (!razaoSocial.trim()) missing.push('Razão Social')
+        if (!cnpj.trim()) missing.push('CNPJ')
+
+        if (missing.length > 0) {
+            setError(`Preencha os campos obrigatórios: ${missing.join(', ')}.`)
             return
         }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+            setError('Informe um e-mail válido.')
+            return
+        }
+        const pureCnpj = cnpj.replace(/\D/g, '')
+        if (pureCnpj.length !== 14) {
+            setError('Informe um CNPJ completo com 14 dígitos.')
+            return
+        }
+
         setLoading(true)
         setError(null)
 
-            try {
+        try {
             await authLib.signUp({
                 email: email.trim(),
                 password,
                 name: name.trim(),
                 razaoSocial: razaoSocial.trim(),
-                cnpj: cnpj.replace(/\D/g, ''),
+                cnpj: pureCnpj,
                 address: endereco.trim(),
                 numero: numero.trim(),
                 zipCode: cep.replace(/\D/g, ''),
@@ -101,79 +139,129 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
             <ScrollView
-                contentContainerStyle={styles.scroll}
+                contentContainerStyle={[
+                    styles.scroll,
+                    {
+                        paddingTop: Math.max(insets.top + 12, 24),
+                        paddingBottom: Math.max(insets.bottom + 24, 40),
+                    },
+                ]}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
             >
                 <Animated.View style={animatedStyle}>
                 {/* Botão de Voltar */}
                 {onBack && (
-                    <TouchableOpacity style={{ marginBottom: 20 }} onPress={onBack}>
-                        <Text style={{ fontSize: 16, color: '#16a34a', fontWeight: '600' }}>← Voltar para a tela inicial</Text>
+                    <TouchableOpacity
+                        style={styles.backNavBtn}
+                        onPress={onBack}
+                        accessibilityRole="button"
+                        accessibilityLabel="Voltar para a tela inicial"
+                    >
+                        <Text style={styles.backNavText}>← Voltar para a tela inicial</Text>
                     </TouchableOpacity>
                 )}
 
                 {/* Logo Reduzido */}
                 <View style={styles.logoSection}>
-                    <Image source={require('../../assets/logo-biodash.png')} style={{ width: 200, height: 100 }} resizeMode="contain" />
+                    <Image
+                        source={require('../../assets/logo-biodash.png')}
+                        style={{ width: 200, height: 100 }}
+                        resizeMode="contain"
+                        accessible
+                        accessibilityRole="image"
+                        accessibilityLabel="BioDash"
+                    />
                 </View>
 
                 {/* Card de Cadastro */}
                 <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Criar Conta</Text>
+                    <Text style={styles.cardTitle} accessibilityRole="header">Criar Conta</Text>
                     <Text style={styles.cardSubtitle}>
-                        Preencha os dados da sua empresa para participar.
+                        Preencha os dados da sua empresa para participar. Campos com * são obrigatórios.
                     </Text>
 
                     {/* Nome */}
                     <View style={styles.field}>
-                        <Text style={styles.label}>Nome Completo</Text>
+                        <Text style={styles.label}>Nome Completo *</Text>
                         <TextInput
                             style={styles.input}
                             placeholder="Seu nome"
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor="#475569"
                             autoCorrect={false}
+                            textContentType="name"
+                            autoComplete="name"
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => emailRef.current?.focus()}
+                            accessibilityLabel="Nome Completo obrigatório"
                             value={name}
-                            onChangeText={setName}
+                            onChangeText={(text) => {
+                                setName(text)
+                                if (error) setError(null)
+                            }}
                         />
                     </View>
 
                     {/* Email */}
                     <View style={styles.field}>
-                        <Text style={styles.label}>Email</Text>
+                        <Text style={styles.label}>E-mail *</Text>
                         <TextInput
+                            ref={emailRef}
                             style={styles.input}
                             placeholder="empresa@email.com"
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor="#475569"
                             keyboardType="email-address"
                             autoCapitalize="none"
                             autoCorrect={false}
+                            textContentType="emailAddress"
+                            autoComplete="email"
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => passwordRef.current?.focus()}
+                            accessibilityLabel="E-mail obrigatório"
                             value={email}
-                            onChangeText={setEmail}
+                            onChangeText={(text) => {
+                                setEmail(text)
+                                if (error) setError(null)
+                            }}
                         />
                     </View>
 
                     {/* Senha */}
                     <View style={styles.field}>
-                        <Text style={styles.label}>Senha</Text>
+                        <Text style={styles.label}>Senha *</Text>
                         <View style={styles.passwordRow}>
                             <TextInput
+                                ref={passwordRef}
                                 style={[styles.input, styles.passwordInput]}
                                 placeholder="Crie uma senha forte"
-                                placeholderTextColor="#94a3b8"
+                                placeholderTextColor="#475569"
                                 secureTextEntry={!showPassword}
                                 autoCapitalize="none"
+                                autoCorrect={false}
+                                textContentType="newPassword"
+                                autoComplete="new-password"
+                                returnKeyType="next"
+                                blurOnSubmit={false}
+                                onSubmitEditing={() => razaoSocialRef.current?.focus()}
+                                accessibilityLabel="Senha obrigatória"
                                 value={password}
-                                onChangeText={setPassword}
+                                onChangeText={(text) => {
+                                    setPassword(text)
+                                    if (error) setError(null)
+                                }}
                             />
                             <TouchableOpacity
                                 style={styles.eyeButton}
                                 onPress={() => setShowPassword(!showPassword)}
+                                accessibilityRole="button"
+                                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                             >
-                                <MaterialCommunityIcons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#94a3b8" />
+                                <MaterialCommunityIcons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#475569" importantForAccessibility="no" />
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -181,29 +269,43 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                     {/* Divisão Empresas */}
                     <View style={styles.divider}>
                         <View style={styles.line} />
-                        <Text style={styles.dividerText}>Dados da Empresa</Text>
+                        <Text style={styles.dividerText} accessibilityRole="header">Dados da Empresa</Text>
                         <View style={styles.line} />
                     </View>
 
                     {/* Razão Social e CNPJ */}
                     <View style={styles.field}>
-                        <Text style={styles.label}>Razão Social</Text>
+                        <Text style={styles.label}>Razão Social *</Text>
                         <TextInput
+                            ref={razaoSocialRef}
                             style={styles.input}
                             placeholder="Nome Oficial LTDA"
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor="#475569"
+                            textContentType="organizationName"
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => cnpjRef.current?.focus()}
+                            accessibilityLabel="Razão Social obrigatória"
                             value={razaoSocial}
-                            onChangeText={setRazaoSocial}
+                            onChangeText={(text) => {
+                                setRazaoSocial(text)
+                                if (error) setError(null)
+                            }}
                         />
                     </View>
 
                     <View style={styles.field}>
-                        <Text style={styles.label}>CNPJ</Text>
+                        <Text style={styles.label}>CNPJ *</Text>
                         <TextInput
+                            ref={cnpjRef}
                             style={styles.input}
                             placeholder="00.000.000/0000-00"
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor="#475569"
                             keyboardType="numeric"
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => cepRef.current?.focus()}
+                            accessibilityLabel="CNPJ obrigatório"
                             value={cnpj}
                             maxLength={18}
                             onChangeText={handleCnpjChange}
@@ -213,44 +315,70 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                     {/* Divisão Endereço */}
                     <View style={styles.divider}>
                         <View style={styles.line} />
-                        <Text style={styles.dividerText}>Endereço do Biodigestor</Text>
+                        <Text style={styles.dividerText} accessibilityRole="header">Endereço do Biodigestor</Text>
                         <View style={styles.line} />
                     </View>
 
-                    {/* Endereço Container (CEP e Número na mesma linha se possível, aqui para mobile empilhado) */}
+                    {/* Endereço Container */}
                     <View style={styles.row}>
                         <View style={[styles.field, { flex: 1, marginRight: 12 }]}>
-                            <Text style={styles.label}>CEP</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                <Text style={[styles.label, { marginBottom: 0 }]}>CEP</Text>
+                                {cepLoading && <ActivityIndicator size="small" color="#15803d" style={{ marginLeft: 8 }} accessibilityLabel="Buscando CEP" />}
+                            </View>
                             <TextInput
+                                ref={cepRef}
                                 style={styles.input}
                                 placeholder="00000-000"
-                                placeholderTextColor="#94a3b8"
+                                placeholderTextColor="#475569"
                                 keyboardType="numeric"
+                                textContentType="postalCode"
+                                autoComplete="postal-code"
+                                returnKeyType="next"
+                                blurOnSubmit={false}
+                                onSubmitEditing={() => numeroRef.current?.focus()}
+                                accessibilityLabel="CEP"
                                 value={cep}
                                 maxLength={9}
                                 onChangeText={handleCepChange}
                             />
                         </View>
-                        <View style={[styles.field, { width: 100 }]}>
+                        <View style={[styles.field, { flex: 0.45, minWidth: 110 }]}>
                             <Text style={styles.label}>Número</Text>
                             <TextInput
+                                ref={numeroRef}
                                 style={styles.input}
-                                placeholder="123"
-                                placeholderTextColor="#94a3b8"
-                                keyboardType="numeric"
+                                placeholder="123 ou S/N"
+                                placeholderTextColor="#475569"
+                                returnKeyType="next"
+                                blurOnSubmit={false}
+                                onSubmitEditing={() => enderecoRef.current?.focus()}
+                                accessibilityLabel="Número do endereço"
                                 value={numero}
                                 onChangeText={setNumero}
                             />
                         </View>
                     </View>
 
+                    {cepError ? (
+                        <Text style={styles.cepErrorText} accessibilityLiveRegion="polite">
+                            {cepError}
+                        </Text>
+                    ) : null}
+
                     {/* Endereço Completo */}
                     <View style={styles.field}>
                         <Text style={styles.label}>Logradouro</Text>
                         <TextInput
+                            ref={enderecoRef}
                             style={styles.input}
                             placeholder="Rua, Avenida, etc."
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor="#475569"
+                            textContentType="fullStreetAddress"
+                            autoComplete="street-address"
+                            returnKeyType="done"
+                            onSubmitEditing={handleRegister}
+                            accessibilityLabel="Logradouro"
                             value={endereco}
                             onChangeText={setEndereco}
                         />
@@ -258,8 +386,12 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
 
                     {/* Erro */}
                     {error ? (
-                        <View style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}>
-                            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#dc2626" style={{ marginRight: 6 }} />
+                        <View
+                            style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}
+                            accessibilityRole="alert"
+                            accessibilityLiveRegion="polite"
+                        >
+                            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#b91c1c" style={{ marginRight: 6 }} importantForAccessibility="no" />
                             <Text style={styles.errorText}>{error}</Text>
                         </View>
                     ) : null}
@@ -270,6 +402,9 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                         onPress={handleRegister}
                         disabled={loading}
                         activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityLabel={loading ? 'Cadastrando empresa, aguarde' : 'Cadastrar Empresa'}
+                        accessibilityState={{ disabled: loading, busy: loading }}
                     >
                         {loading ? (
                             <ActivityIndicator color="#fff" size="small" />
@@ -279,12 +414,16 @@ export default function RegisterScreen({ onRegisterSuccess, onBackToLogin, onBac
                     </TouchableOpacity>
 
                     {/* Link de volta pro login */}
-                    <TouchableOpacity style={styles.backButton} onPress={onBackToLogin}>
-                        <Text style={styles.backButtonText}>Já tenho uma conta. <Text style={{ fontWeight: 'bold', color: '#16a34a' }}>Fazer Login</Text></Text>
+                    <TouchableOpacity
+                        style={styles.backButton}
+                        onPress={onBackToLogin}
+                        accessibilityRole="button"
+                        accessibilityLabel="Já tenho uma conta. Fazer Login"
+                    >
+                        <Text style={styles.backButtonText}>Já tenho uma conta. <Text style={{ fontWeight: 'bold', color: '#15803d' }}>Fazer Login</Text></Text>
                     </TouchableOpacity>
                 </View>
                 </Animated.View>
-                <View style={{ height: 40 }} />
             </ScrollView>
         </KeyboardAvoidingView>
     )
@@ -297,8 +436,19 @@ const styles = StyleSheet.create({
     },
     scroll: {
         flexGrow: 1,
-        padding: 24,
-        paddingTop: 60,
+        paddingHorizontal: 24,
+    },
+    backNavBtn: {
+        minHeight: 44,
+        justifyContent: 'center',
+        alignSelf: 'flex-start',
+        marginBottom: 12,
+        paddingVertical: 8,
+    },
+    backNavText: {
+        fontSize: 16,
+        color: '#15803d',
+        fontWeight: '600',
     },
     logoSection: {
         alignItems: 'center',
@@ -314,7 +464,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#bbf7d0',
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#16a34a',
+        shadowColor: '#15803d',
         shadowOpacity: 0.25,
         shadowRadius: 8,
         elevation: 3,
@@ -345,7 +495,7 @@ const styles = StyleSheet.create({
     },
     cardSubtitle: {
         fontSize: 13,
-        color: '#64748b',
+        color: '#475569',
         marginBottom: 24,
     },
     field: {
@@ -362,7 +512,7 @@ const styles = StyleSheet.create({
     },
     input: {
         borderWidth: 1,
-        borderColor: '#cbd5e1',
+        borderColor: '#64748b',
         borderRadius: 10,
         paddingHorizontal: 14,
         paddingVertical: 12,
@@ -372,7 +522,7 @@ const styles = StyleSheet.create({
     },
     passwordRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'stretch',
     },
     passwordInput: {
         flex: 1,
@@ -381,12 +531,14 @@ const styles = StyleSheet.create({
     },
     eyeButton: {
         borderWidth: 1,
-        borderColor: '#cbd5e1',
+        borderColor: '#64748b',
         borderLeftWidth: 0,
         borderTopRightRadius: 10,
         borderBottomRightRadius: 10,
         paddingHorizontal: 12,
-        paddingVertical: 12,
+        minWidth: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
         backgroundColor: '#f8fafc',
     },
     eyeEmoji: {
@@ -400,14 +552,20 @@ const styles = StyleSheet.create({
     line: {
         flex: 1,
         height: 1,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: '#cbd5e1',
     },
     dividerText: {
         marginHorizontal: 12,
         fontSize: 12,
         fontWeight: '600',
-        color: '#94a3b8',
+        color: '#475569',
         textTransform: 'uppercase',
+    },
+    cepErrorText: {
+        color: '#b91c1c',
+        fontSize: 12,
+        marginTop: -8,
+        marginBottom: 12,
     },
     errorBox: {
         backgroundColor: '#fef2f2',
@@ -418,16 +576,19 @@ const styles = StyleSheet.create({
         borderColor: '#fecaca',
     },
     errorText: {
-        color: '#dc2626',
+        color: '#b91c1c',
         fontSize: 13,
         textAlign: 'center',
+        flexShrink: 1,
     },
     button: {
-        backgroundColor: '#16a34a',
+        backgroundColor: '#15803d',
         borderRadius: 12,
         paddingVertical: 14,
+        minHeight: 48,
+        justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#16a34a',
+        shadowColor: '#15803d',
         shadowOpacity: 0.35,
         shadowRadius: 8,
         elevation: 3,
@@ -443,11 +604,13 @@ const styles = StyleSheet.create({
         letterSpacing: 0.3,
     },
     backButton: {
-        marginTop: 20,
+        marginTop: 12,
+        minHeight: 44,
+        justifyContent: 'center',
         alignItems: 'center',
     },
     backButtonText: {
         fontSize: 14,
-        color: '#64748b',
+        color: '#475569',
     },
 })
