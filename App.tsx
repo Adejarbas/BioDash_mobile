@@ -13,6 +13,7 @@ import HelpCenterScreen from './src/screens/HelpCenterScreen'
 import ChatbotScreen from './src/screens/ChatbotScreen'
 import { StatusBar } from 'expo-status-bar'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
+import { FeedbackHost } from './src/components/FeedbackHost'
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context'
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons'
 
@@ -268,6 +269,7 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <MainApp />
+        <FeedbackHost />
       </ThemeProvider>
     </SafeAreaProvider>
   )

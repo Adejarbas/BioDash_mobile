@@ -46,6 +46,12 @@ Module._load = function (request, ...args) {
       default: { getItem: async () => null, setItem: async () => {} },
     };
   }
+  if (request === 'react-native') {
+    return {
+      Alert: { alert: () => {} },
+      Platform: { OS: 'web' },
+    };
+  }
   return originalLoad.call(this, request, ...args);
 };
 
@@ -64,6 +70,7 @@ require.extensions['.tsx'] = compileTs;
 const { parseInlineMarkdown, stripMarkdown } = require('../src/lib/markdownText.ts');
 const { getCriticalityBadgeInfo } = require('../src/lib/anomalyClassifier.ts');
 const { lightColors, darkColors } = require('../src/context/ThemeContext.tsx');
+const { inferFeedbackVariant, showAlert, subscribeToToasts } = require('../src/lib/feedback.ts');
 
 Module._load = originalLoad;
 if (originalTsLoader) require.extensions['.ts'] = originalTsLoader;
@@ -112,4 +119,23 @@ test('tokens de ThemeContext atendem WCAG AA (>= 4.5:1)', () => {
   assert.ok(contrastRatio(lightColors.primary, lightColors.background) >= 4.5, 'light: primary em background');
   assert.ok(contrastRatio(lightColors.inputBorder, lightColors.cardBackground) >= 3.0, 'light: inputBorder >= 3:1');
   assert.ok(contrastRatio(darkColors.inputBorder, darkColors.cardBackground) >= 3.0, 'dark: inputBorder >= 3:1');
+});
+
+test('inferFeedbackVariant e showAlert emitem toast tipado quando há listener ativo', () => {
+  assert.equal(inferFeedbackVariant('Sucesso'), 'success');
+  assert.equal(inferFeedbackVariant('Erro ao salvar'), 'error');
+  assert.equal(inferFeedbackVariant('Aviso'), 'warning');
+  assert.equal(inferFeedbackVariant('Sobre o BioDash'), 'info');
+
+  const received = [];
+  const unsubscribe = subscribeToToasts((toast) => received.push(toast));
+  try {
+    showAlert('Sucesso', 'Operação concluída!');
+  } finally {
+    unsubscribe();
+  }
+  assert.equal(received.length, 1);
+  assert.equal(received[0].variant, 'success');
+  assert.equal(received[0].title, 'Sucesso');
+  assert.equal(received[0].message, 'Operação concluída!');
 });
