@@ -20,6 +20,7 @@ import {
     subscribeToToasts,
     ToastPayload,
 } from '../lib/feedback'
+import { renderToastOverlay } from '../lib/toastPortal'
 
 const MAX_VISIBLE_TOASTS = 3
 
@@ -229,28 +230,33 @@ export function FeedbackHost() {
         action()
     }
 
+    const toastOverlay = toasts.length > 0
+        ? renderToastOverlay(
+            <View
+                pointerEvents="box-none"
+                style={[
+                    styles.toastHost,
+                    Platform.OS === 'web' ? ({ position: 'fixed', zIndex: 2147483647 } as any) : null,
+                    { top: Math.max(insets.top, 12) + 8 },
+                ]}
+            >
+                <View pointerEvents="box-none" style={styles.toastColumn}>
+                    {toasts.map((toast) => (
+                        <ToastItem
+                            key={toast.id}
+                            toast={toast}
+                            reduceMotion={reduceMotion}
+                            onDismiss={handleDismissToast}
+                        />
+                    ))}
+                </View>
+            </View>
+        )
+        : null
+
     return (
         <>
-            {toasts.length > 0 && (
-                <View
-                    pointerEvents="box-none"
-                    style={[
-                        styles.toastHost,
-                        { top: Math.max(insets.top, 12) + 8 },
-                    ]}
-                >
-                    <View pointerEvents="box-none" style={styles.toastColumn}>
-                        {toasts.map((toast) => (
-                            <ToastItem
-                                key={toast.id}
-                                toast={toast}
-                                reduceMotion={reduceMotion}
-                                onDismiss={handleDismissToast}
-                            />
-                        ))}
-                    </View>
-                </View>
-            )}
+            {toastOverlay}
 
             {confirmDialog && (
                 <Modal
