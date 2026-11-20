@@ -184,6 +184,7 @@ export function FeedbackHost() {
     const insets = useSafeAreaInsets()
     const [toasts, setToasts] = useState<ToastPayload[]>([])
     const [confirmDialog, setConfirmDialog] = useState<ConfirmPayload | null>(null)
+    const [confirmVisible, setConfirmVisible] = useState(false)
     const [reduceMotion, setReduceMotion] = useState(false)
 
     useEffect(() => {
@@ -205,6 +206,7 @@ export function FeedbackHost() {
         })
         const unsubConfirm = subscribeToConfirm((payload) => {
             setConfirmDialog(payload)
+            setConfirmVisible(true)
         })
         return () => {
             unsubToast()
@@ -216,10 +218,14 @@ export function FeedbackHost() {
         setToasts((prev) => prev.filter((item) => item.id !== id))
     }, [])
 
+    const closeConfirmDialog = useCallback(() => {
+        setConfirmVisible(false)
+    }, [])
+
     const handleConfirmAction = () => {
         if (!confirmDialog) return
         const action = confirmDialog.onConfirm
-        setConfirmDialog(null)
+        setConfirmVisible(false)
         action()
     }
 
@@ -246,78 +252,80 @@ export function FeedbackHost() {
                 </View>
             )}
 
-            <Modal
-                visible={!!confirmDialog}
-                transparent
-                animationType={reduceMotion ? 'none' : 'fade'}
-                onRequestClose={() => setConfirmDialog(null)}
-            >
-                <Pressable
-                    style={styles.confirmBackdrop}
-                    onPress={() => setConfirmDialog(null)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Fechar diálogo de confirmação"
+            {confirmDialog && (
+                <Modal
+                    visible={confirmVisible}
+                    transparent
+                    animationType={Platform.OS === 'web' || reduceMotion ? 'none' : 'fade'}
+                    onRequestClose={closeConfirmDialog}
                 >
                     <Pressable
-                        style={[
-                            styles.confirmCard,
-                            {
-                                backgroundColor: colors.cardBackground,
-                                borderColor: colors.border,
-                            },
-                        ]}
-                        onPress={(e) => e.stopPropagation()}
+                        style={styles.confirmBackdrop}
+                        onPress={closeConfirmDialog}
+                        accessibilityRole="button"
+                        accessibilityLabel="Fechar diálogo de confirmação"
                     >
-                        <Text
-                            style={[styles.confirmTitle, { color: colors.text }]}
-                            accessibilityRole="header"
-                            maxFontSizeMultiplier={1.4}
+                        <Pressable
+                            style={[
+                                styles.confirmCard,
+                                {
+                                    backgroundColor: colors.cardBackground,
+                                    borderColor: colors.border,
+                                },
+                            ]}
+                            onPress={(e) => e.stopPropagation()}
                         >
-                            {confirmDialog?.title}
-                        </Text>
-                        <Text
-                            style={[styles.confirmMessage, { color: colors.textMuted }]}
-                            maxFontSizeMultiplier={1.4}
-                        >
-                            {confirmDialog?.message}
-                        </Text>
+                            <Text
+                                style={[styles.confirmTitle, { color: colors.text }]}
+                                accessibilityRole="header"
+                                maxFontSizeMultiplier={1.4}
+                            >
+                                {confirmDialog.title}
+                            </Text>
+                            <Text
+                                style={[styles.confirmMessage, { color: colors.textMuted }]}
+                                maxFontSizeMultiplier={1.4}
+                            >
+                                {confirmDialog.message}
+                            </Text>
 
-                        <View style={styles.confirmActions}>
-                            <TouchableOpacity
-                                style={[
-                                    styles.confirmBtn,
-                                    { backgroundColor: colors.iconBg, borderColor: colors.border, borderWidth: 1 },
-                                ]}
-                                onPress={() => setConfirmDialog(null)}
-                                accessibilityRole="button"
-                                accessibilityLabel="Cancelar"
-                            >
-                                <Text style={[styles.confirmBtnText, { color: colors.text }]}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[
-                                    styles.confirmBtn,
-                                    {
-                                        backgroundColor: confirmDialog?.destructive ? colors.danger : colors.primary,
-                                    },
-                                ]}
-                                onPress={handleConfirmAction}
-                                accessibilityRole="button"
-                                accessibilityLabel={confirmDialog?.confirmText || 'Confirmar'}
-                            >
-                                <Text
+                            <View style={styles.confirmActions}>
+                                <TouchableOpacity
                                     style={[
-                                        styles.confirmBtnText,
-                                        { color: confirmDialog?.destructive ? '#ffffff' : colors.onPrimary },
+                                        styles.confirmBtn,
+                                        { backgroundColor: colors.iconBg, borderColor: colors.border, borderWidth: 1 },
                                     ]}
+                                    onPress={closeConfirmDialog}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Cancelar"
                                 >
-                                    {confirmDialog?.confirmText || 'Confirmar'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
+                                    <Text style={[styles.confirmBtnText, { color: colors.text }]}>Cancelar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.confirmBtn,
+                                        {
+                                            backgroundColor: confirmDialog.destructive ? colors.danger : colors.primary,
+                                        },
+                                    ]}
+                                    onPress={handleConfirmAction}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={confirmDialog.confirmText}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.confirmBtnText,
+                                            { color: confirmDialog.destructive ? '#ffffff' : colors.onPrimary },
+                                        ]}
+                                    >
+                                        {confirmDialog.confirmText}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </Pressable>
                     </Pressable>
-                </Pressable>
-            </Modal>
+                </Modal>
+            )}
         </>
     )
 }
