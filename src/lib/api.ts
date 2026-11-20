@@ -126,7 +126,10 @@ export const indicatorsApi = {
 export const maintenanceApi = {
   fetchSchedules: () =>
     authRequest(`${API_BASE_URL}/maintenance/schedules`, { method: "GET" }),
-  updateSchedule: (id: string, status: string) =>
+  updateSchedule: (
+    id: string,
+    status: "pending" | "in_progress" | "completed" | "cancelled"
+  ) =>
     authRequest(`${API_BASE_URL}/maintenance/schedules/${id}`, {
       method: "PUT",
       body: JSON.stringify({ status }),

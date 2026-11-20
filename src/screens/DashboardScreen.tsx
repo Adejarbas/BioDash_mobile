@@ -142,7 +142,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
 
     const handleArchiveMaintenance = async (id: string) => {
         try {
-            const res = await maintenanceApi.updateSchedule(id, 'archived');
+            const res = await maintenanceApi.updateSchedule(id, 'cancelled');
             if (!res.success) throw new Error(res.error);
 
             showAlert("Sucesso", "Manutenção arquivada com sucesso!");
@@ -164,7 +164,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                 trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
 
                 const archived = res.data.filter((m: any) =>
-                    m.status === 'archived' &&
+                    m.status === 'cancelled' &&
                     new Date(m.created_at || m.scheduled_date) >= trintaDiasAtras
                 );
 
@@ -187,7 +187,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
 
     const handleMarkAsDone = async (id: string) => {
         try {
-            const res = await maintenanceApi.updateSchedule(id, 'done');
+            const res = await maintenanceApi.updateSchedule(id, 'completed');
             if (!res.success) throw new Error(res.error);
             showAlert("Sucesso", "Manutenção concluída!");
             loadDashboardData();
@@ -829,7 +829,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
             const maintRes = await maintenanceApi.fetchSchedules();
             if (maintRes.success && maintRes.data && maintRes.data.length > 0) {
                 const ptMap: Record<string, string> = { low: 'Baixa', medium: 'Média', high: 'Alta', urgent: 'Urgente' };
-                const activeSchedules = maintRes.data.filter((m: any) => m.status !== 'archived');
+                const activeSchedules = maintRes.data.filter((m: any) => m.status !== 'cancelled');
                 setMaintenances(activeSchedules.slice(0, 5).map((m: any) => {
                     const prLevel = ptMap[m.priority] || m.priority.split(' - ')[0];
                     return {
@@ -1569,7 +1569,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                             accessibilityLabel={`${item.title}, agendada para ${item.date}, status ${item.status === 'pending' ? 'Pendente' : 'Concluído'}`}
                                             accessibilityHint="Toque para abrir opções de edição, conclusão ou exclusão"
                                         >
-                                            <View style={[styles.maintenanceDot, item.status === 'done' && { backgroundColor: '#15803d' }]} importantForAccessibility="no" />
+                                            <View style={[styles.maintenanceDot, item.status === 'completed' && { backgroundColor: '#15803d' }]} importantForAccessibility="no" />
                                             <View style={{ flex: 1, marginRight: 8 }}>
                                                 <Text style={[styles.maintenanceTitle, { color: colors.text }]}>{item.title}</Text>
                                                 <Text style={[styles.maintenanceDate, { color: colors.textMuted }]}>{item.date}</Text>
@@ -2897,7 +2897,7 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                                 </TouchableOpacity>
                             )}
 
-                            {selectedMaintenance?.status === 'done' && (
+                            {selectedMaintenance?.status === 'completed' && (
                                 <TouchableOpacity
                                     style={{ minHeight: 52, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
                                     onPress={() => {
