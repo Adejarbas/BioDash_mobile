@@ -31,6 +31,7 @@ import { useTheme } from '../context/ThemeContext'
 import { useFadeInUp } from '../hooks/useFadeInUp'
 import { classifySensorReading, getCriticalityBadgeInfo } from '../lib/anomalyClassifier'
 import { showAlert, showConfirm } from '../lib/feedback'
+import { selectMostRecentIndicator } from '../lib/indicators'
 
 interface MetricData {
     value: number
@@ -755,7 +756,9 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                     return d.getMonth() === lastEdited.month && d.getFullYear() === lastEdited.year;
                 });
             }
-            if (!current && allRows.length > 0) current = allRows[0];
+            if (!current && allRows.length > 0) {
+                current = selectMostRecentIndicator(allRows);
+            }
 
             // Pega o registro anterior para comparação (o próximo na lista descendente)
                         const currentIndex = allRows.indexOf(current);
@@ -2793,7 +2796,11 @@ export default function DashboardScreen({ onNavigateNotifications }: { onNavigat
                         <ScrollView>
                             <TouchableOpacity
                                 style={{ minHeight: 48, paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center' }}
-                                onPress={() => { setSelectedMonth(null); setShowMonthPicker(false); }}
+                                onPress={() => {
+                                    AsyncStorage.removeItem('@biodash_last_edited').catch(() => {});
+                                    setSelectedMonth(null);
+                                    setShowMonthPicker(false);
+                                }}
                                 accessibilityRole="radio"
                                 accessibilityLabel="Mês mais recente"
                                 accessibilityState={{ checked: selectedMonth === null, selected: selectedMonth === null }}

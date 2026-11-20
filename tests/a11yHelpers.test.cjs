@@ -71,6 +71,7 @@ const { parseInlineMarkdown, stripMarkdown } = require('../src/lib/markdownText.
 const { getCriticalityBadgeInfo } = require('../src/lib/anomalyClassifier.ts');
 const { lightColors, darkColors } = require('../src/context/ThemeContext.tsx');
 const { inferFeedbackVariant, showAlert, subscribeToToasts } = require('../src/lib/feedback.ts');
+const { selectMostRecentIndicator } = require('../src/lib/indicators.ts');
 
 Module._load = originalLoad;
 if (originalTsLoader) require.extensions['.ts'] = originalTsLoader;
@@ -138,4 +139,20 @@ test('inferFeedbackVariant e showAlert emitem toast tipado quando há listener a
   assert.equal(received[0].variant, 'success');
   assert.equal(received[0].title, 'Sucesso');
   assert.equal(received[0].message, 'Operação concluída!');
+});
+
+test('selectMostRecentIndicator prioriza o mês mais recente até hoje em vez de anos futuros', () => {
+  const rows = [
+    { id: 'future-2028', measured_at: '2028-10-15T00:00:00.000Z' },
+    { id: 'oct-2026', measured_at: '2026-10-15T00:00:00.000Z' },
+    { id: 'sep-2026', measured_at: '2026-09-10T01:45:40.068Z' },
+  ];
+  const now = new Date('2026-11-20T14:00:00.000Z');
+  assert.equal(selectMostRecentIndicator(rows, now)?.id, 'oct-2026');
+
+  const onlyFuture = [
+    { id: 'future-2028', measured_at: '2028-10-15T00:00:00.000Z' },
+    { id: 'future-2027', measured_at: '2027-03-15T00:00:00.000Z' },
+  ];
+  assert.equal(selectMostRecentIndicator(onlyFuture, now)?.id, 'future-2027');
 });
