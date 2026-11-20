@@ -46,6 +46,10 @@ import {
     useSpeechRecognitionEvent,
     isSpeechRecognitionAvailable,
 } from '../services/speechRecognition'
+import {
+    NO_SPEECH_RECOGNIZED_MESSAGE,
+    isNoSpeechRecognitionError,
+} from '../services/voiceFeedback'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -334,6 +338,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     const recordingLimitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const recordingStartedAtRef = useRef<number>(0)
     const stopVoiceRecognitionRef = useRef<() => void>(() => {})
+    const nativeSessionActiveRef = useRef(false)
+    const nativeVoiceHandledRef = useRef(false)
 
     const clearRecordingTimers = useCallback((resetSeconds = true) => {
         if (recordingIntervalRef.current) {
@@ -440,10 +446,34 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 webMediaStreamRef.current = null
                 webAudioChunksRef.current = []
             } else {
+                nativeSessionActiveRef.current = false
+                nativeVoiceHandledRef.current = false
                 ExpoSpeechRecognitionModule?.abort?.()
             }
         }
     }, [clearRecordingTimers])
+
+    // ─── Scroll automático e mensagens do bot ────────────────────────────────
+    const scrollToBottom = () => {
+        setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true })
+        }, 100)
+    }
+
+    const addBotMessage = (text: string, suggestions?: QuickSuggestionPayload[]) => {
+        setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'bot',
+            text,
+            timestamp: new Date(),
+            suggestions,
+        }])
+        scrollToBottom()
+    }
+
+    const notifyNoSpeechRecognized = () => {
+        addBotMessage(NO_SPEECH_RECOGNIZED_MESSAGE)
+    }
 
     // ─── Handlers nativos do expo-speech-recognition ─────────────────────────
 
@@ -458,16 +488,25 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         // Se for resultado final (não parcial), envia automaticamente
         if (!event.isFinal) return
         updateListeningState(false)
+        nativeSessionActiveRef.current = false
+        nativeVoiceHandledRef.current = true
         if (transcript.trim()) {
             sendMessage(transcript.trim())
+        } else {
+            notifyNoSpeechRecognized()
         }
     })
 
     useSpeechRecognitionEvent('error', (event) => {
         updateListeningState(false)
+        nativeSessionActiveRef.current = false
+        nativeVoiceHandledRef.current = true
+        if (event.error === 'no-speech') {
+            notifyNoSpeechRecognized()
+            return
+        }
         const errorMessages: Record<string, string> = {
             'not-allowed': 'Permissão de microfone negada. Vá em Configurações → Aplicativos → BioDash → Permissões → Microfone → Permitir.',
-            'no-speech': 'Nenhuma fala detectada. Tente novamente mais perto do microfone.',
             'network': 'Erro de rede no reconhecimento de voz.',
             'audio-capture': 'Microfone não encontrado.',
             'aborted': '',
@@ -477,15 +516,14 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
     })
 
     useSpeechRecognitionEvent('end', () => {
+        const hadPendingSession = nativeSessionActiveRef.current && !nativeVoiceHandledRef.current
+        nativeSessionActiveRef.current = false
         updateListeningState(false)
+        if (hadPendingSession) {
+            nativeVoiceHandledRef.current = true
+            notifyNoSpeechRecognized()
+        }
     })
-
-    // ─── Scroll automático ───────────────────────────────────────────────────
-    const scrollToBottom = () => {
-        setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true })
-        }, 100)
-    }
 
     // ─── Reconhecimento de Voz ────────────────────────────────────────────────
     // No mobile: usa expo-speech-recognition (nativo iOS/Android)
@@ -581,7 +619,10 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         updateListeningState(false)
 
                         const audio = new Blob(chunks, { type })
-                        if (!audio.size) return
+                        if (!audio.size) {
+                            notifyNoSpeechRecognized()
+                            return
+                        }
 
                         if (audio.size > MAX_AUDIO_BYTES) {
                             Alert.alert(
@@ -595,11 +636,19 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         try {
                             const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`, durationSec)
                             const transcript = response.data?.text?.trim()
-                            if (!response.success || !transcript) {
-                                throw new Error(response.error || 'Nenhuma fala foi reconhecida.')
+                            if (response.success && !transcript) {
+                                notifyNoSpeechRecognized()
+                                return
                             }
-                            setInputText(transcript)
-                            await sendMessage(transcript)
+                            if (!response.success) {
+                                if (isNoSpeechRecognitionError(response.error)) {
+                                    notifyNoSpeechRecognized()
+                                    return
+                                }
+                                throw new Error(response.error || 'Não foi possível transcrever o áudio.')
+                            }
+                            setInputText(transcript!)
+                            await sendMessage(transcript!)
                         } catch (error: any) {
                             Alert.alert('Transcrição', error?.message || 'Não foi possível transcrever o áudio.')
                         } finally {
@@ -645,6 +694,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 if (transcript) {
                     setInputText(transcript)
                     void sendMessage(transcript)
+                } else {
+                    notifyNoSpeechRecognized()
                 }
             }
 
@@ -683,9 +734,12 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
 
                     webShouldKeepListeningRef.current = false
                     updateListeningState(false)
+                    if (event.error === 'no-speech') {
+                        notifyNoSpeechRecognized()
+                        return
+                    }
                     const msgs: Record<string, string> = {
                         'not-allowed': 'Permissão de microfone negada. Libere o microfone nas permissões do navegador e tente novamente.',
-                        'no-speech': 'Nenhuma fala detectada.',
                         'audio-capture': 'Microfone não encontrado.',
                         'network': 'O serviço de reconhecimento de voz do navegador está indisponível. Verifique a conexão ou tente no Chrome/Edge.',
                         'service-not-allowed': 'O navegador bloqueou o serviço de reconhecimento de voz.',
@@ -754,6 +808,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         // O usuário pode soltar o botão enquanto o sistema exibe a permissão.
         if (voiceInputModeRef.current !== mode) return
 
+        nativeSessionActiveRef.current = true
+        nativeVoiceHandledRef.current = false
         updateListeningState(true)
         setInputText('')
 
@@ -766,6 +822,7 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                 volumeChangeEventOptions: { enabled: false },
             })
         } catch (e: any) {
+            nativeSessionActiveRef.current = false
             updateListeningState(false)
             Alert.alert('Erro ao iniciar microfone', e?.message || String(e))
         }
@@ -805,6 +862,8 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
             if (transcript) {
                 setInputText(transcript)
                 void sendMessage(transcript)
+            } else {
+                notifyNoSpeechRecognized()
             }
             return
         }
@@ -1473,17 +1532,6 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
         } finally {
             setIsSearching(false)
         }
-    }
-
-    const addBotMessage = (text: string, suggestions?: QuickSuggestionPayload[]) => {
-        setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            role: 'bot',
-            text,
-            timestamp: new Date(),
-            suggestions,
-        }])
-        scrollToBottom()
     }
 
     // ─── Render de cada bolha de mensagem ────────────────────────────────────
