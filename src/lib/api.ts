@@ -274,7 +274,7 @@ export const chatbotApi = {
     audio: Blob,
     filename = "voice-message.webm",
     durationSeconds?: number,
-  ): Promise<ApiResponse<{ text: string }>> => {
+  ): Promise<ApiResponse<{ text: string; status?: "success" | "no-recognized"; language?: string; duration?: number }>> => {
     if (audio.size > MAX_CHATBOT_AUDIO_BYTES) {
       return {
         success: false,

@@ -46,10 +46,7 @@ import {
     useSpeechRecognitionEvent,
     isSpeechRecognitionAvailable,
 } from '../services/speechRecognition'
-import {
-    NO_SPEECH_RECOGNIZED_MESSAGE,
-    isNoSpeechRecognitionError,
-} from '../services/voiceFeedback'
+import { NO_SPEECH_RECOGNIZED_MESSAGE } from '../services/voiceFeedback'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -635,20 +632,16 @@ export default function ChatbotScreen({ onBack }: ChatbotScreenProps) {
                         setIsTranscribing(true)
                         try {
                             const response = await chatbotApi.transcribeAudio(audio, `voice-message.${extension}`, durationSec)
+                            if (!response.success) {
+                                throw new Error(response.error || 'Não foi possível transcrever o áudio.')
+                            }
                             const transcript = response.data?.text?.trim()
-                            if (response.success && !transcript) {
+                            if (response.data?.status === 'no-recognized' || !transcript) {
                                 notifyNoSpeechRecognized()
                                 return
                             }
-                            if (!response.success) {
-                                if (isNoSpeechRecognitionError(response.error)) {
-                                    notifyNoSpeechRecognized()
-                                    return
-                                }
-                                throw new Error(response.error || 'Não foi possível transcrever o áudio.')
-                            }
-                            setInputText(transcript!)
-                            await sendMessage(transcript!)
+                            setInputText(transcript)
+                            await sendMessage(transcript)
                         } catch (error: any) {
                             Alert.alert('Transcrição', error?.message || 'Não foi possível transcrever o áudio.')
                         } finally {
