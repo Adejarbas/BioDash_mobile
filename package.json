@@ -11,6 +11,8 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test:unit": "node --test tests/a11yHelpers.test.cjs tests/auth.test.cjs tests/voiceFeedback.test.cjs tests/domainLogic.test.cjs",
+    "test:integration": "node --test tests/apiIntegration.test.cjs tests/storageAndFeedback.test.cjs tests/iotTelemetryIntegration.test.cjs",
     "test": "node --test tests/*.test.cjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
