@@ -27,6 +27,7 @@ import {
     getSensorDisplayInfo,
 } from '../lib/anomalyClassifier';
 import { showAlert } from '../lib/feedback';
+import { parseStrictPtBrDate } from '../lib/dashboardMetrics';
 
 interface AlertOccurrence {
     id: string;
@@ -48,25 +49,6 @@ interface AlertOccurrence {
 
 interface Props {
     onBack: () => void;
-}
-
-function parseStrictPtBrDate(raw: string): string | null {
-    const match = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (!match) return null;
-    const day = Number(match[1]);
-    const month = Number(match[2]);
-    const year = Number(match[3]);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-
-    const candidate = new Date(year, month - 1, day, 9, 0, 0);
-    if (
-        candidate.getFullYear() !== year ||
-        candidate.getMonth() !== month - 1 ||
-        candidate.getDate() !== day
-    ) {
-        return null;
-    }
-    return candidate.toISOString();
 }
 
 export default function NotificationsScreen({ onBack }: Props) {

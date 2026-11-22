@@ -24,33 +24,8 @@ import { authLib } from '../lib/auth';
 import { profileApi } from '../lib/api';
 import { uploadFile, getDownloadUrl } from '../lib/storage';
 import { showAlert } from '../lib/feedback';
+import { maskCNPJ, maskPhone, maskCEP } from '../lib/dashboardMetrics';
 import SubScreenHeader from '../components/SubScreenHeader';
-
-const maskCNPJ = (value: string): string => {
-    const digits = value.replace(/\D/g, '').slice(0, 14);
-    return digits
-        .replace(/^(\d{2})(\d)/, '$1.$2')
-        .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-        .replace(/\.\d{3}(\d)/, (m, d) => m.slice(0, -1) + '/' + d)
-        .replace(/(\d{4})(\d)/, '$1-$2');
-};
-
-const maskPhone = (value: string): string => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
-    if (digits.length <= 10) {
-        return digits
-            .replace(/^(\d{2})(\d)/, '($1) $2')
-            .replace(/(\d{4})(\d)/, '$1-$2');
-    }
-    return digits
-        .replace(/^(\d{2})(\d)/, '($1) $2')
-        .replace(/(\d{5})(\d)/, '$1-$2');
-};
-
-const maskCEP = (value: string): string => {
-    const digits = value.replace(/\D/g, '').slice(0, 8);
-    return digits.replace(/(\d{5})(\d)/, '$1-$2');
-};
 
 interface ProfileFormData {
     nome: string;

@@ -112,7 +112,10 @@ jobs:
         run: npm run lint
 
       - name: Testes Unitários (Quality Gate)
-        run: npm test
+        run: npm run test:unit
+
+      - name: Testes de Integração (Quality Gate)
+        run: npm run test:integration
 
   # ============================================================================
   # Versionamento Semântico e Empacotamento Docker Web
